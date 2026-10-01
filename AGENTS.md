@@ -245,7 +245,8 @@ image/         the data model, nothing GPU
                  every vendor's words come to, and at(), the map read under one of the
                  picture's pixels; apple.rs and google.rs each vendor's XMP read into a Scale
   gain_map.rs    a gain map beside its SDR base: what its values mean (ISO 21496-1's or Apple's Lift), the
-                 weight the display's room gives it, the Table a weight makes, and gain_at, the shaders' twin
+                 weight the display's room gives it, the Table a weight makes, gain_at, the shaders' twin, and
+                 image(), the map shown in the picture's place, in stops
   encode.rs      the displayed image, turned as shown, walked back out to an 8-bit sRGB PNG or
                  JPEG, for the clipboard, the thumbnails and an exported file
   resample.rs    a CPU box filter in the file's own encoding, for the thumbnails; and resize(), the

@@ -30,7 +30,8 @@
 
 use std::sync::Arc;
 
-use crate::image::color::Transfer;
+use crate::image::color::{ColorSpace, Transfer};
+use crate::image::{AlphaMode, Channels, DecodedImage, Referred, Samples};
 use ultrahdr_rs::GainMapMetadata;
 use ultrahdr_rs::gainmap::apply::GainMapLut;
 
@@ -129,6 +130,85 @@ impl GainMap {
             base_offset,
             alternate_offset,
         }
+    }
+
+    /// The map as a picture of its own, to be drawn in the place of the one
+    /// it belongs to: each value as the stops it lifts the base by at the
+    /// whole of the lift, gray for a luminance map and a color for one with
+    /// a channel each, read as a measurement — windowed to the range it
+    /// spans — so that what is lifted most is brightest, and the readout
+    /// under the pointer reads stops.
+    pub fn image(&self) -> DecodedImage {
+        let stops = self.stops_table();
+        let channels = self.channels.max(1) as usize;
+        let data = self
+            .data
+            .chunks_exact(channels)
+            .flat_map(|values| {
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(channel, &value)| stops[channel.min(2) * 256 + value as usize])
+            })
+            .collect();
+        let mut image = DecodedImage::new(
+            self.width,
+            self.height,
+            Samples::F32 {
+                channels: if channels == 1 {
+                    Channels::Gray
+                } else {
+                    Channels::Rgb
+                },
+                data,
+            },
+            ColorSpace::LINEAR_BT709,
+            AlphaMode::Opaque,
+        );
+        image.referred = Referred::Measured;
+        image
+    }
+
+    /// The least and the most any of the map's pixels lifts the base by, in
+    /// stops, at the whole of the lift: what this picture's map holds, which
+    /// may be less than the headroom it is described for. `None` for a map
+    /// with no pixels.
+    pub fn lift_range(&self) -> Option<[f32; 2]> {
+        let stops = &self.stops_table();
+        let channels = self.channels.max(1) as usize;
+        // Which values each channel holds, so that a map of millions of
+        // pixels is read through the table 256 times at most a channel.
+        let mut held = [[false; 256]; 3];
+        for values in self.data.chunks_exact(channels) {
+            for (channel, &value) in values.iter().enumerate().take(3) {
+                held[channel][value as usize] = true;
+            }
+        }
+        held.iter()
+            .enumerate()
+            .flat_map(|(channel, values)| {
+                values
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, held)| **held)
+                    .map(move |(value, _)| stops[channel * 256 + value])
+            })
+            .filter(|stops| stops.is_finite())
+            .fold(None, |range: Option<[f32; 2]>, stops| {
+                Some(range.map_or([stops, stops], |[low, high]| {
+                    [low.min(stops), high.max(stops)]
+                }))
+            })
+    }
+
+    /// Each value of each channel as the stops it lifts by at the whole of
+    /// the lift, laid out as [`Table`]'s gains are.
+    fn stops_table(&self) -> Vec<f32> {
+        let table = self.table(1.0);
+        (0..3)
+            .flat_map(|channel| (0..=255u8).map(move |value| (channel, value)))
+            .map(|(channel, value)| table.gain(value, channel).log2())
+            .collect()
     }
 
     /// The gain at base pixel `(x, y)` of a `width` by `height` base,
@@ -343,6 +423,42 @@ mod tests {
         assert!((Transfer::Bt709.to_linear(0.5) - 0.2596).abs() < 0.001);
         assert!((Transfer::Bt709.to_linear(1.0) - 1.0).abs() < 1e-5);
         assert_eq!(Transfer::Bt709.to_linear(0.0), 0.0);
+    }
+
+    /// Shown in the picture's place, the map reads in stops, one channel
+    /// gray and three in color, and its range is what its pixels hold.
+    #[test]
+    fn the_map_shown_reads_in_stops() {
+        let map = map(Lift::Iso(iso(2.0)));
+        let image = map.image();
+        assert_eq!((image.width, image.height), (2, 1));
+        assert_eq!(image.referred, Referred::Measured);
+        let Samples::F32 { channels, data } = &image.samples else {
+            panic!("float samples");
+        };
+        assert_eq!(*channels, Channels::Gray);
+        assert!(
+            data[0].abs() < 1e-5 && (data[1] - 2.0).abs() < 1e-3,
+            "{data:?}"
+        );
+        let [low, high] = map.lift_range().expect("a range");
+        assert!(low.abs() < 1e-5 && (high - 2.0).abs() < 1e-3);
+
+        let color = GainMap {
+            width: 1,
+            height: 1,
+            channels: 3,
+            data: vec![0, 128, 255],
+            lift: Lift::Apple { headroom: 8.0 },
+        };
+        let Samples::F32 { channels, data } = color.image().samples else {
+            panic!("float samples");
+        };
+        assert_eq!(channels, Channels::Rgb);
+        assert_eq!(data.len(), 3);
+        assert!((data[2] - 3.0).abs() < 1e-3);
+        let [low, high] = color.lift_range().expect("a range");
+        assert!(low.abs() < 1e-5 && (high - 3.0).abs() < 1e-3);
     }
 
     /// The map is sampled bilinearly at the base pixel's place in it, as

@@ -541,6 +541,7 @@ that is not a paste; open it as an argument instead.
 | `o` | Turn the room above white off and on, where the monitor is in HDR mode | `display.hdr` |
 | `v` | Show a raw as the camera's JPEG of it, or as the picture developed from the sensor | `display.camera-jpeg` |
 | `Shift+D` | Show a picture's depth map in its place, or the picture again | `display.depth` |
+| `Shift+G` | Show a picture's gain map in its place, or the picture again | `display.gain-map` |
 | `r` | Cycle false color: gray → viridis → magma → turbo | `display.colormap` |
 | `z` | Reset every display setting | `display.reset` |
 | `;` | Turn the picture a quarter counterclockwise | `display.turn.left` |
@@ -590,6 +591,17 @@ its own, and the picture's are waiting as you left them when you go back. A
 region you had marked out goes, since it was marked in the other image's
 pixels. The toggle stays on as you step through other pictures that carry a
 map, and a picture without one is shown as itself.
+
+A picture that carries a gain map — an HDR photograph from a recent phone —
+has a button with a sun on it, just before `HDR`. A click on it or `G`
+shows the gain map in the picture's place in the same way, and another
+shows the picture again. The map is drawn in stops: black where it leaves
+the photograph as it is, white where it brightens it most, stretched between
+the two. The pixel readout gives the stops at the pixel under the pointer,
+whatever your display's room, since it is the map the file holds and not how
+much of it is being applied. A map with a channel for each color is drawn in
+color. The gain map's button and the depth map's take each other's place:
+with both on a picture, one map is up at a time.
 
 The window is the one place the case of a key matters: `a` and `s` move
 the value that comes out black, `A` and `S` the value that comes out white.
@@ -891,7 +903,8 @@ region behind: it belongs to the picture it was drawn on.
 | Click the dot beside the grid button | Choose how a pixel's value is read out | |
 | Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
 | Click the camera button reading **RAW** or **JPEG**, near the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
-| Click the axes button, just before `HDR` at the bottom right | Show a picture's depth map in its place, or the picture again, as `D` does | |
+| Click the axes button, near `HDR` at the bottom right | Show a picture's depth map in its place, or the picture again, as `D` does | |
+| Click the sun button, just before `HDR` at the bottom right | Show a picture's gain map in its place, or the picture again, as `G` does | |
 
 The button at the top of the left strip opens a menu of the
 copies beside it: the file's **Name**, its **Path**, its **URI**, the

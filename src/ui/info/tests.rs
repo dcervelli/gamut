@@ -401,42 +401,91 @@ fn the_time_taken_is_said_as_how_long_ago() {
     assert_eq!(short(&fact(exif::LENS, "2001-01-01 12:00:00 +00:00")), None);
 }
 
-/// A picture with a gain map says what the map is and how much of its
-/// lift is on screen; one without says nothing about a map.
+/// A picture with a gain map has it described in a section of its own
+/// after the picture's, in stops: how far the picture can go above white,
+/// how far the map raises it, and how much of that is on screen. One
+/// without has no such section.
 #[test]
-fn a_gain_map_is_described_under_the_image() {
+fn a_gain_map_is_described_after_the_image() {
     use crate::image::gain_map::{GainMap, Lift};
     let mut current = current();
-    assert!(!written(&current).iter().any(|row| row == "Gain map"));
+    assert!(!written(&current).iter().any(|row| row == GAIN_MAP));
     let map = GainMap {
         width: 2,
         height: 3,
         channels: 1,
-        data: vec![0; 6],
+        data: vec![0, 0, 0, 0, 0, 255],
         lift: Lift::Apple { headroom: 8.0 },
     };
     let mut image = (*current.image).clone();
     image.gain_map = Some(std::sync::Arc::new(map.clone()));
     current.image = std::sync::Arc::new(image);
-    let value = |current: &Current, name: &str| {
+    let section = |current: &Current| {
         let rows = written(current);
+        let at = rows
+            .iter()
+            .position(|row| row == GAIN_MAP)
+            .expect("a section");
+        assert!(rows.iter().position(|row| row == "Image") < Some(at));
+        let end = rows.iter().position(|row| row == "Camera").unwrap();
+        rows[at + 1..end].to_vec()
+    };
+    let pairs = |pairs: &[(&str, &str)]| -> Vec<String> {
+        pairs
+            .iter()
+            .flat_map(|(name, value)| [name.to_string(), value.to_string()])
+            .collect()
+    };
+    assert_eq!(
+        section(&current),
+        pairs(&[
+            ("Resolution", "2 \u{00d7} 3"),
+            ("Samples", "8-bit luminance"),
+            ("Described by", "Apple"),
+            ("HDR headroom", "3.0 stops above SDR white"),
+            ("Lift", "up to 3.0 stops"),
+            ("Applied", "none: the display has no room above white"),
+        ])
+    );
+    let value = |current: &Current, name: &str| {
+        let rows = section(current);
         let at = rows.iter().position(|row| row == name).expect(name);
         rows[at + 1].clone()
     };
-    assert_eq!(value(&current, "Gain map"), "Apple");
-    assert_eq!(value(&current, "Gain map size"), "2 \u{00d7} 3, luminance");
-    assert_eq!(value(&current, "HDR headroom"), "3.0 stops above SDR white");
-    assert_eq!(
-        value(&current, "Gain applied"),
-        "none: the display has no room above white"
-    );
     current.lift = Some(std::sync::Arc::new(map.table(0.5)));
     assert_eq!(
-        value(&current, "Gain applied"),
-        "50%, as much as the display has room for"
+        value(&current, "Applied"),
+        "1.5 of 3.0 stops, as much as the display has room for"
     );
     current.lift = Some(std::sync::Arc::new(map.table(1.0)));
-    assert_eq!(value(&current, "Gain applied"), "all");
+    assert_eq!(value(&current, "Applied"), "all 3.0 stops");
+
+    // Shown in the picture's place, the pill moves to the map's heading,
+    // and the map says what it lost on its way to the device.
+    let mut face = crate::ui::Face::new(map.image());
+    face.reduced = Some(crate::render::Reduced::NoNorm16);
+    current.show(
+        crate::image::auxiliary::Showing::Auxiliary(crate::image::auxiliary::Auxiliary::GainMap),
+        |_| Some(face),
+    );
+    let showing: Vec<_> = contents(&current)
+        .sections
+        .iter()
+        .filter(|section| section.showing)
+        .map(|section| section.name)
+        .collect();
+    assert_eq!(showing, [GAIN_MAP]);
+    assert!(section(&current).contains(&"Precision".to_string()));
+    assert_eq!(value(&current, "Applied"), "all 3.0 stops", "the picture's");
+}
+
+/// The range a gain map raises the picture over is written from where it
+/// leaves it alone, and with a sign where it darkens somewhere.
+#[test]
+fn a_lift_is_written_in_stops() {
+    assert_eq!(lift([0.0, 2.71]), "up to 2.7 stops");
+    assert_eq!(lift([-0.01, 2.0]), "up to 2.0 stops");
+    assert_eq!(lift([-0.5, 2.0]), "\u{2212}0.5 to +2.0 stops");
 }
 
 /// Precision lost on the way to the device is said, with why; a picture

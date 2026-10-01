@@ -2279,7 +2279,7 @@ fn the_depth_toggle_answers_only_for_a_picture_with_a_depth_map() {
         app.press(crate::ui::Control::Depth),
         Effect::Nothing
     ));
-    assert!(!app.show_depth, "refused");
+    assert_eq!(app.show_beside, None, "refused");
 
     let path = fixture("heic-depth.heic");
     let mut app = open(vec![path.clone()], vec![path]);
@@ -2289,11 +2289,11 @@ fn the_depth_toggle_answers_only_for_a_picture_with_a_depth_map() {
         app.press(crate::ui::Control::Depth),
         Effect::Redraw
     ));
-    assert!(app.show_depth);
+    assert_eq!(app.show_beside, Some(Auxiliary::Depth));
     assert!(app.files.is_idle(), "nothing asked for");
     assert!(app.current.is_some(), "the picture stays");
     let _ = app.perform(super::input::Action::ToggleDepth);
-    assert!(!app.show_depth, "the key does what the button does");
+    assert_eq!(app.show_beside, None, "the key does what the button does");
 }
 
 /// The depth map shown in the picture's place is what is on screen in
@@ -2350,6 +2350,65 @@ fn the_depth_map_is_what_is_on_screen_while_it_is_shown() {
     assert_eq!(current.display.exposure_stops(), 1.0, "as it was left");
     let back = app.view.placement(current.size(), viewport);
     assert!((back.width - covered.width).abs() < 1e-3);
+}
+
+/// The gain map's toggle answers only for a picture with a gain map, and
+/// shows the map in stops at its own size; pressed while the depth map is
+/// up, the other toggle takes its place, and going back puts the picture
+/// back with its lift as it was.
+#[test]
+fn the_gain_map_toggle_shows_the_map_in_stops() {
+    use crate::image::depth::DepthMap;
+    use crate::image::gain_map::{GainMap, Lift};
+    let (mut app, _dir) = app_over("gain", &[("a.png", 4, 3)]);
+    assert!(!app.conditions().gain_map);
+    assert!(matches!(
+        app.press(crate::ui::Control::GainMap),
+        Effect::Nothing
+    ));
+    assert_eq!(app.show_beside, None, "refused");
+
+    let current = app.current.as_mut().unwrap();
+    let mut image = (*current.image).clone();
+    image.gain_map = Some(Arc::new(GainMap {
+        width: 2,
+        height: 1,
+        channels: 1,
+        data: vec![0, 255],
+        lift: Lift::Apple { headroom: 4.0 },
+    }));
+    image.depth = Some(Arc::new(DepthMap {
+        width: 1,
+        height: 1,
+        samples: crate::image::Samples::U8 {
+            channels: crate::image::Channels::Gray,
+            data: vec![7],
+        },
+        scale: None,
+    }));
+    current.image = Arc::new(image);
+    assert!(app.conditions().gain_map);
+
+    let _ = app.perform(super::input::Action::ToggleGainMap);
+    assert_eq!(app.show_beside, Some(Auxiliary::GainMap));
+    let current = app.current.as_ref().expect("the map");
+    assert_eq!(current.showing, Showing::Auxiliary(Auxiliary::GainMap));
+    assert_eq!(current.size(), [2.0, 1.0], "the map's own size");
+    let stops = |x| current.sample(x, 0).expect("a pixel").stored()[0];
+    assert!(stops(0).abs() < 1e-5 && (stops(1) - 2.0).abs() < 1e-3);
+    assert!(current.lift.is_none(), "the map is not lifted itself");
+    assert!(current.picture().0.carries(Auxiliary::GainMap));
+
+    let _ = app.press(crate::ui::Control::Depth);
+    assert_eq!(app.show_beside, Some(Auxiliary::Depth));
+    let current = app.current.as_ref().expect("the depth map");
+    assert_eq!(current.showing, Showing::Auxiliary(Auxiliary::Depth));
+
+    let _ = app.press(crate::ui::Control::Depth);
+    let current = app.current.as_ref().expect("the picture");
+    assert_eq!(current.showing, Showing::Picture);
+    assert_eq!(current.size(), [4.0, 3.0]);
+    assert!(current.lift.is_some(), "the picture keeps its lift");
 }
 
 /// A file arriving is weighed against the picture, not against the depth

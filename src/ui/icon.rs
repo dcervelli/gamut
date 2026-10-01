@@ -557,6 +557,20 @@ pub(super) const AXIS_3D: &[Mark] = &[
     Mark::Line([13.5, 10.5], [15.0, 9.0]),
 ];
 
+/// Lucide's `sun`: a disc's outline with eight short rays round it — light
+/// above white, for the toggle that shows the gain map.
+pub(super) const SUN: &[Mark] = &[
+    Mark::circle([12.0, 12.0], 4.0),
+    Mark::Line([12.0, 2.0], [12.0, 4.0]),
+    Mark::Line([12.0, 20.0], [12.0, 22.0]),
+    Mark::Line([4.93, 4.93], [6.34, 6.34]),
+    Mark::Line([17.66, 17.66], [19.07, 19.07]),
+    Mark::Line([2.0, 12.0], [4.0, 12.0]),
+    Mark::Line([20.0, 12.0], [22.0, 12.0]),
+    Mark::Line([6.34, 17.66], [4.93, 19.07]),
+    Mark::Line([19.07, 4.93], [17.66, 6.34]),
+];
+
 /// Lucide's `eye`: an almond with the pupil in it — what is on screen, for
 /// the pill that says the depth map is shown in the picture's place.
 ///
@@ -1183,7 +1197,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 43] = [
+    const ICONS: [&[Mark]; 44] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1226,6 +1240,7 @@ mod tests {
         ARROW_LEFT,
         ARROW_RIGHT,
         AXIS_3D,
+        SUN,
         EYE,
     ];
 

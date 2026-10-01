@@ -129,6 +129,11 @@ controls! {
     /// stretched over it: lit while it is, and drawn only for a picture
     /// that carries one. `D` does the same.
     Depth,
+    /// The toggle beside the depth map's, before the headroom switch, that
+    /// draws the picture's gain map in its place, in stops: lit while it
+    /// is, and drawn only for a picture that carries one. `G` does the
+    /// same.
+    GainMap,
     /// The button at the foot of the right strip, which opens the help
     /// popup — every key, what it does and when — and closes it while it
     /// is up. `?` and `/` do the same.
@@ -290,6 +295,7 @@ impl Control {
             // which picture is up — see `Pass::camera_switch`.
             Control::CameraJpeg => "Camera JPEG".to_string(),
             Control::Depth => "Depth".to_string(),
+            Control::GainMap => "Gain map".to_string(),
             Control::Help => "Help".to_string(),
             Control::PixelFormat => "Pixel format".to_string(),
             Control::Dismiss => "Dismiss".to_string(),

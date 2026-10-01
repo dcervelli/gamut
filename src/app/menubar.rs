@@ -408,6 +408,7 @@ fn image(b: &mut Builder) -> Vec<Node> {
         b.button("HDR Output", Control::Output),
         b.button("Camera JPEG", Control::CameraJpeg),
         b.button("Depth Map", Control::Depth),
+        b.button("Gain Map", Control::GainMap),
         Node::Separator,
         b.submenu("Histogram Plot", None, plot),
     ]
@@ -696,6 +697,9 @@ impl App {
                 | Control::Marks => panels.lit(control),
                 Control::Depth => current
                     .is_some_and(|current| current.showing == Showing::Auxiliary(Auxiliary::Depth)),
+                Control::GainMap => current.is_some_and(|current| {
+                    current.showing == Showing::Auxiliary(Auxiliary::GainMap)
+                }),
                 Control::Region => self.marking.selection.is_on(),
                 Control::Output => self.headroom() == crate::image::display::Headroom::Above,
                 Control::CameraJpeg => {

@@ -44,8 +44,8 @@ field, the EXIF one is shown.
 ## Image
 
 Headed by the picture's size and the format that read it — "4000 × 3000
-JPEG". It describes the picture even while the depth map is shown in its
-place. Its heading wears a *Showing* pill while the picture is on screen.
+JPEG". It describes the picture even while the gain map or the depth map
+is shown in its place. Its heading wears a *Showing* pill while the picture is on screen.
 
 | Field | What it says |
 | --- | --- |
@@ -59,12 +59,25 @@ place. Its heading wears a *Showing* pill while the picture is on screen.
 | Color space | The color space the numbers are in, by its common name where it has one: *sRGB*, *Display P3*. |
 | Alpha | Straight or premultiplied, only where there is an alpha channel. |
 | Referred to | Whether the numbers are graded (1.0 is white), scene light, or a measurement. This decides how the picture first opens. |
-| Gain map | Whose description of the gain map the file gives: ISO 21496-1 or Apple. |
-| Gain map size | The gain map's size, and whether it is one channel or three. |
-| HDR headroom | How far above SDR white the gain map can lift the picture, in stops. |
-| Gain applied | How much of that lift is on screen. *none* on a display with no room above white. |
 | Exposure applied | Radiance HDR only: the multiplier the file says was already applied. |
 | Holds | For an animation, how many frames and how it loops; for a file of pages, how many and which one this is. |
+
+## Gain map
+
+Only for a picture that carries a gain map: an HDR photograph from a recent
+phone, as a JPEG or a HEIC. It describes the map whether the picture or the
+map is on screen; while the map is shown in the picture's place, its heading
+wears a *Showing* pill.
+
+| Field | What it says |
+| --- | --- |
+| Resolution | The map's own size, usually a quarter of the picture's or less. |
+| Samples | *8-bit luminance* for a map that brightens all three colors alike, *8-bit RGB* for one with a channel for each. |
+| Precision | Only while the map is shown, and only when the GPU could not hold it at full precision, and why. |
+| Described by | Whose description of the map the file gives: ISO 21496-1, the standard Android phones and recent iPhones write, or Apple, an older iPhone's own. |
+| HDR headroom | How far above SDR white the HDR version of the photograph reaches, in stops. Each stop is twice as bright. |
+| Lift | How far the map brightens the picture where it brightens it most, in stops. It can be less than the headroom: a scene with no bright highlights needs little of it. |
+| Applied | How much of the headroom your display is showing, in stops. *none* on a display with no room above white, which shows the photograph as the phone graded it for SDR. |
 
 ## Depth map
 

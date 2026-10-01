@@ -154,6 +154,10 @@ pub const NO_CAMERA_JPEG: &str = "This file carries no camera JPEG.";
 /// switch, this is only ever the reason a press of the key is refused.
 pub const NO_DEPTH_MAP: &str = "This image has no depth map.";
 
+/// What the gain map's toggle says, for the key, on a picture with no gain
+/// map, which is as seldom heard as [`NO_DEPTH_MAP`] for the same reason.
+pub const NO_GAIN_MAP: &str = "This image has no gain map.";
+
 /// What the Raw Data tab's copy button says while there are no tags to
 /// copy: exiftool is not there, is reading the file, or could not.
 pub const NO_TAGS: &str = "No tags to copy.";
@@ -235,6 +239,9 @@ pub struct Conditions {
     /// Whether the picture on screen carries a depth map, which is what
     /// the depth toggle needs.
     pub depth: bool,
+    /// Whether the picture on screen carries a gain map, which is what the
+    /// gain map's toggle needs.
+    pub gain_map: bool,
     /// Whether anything out there offers to open the file on screen.
     pub openable: bool,
     /// Whether a false color is on the picture.
@@ -276,6 +283,7 @@ impl Default for Conditions {
             hdr: Hdr::Unsupported,
             camera_jpeg: false,
             depth: false,
+            gain_map: false,
             openable: false,
             false_colored: false,
             picking: false,
@@ -316,6 +324,7 @@ impl Conditions {
         hdr: Hdr::Available,
         camera_jpeg: true,
         depth: true,
+        gain_map: true,
         openable: true,
         false_colored: false,
         picking: false,
@@ -365,6 +374,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         visited_after,
         camera_jpeg,
         depth,
+        gain_map,
         ..
     } = conditions;
     let said = |said| Some(Refused { said, hint: None });
@@ -386,6 +396,9 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
     }
     if tip == Tip::Control(Control::Depth) && !depth {
         return said(NO_DEPTH_MAP);
+    }
+    if tip == Tip::Control(Control::GainMap) && !gain_map {
+        return said(NO_GAIN_MAP);
     }
     if tip == Tip::Control(Control::Paste) && !clipboard {
         return said(NOTHING_TO_PASTE);
@@ -429,6 +442,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
                 | Control::TurnLeft
                 | Control::TurnRight
                 | Control::Depth
+                | Control::GainMap
                 | Control::Play
                 | Control::StepBack
                 | Control::StepForward
@@ -642,7 +656,8 @@ pub fn words(tip: Tip) -> Option<String> {
             // knows — see `Namer::tooltip`.
             | Control::CameraJpeg
             // Named by its key's row, like the other toggles.
-            | Control::Depth,
+            | Control::Depth
+            | Control::GainMap,
         )
         | Tip::Name
         | Tip::Counter

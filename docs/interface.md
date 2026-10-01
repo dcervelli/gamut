@@ -605,13 +605,16 @@ What is on screen is what everything reads: the size the top bar gives, the
 pixel under the pointer and its coordinate, the zoom, the histogram and the
 keys that set the window, a copy and an export. A raw's camera JPEG gets
 that by being read in place of the developed picture. An image the picture
-carries — a depth map now, a portrait's mattes later — gets it without a
+carries — a depth map and a gain map now, a portrait's mattes later — gets it without a
 read, by being made a picture of its own and put in the same place.
 
 `image/auxiliary.rs` names the kinds (`Auxiliary`) and which of a file's
 images is up (`Showing`), and `DecodedImage::auxiliary` makes the image
 (`DepthMap::image` for the depth map: gray, a measurement, windowed to the
-codes it holds). `Current`'s `image`, `stats`, `display`, `stored` and `lift`
+codes it holds; `GainMap::image` for the gain map: each value as the stops
+it lifts by at the whole of the lift, through `GainMap::table` at a weight
+of one, so the readout under the pointer reads stops — gray for a luminance
+map, a color for one with a channel each — and a measurement too). `Current`'s `image`, `stats`, `display`, `stored` and `lift`
 are always of what is up; they are a `Face`, and the faces not up are held in
 `Current::held` as they were left, so that going back puts back the
 picture's exposure and window rather than working them out again.
@@ -624,9 +627,9 @@ and `install` lets the lot go with the file.
 the file: the view is rescaled (`View::rescale`, as for `Arrival::Rerendered`)
 so the new image covers what the old one did, whatever its size, and the
 region, marked in the old image's pixels, is let go. `App::follow_showing`
-decides what should be up — the depth map while `App::show_depth` is on
-and the picture carries one and is not an animation, whose frames would
-replace it — and runs on the toggle and after each arrival, after the
+decides what should be up — the image whose toggle `App::show_beside`
+names, while the picture carries one and is not an animation, whose frames
+would replace it; one toggle at a time, since one image is up — and runs on the toggle and after each arrival, after the
 player has started. What is about the file rather than about what is seen
 is put back in the picture's terms first: `App::apply` shows the picture
 before it weighs the file arriving against it, and `App::keep_shown` and
@@ -639,16 +642,20 @@ the one description of how what is on screen is drawn off it, so a way of
 drawing added later is added there once. An image *applied* to the picture
 rather than shown in its place — the gain map now, a matte as the picture's
 alpha later — is carried on the picture's `DecodedImage` and read by
-`Seen::raster` and the image layer alike; it is not a `Showing`.
+`Seen::raster` and the image layer alike; applying it is not a `Showing`.
+The gain map is both: applied to the picture, and shown as a picture of
+its own made from it, which carries no map and so is drawn unlifted, while
+the picture held keeps its lift.
 
-The toggle is a square with `axis-3d`'s mark alone, between the camera's
-switch and the headroom switch (`Pass::depth_toggle`), lit while the map is
-up, and is left out on a picture
-with no map for the camera switch's reason; `NO_DEPTH_MAP` is the refusal
-only the key reaches. The info panel's `Image` and `Depth map` sections
-each describe their own image whichever is up, and the pill with an eye and
-*Showing* (`Section::showing`) on one of the two headings says which is on
-screen. A picture with no map has the pill on its `Image` heading all the
+Each toggle is a square with its mark alone — `axis-3d`'s for the depth
+map (`Pass::depth_toggle`), `sun`'s for the gain map
+(`Pass::gain_map_toggle`), the second next to the headroom switch whose room
+its map is about — lit while its map is up, and left out on a picture
+with no map for the camera switch's reason; `NO_DEPTH_MAP` and `NO_GAIN_MAP`
+are the refusals only the keys reach. The info panel's `Image`, `Gain map`
+and `Depth map` sections each describe their own image whichever is up, and
+the pill with an eye and *Showing* (`Section::showing`) on one of the
+headings says which is on screen. A picture with no map has the pill on its `Image` heading all the
 same, so that the pill is always somewhere rather than only sometimes. The
 `Image` heading is its facts rather than its name, laid out by `line`, which
 keeps the pill's room clear at its end.
@@ -1003,8 +1010,17 @@ can be the stored picture's on its side, and a TIFF's compression — only a
 TIFF's, since a raw's first directory describes the preview in front of it
 and every other container's block has no pixels of its own.
 
+A picture carrying a gain map has a section of its own for it, `Gain map`,
+straight after the picture's, in the stops a photographer meters in: the
+map's size and samples, whose description it is, the headroom it is
+described for (`GainMap::stops`), the most and least its pixels lift by
+(`GainMap::lift_range`, read through the table rather than from the
+metadata's stated bounds, so it is what this picture's map holds), and how
+much of the lift is on screen — the weight of the picture's own lift,
+written as a share of the stops.
+
 A picture carrying a depth map has a section of its own for it, `Depth
-map`, after the picture's: its resolution and samples, and where the file
+map`, after the gain map's: its resolution and samples, and where the file
 says what its codes stand for — a `depth::Scale` — whose words said it
 (`depth::Vendor`), whether the codes are spread over the distance or its
 inverse, the distances the two ends of the codes stand for, nearest first,
@@ -1045,8 +1061,8 @@ being a question about where the rest of it went. Each group is an `exif::Group`
 group cannot reach the panel without them; the regions come last. The
 panel does not read the groups in one run: `About` comes straight after the
 file, since a title and a caption say what the picture is before its size
-and samples say how it is stored, and the picture's own section and the
-depth map's come between it and the rest, which are about how the picture
+and samples say how it is stored, and the picture's own section, the gain
+map's and the depth map's come between it and the rest, which are about how the picture
 was taken.
 
 The coordinates are kept as numbers too, as `Exif::position`: the latitude

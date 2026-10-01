@@ -4,6 +4,23 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- A **Gain map** button at the bottom right, and `G`, for a picture carrying
+  a gain map: shows the map in the picture's place, in stops, so the pixel
+  readout says how far each pixel is brightened, and the picture again.
+
+### Changed
+
+- The information panel describes a picture's gain map in a *Gain map*
+  section of its own after *Image*, which wears the *Showing* pill while the
+  map is shown: its size and samples, whose description it is, the HDR
+  headroom in stops, how far the map lifts the picture at most, and how
+  many of those stops the display is applying. The four gain map rows leave
+  the *Image* section.
+
 ## 0.10.0 - 2026-10-01
 
 ### Added

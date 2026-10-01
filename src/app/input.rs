@@ -165,6 +165,9 @@ pub enum Action {
     /// Between the picture and its depth map, drawn in its place, for every
     /// picture with one from then on.
     ToggleDepth,
+    /// Between the picture and its gain map, drawn in its place in stops,
+    /// for every picture with one from then on.
+    ToggleGainMap,
     /// Put the name of the file on screen on the clipboard, with nothing of
     /// the directory it sits in.
     CopyName,
@@ -377,6 +380,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Output) => ToggleHdr,
         Tip::Control(Control::CameraJpeg) => ToggleCameraJpeg,
         Tip::Control(Control::Depth) => ToggleDepth,
+        Tip::Control(Control::GainMap) => ToggleGainMap,
         Tip::Control(Control::Paste) => Action::Paste,
         Tip::Control(Control::Region) => ToggleRegion,
         Tip::Control(Control::Help) => ShowHelp,
@@ -590,6 +594,8 @@ pub enum When {
     CameraJpeg,
     /// The picture on screen carries a depth map.
     Depth,
+    /// The picture on screen carries a gain map.
+    GainMap,
     SingleChannel,
     /// A rename, a deletion or a removal has been made this session and
     /// not yet undone.
@@ -608,7 +614,7 @@ impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 15] = [
+    pub const ALL: [When; 16] = [
         When::RegionSelected,
         When::SeveralFiles,
         When::Animation,
@@ -618,6 +624,7 @@ impl When {
         When::HdrMode,
         When::CameraJpeg,
         When::Depth,
+        When::GainMap,
         When::SingleChannel,
         When::Undoable,
         When::VisitedBefore,
@@ -639,6 +646,7 @@ impl When {
             When::HdrMode => "the monitor in HDR mode",
             When::CameraJpeg => "a raw with a camera JPEG",
             When::Depth => "an image has a depth map",
+            When::GainMap => "an image has a gain map",
             When::SingleChannel => "a single-channel image",
             When::Undoable => "an edit to undo",
             When::VisitedBefore => "a file shown before this one",
@@ -672,6 +680,7 @@ impl Conditions {
             When::HdrMode => self.hdr == Hdr::Available,
             When::CameraJpeg => self.camera_jpeg,
             When::Depth => self.depth,
+            When::GainMap => self.gain_map,
             When::SingleChannel => self.single_channel,
             When::Undoable => self.undoable,
             When::VisitedBefore => self.visited_before,
@@ -1298,6 +1307,12 @@ pub static ROWS: &[Row] = &[
         when: Some(When::Depth),
         help: "Toggle depth map display",
         keys: one!("display.depth", ToggleDepth, [key('D')]),
+    },
+    Row {
+        section: Section::Display,
+        when: Some(When::GainMap),
+        help: "Toggle gain map display",
+        keys: one!("display.gain-map", ToggleGainMap, [key('G')]),
     },
     Row {
         section: Section::Display,
@@ -2211,6 +2226,7 @@ impl App {
             ToggleHdr => return self.press(Control::Output),
             ToggleCameraJpeg => return self.press(Control::CameraJpeg),
             ToggleDepth => return self.press(Control::Depth),
+            ToggleGainMap => return self.press(Control::GainMap),
             ToggleRegion => return self.press(Control::Region),
             // Only a region moves, grows and shrinks, and there is none: see
             // `perform_on_region`.
@@ -2424,6 +2440,8 @@ impl App {
                 .is_some_and(|current| matches!(current.camera_jpeg, CameraJpeg::Present(_))),
             depth: self.animation.is_none()
                 && current.is_some_and(|current| current.picture().0.carries(Auxiliary::Depth)),
+            gain_map: self.animation.is_none()
+                && current.is_some_and(|current| current.picture().0.carries(Auxiliary::GainMap)),
             openable: !self.openers.is_empty(),
             false_colored: current
                 .is_some_and(|current| current.display.false_colored(current.image.is_gray())),
@@ -3305,7 +3323,8 @@ impl App {
             // key cannot come to mean different things.
             Control::Output => self.toggle_hdr(),
             Control::CameraJpeg => self.toggle_camera_jpeg(),
-            Control::Depth => self.toggle_depth(),
+            Control::Depth => self.toggle_beside(Auxiliary::Depth),
+            Control::GainMap => self.toggle_beside(Auxiliary::GainMap),
             // The cross on the message at the foot of the window. The frame
             // after re-tests the pointer, which is what takes the highlight
             // off a button that is no longer there.

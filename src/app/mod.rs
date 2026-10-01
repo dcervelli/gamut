@@ -559,11 +559,13 @@ pub struct App {
     /// the thread watching it last said. `FrameInput::paste` is this and
     /// the interface being on screen.
     clipboard_offers: bool,
-    /// Whether the depth toggle is on: the picture's depth map is shown in
-    /// its place, for this picture and every one after it that carries a
-    /// map — see [`App::follow_showing`]. Here rather than in [`Panels`],
-    /// which nothing under `ui` reads it from.
-    show_depth: bool,
+    /// Which of the toggles for an image the picture carries is on — the
+    /// depth map's or the gain map's — if either: that image is shown in the
+    /// picture's place, for this picture and every one after it that
+    /// carries one — see [`App::follow_showing`]. One at a time, since only
+    /// one image is up. Here rather than in [`Panels`], which nothing under
+    /// `ui` reads it from.
+    show_beside: Option<Auxiliary>,
     /// Whether the list is still the one the command line gave, with
     /// nothing opened from the window since. A command line whose every
     /// file fails to decode is a command line to answer by leaving, with a
@@ -769,7 +771,7 @@ impl App {
             picker,
             picking: false,
             clipboard_offers: false,
-            show_depth: false,
+            show_beside: None,
             from_command_line: source.is_some(),
             said_how_to_restore: false,
             keys: Rc::new(config.keys),
@@ -1465,26 +1467,25 @@ impl App {
         Effect::Nothing
     }
 
-    /// Shows the picture's depth map in its place, or the picture again,
-    /// for this picture and every one after it that carries a map.
-    pub(super) fn toggle_depth(&mut self) -> Effect {
-        self.show_depth = !self.show_depth;
+    /// Shows the image of `kind` the picture carries in its place, or the
+    /// picture again, for this picture and every one after it that carries
+    /// one. Pressed while the other kind's toggle is on, it takes that one's
+    /// place.
+    pub(super) fn toggle_beside(&mut self, kind: Auxiliary) -> Effect {
+        self.show_beside = (self.show_beside != Some(kind)).then_some(kind);
         self.follow_showing().also(Effect::Redraw)
     }
 
-    /// Which of the file's images the toggles ask for: the depth map while
-    /// its toggle is on and the picture carries one — and is a still,
-    /// since an animation's frames replace the picture as they play — and
-    /// the picture otherwise. Put on screen where it is not already.
+    /// Which of the file's images the toggles ask for: the one whose toggle
+    /// is on, where the picture carries it — and is a still, since an
+    /// animation's frames replace the picture as they play — and the
+    /// picture otherwise. Put on screen where it is not already.
     fn follow_showing(&mut self) -> Effect {
-        let depth = Showing::Auxiliary(Auxiliary::Depth);
-        let wanted = match self.current.as_ref() {
-            Some(current)
-                if self.show_depth
-                    && self.animation.is_none()
-                    && current.picture().0.carries(Auxiliary::Depth) =>
+        let wanted = match (self.current.as_ref(), self.show_beside) {
+            (Some(current), Some(kind))
+                if self.animation.is_none() && current.picture().0.carries(kind) =>
             {
-                depth
+                Showing::Auxiliary(kind)
             }
             _ => Showing::Picture,
         };

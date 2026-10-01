@@ -51,6 +51,8 @@ use super::{
 const REGIONS: &str = "Regions";
 /// The heading of the depth map the picture carries.
 const DEPTH_MAP: &str = "Depth map";
+/// The heading of the gain map the picture carries.
+const GAIN_MAP: &str = "Gain map";
 /// What the pill at the end of a heading says while its section is on
 /// screen in the picture's place.
 const SHOWING: &str = "Showing";
@@ -196,8 +198,8 @@ struct Section {
     /// order; empty for every other face.
     regions: Vec<ShownRegion>,
     /// Whether what the section describes is on screen, which a pill at the
-    /// end of its heading says: the picture's, or the depth map's while it
-    /// is shown in its place.
+    /// end of its heading says: the picture's, or the gain map's or the
+    /// depth map's while it is shown in its place.
     showing: bool,
 }
 
@@ -1306,7 +1308,7 @@ fn offer(
 
 /// Everything the panel has to say, in the order it says it: the file on
 /// disk, then what somebody wrote about the picture in it, then the picture
-/// itself and the depth map it carries, then what else its metadata has to
+/// itself and the gain map and depth map it carries, then what else its metadata has to
 /// say — the camera, the exposure, the place, the ground — and last the
 /// regions it marks out on the picture.
 ///
@@ -1344,6 +1346,18 @@ fn contents(current: &Current) -> Contents {
                 button: None,
             },
             fields(image_facts(current)),
+        )
+    });
+    sections.push(Section {
+        showing: current.showing == Showing::Auxiliary(Auxiliary::GainMap),
+        ..Section::new(
+            GAIN_MAP,
+            Face::Headed {
+                mark: icon::SUN,
+                head: &[],
+                button: None,
+            },
+            fields(gain_map_facts(current)),
         )
     });
     sections.push(Section {
@@ -1576,7 +1590,8 @@ fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
 /// where it is written out and stays written.
 ///
 /// Always the picture's, whichever of the file's images is on screen: a
-/// depth map shown in its place is described in its own section.
+/// gain map or a depth map shown in its place is described in a section of
+/// its own.
 fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
     let face = current.picture_face();
     let image = &face.image;
@@ -1646,41 +1661,6 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         // reader asking why a file opened dark or stretched is looking for.
         ("Referred to", image.referred.label().to_string()),
     ];
-    // The gain map, where there is one: whose description of it the file
-    // gives, the map itself, how far above the base it can lift the picture,
-    // and how much of that this display's room is showing.
-    let map = image.gain_map.as_deref();
-    facts.extend([
-        (
-            "Gain map",
-            map.map(|map| match map.lift {
-                Lift::Iso(_) => "ISO 21496-1".to_string(),
-                Lift::Apple { .. } => "Apple".to_string(),
-            })
-            .unwrap_or_default(),
-        ),
-        (
-            "Gain map size",
-            map.map(|map| {
-                let kind = match map.channels {
-                    1 => "luminance",
-                    _ => "RGB",
-                };
-                format!("{} \u{00d7} {}, {kind}", map.width, map.height)
-            })
-            .unwrap_or_default(),
-        ),
-        (
-            "HDR headroom",
-            map.map(|map| format!("{:.1} stops above SDR white", map.stops()))
-                .unwrap_or_default(),
-        ),
-        (
-            "Gain applied",
-            map.map(|_| applied(face.lift.as_ref().map_or(0.0, |lift| lift.weight())))
-                .unwrap_or_default(),
-        ),
-    ]);
     facts.extend([
         // The multiplier a Radiance picture says has already been applied
         // to it, which is why it is graded rather than metered; nothing for
@@ -1697,6 +1677,69 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         ("Holds", holds(current)),
     ]);
     facts
+}
+
+/// What the panel says about the gain map the picture carries, whichever of
+/// the two is on screen, in a photographer's terms: its resolution and
+/// samples, the precision it lost on its way to the device while it is
+/// shown, whose description of it the file gives, how far above SDR white
+/// the picture can go, how far the map raises the picture where it raises
+/// it most, and how much of that this display's room is showing. Nothing
+/// where the picture carries no map.
+fn gain_map_facts(current: &Current) -> Vec<(&'static str, String)> {
+    let face = current.picture_face();
+    let Some(map) = face.image.gain_map.as_deref() else {
+        return Vec::new();
+    };
+    let stops = map.stops();
+    vec![
+        (RESOLUTION, format!("{} \u{00d7} {}", map.width, map.height)),
+        (
+            "Samples",
+            match map.channels {
+                1 => "8-bit luminance",
+                _ => "8-bit RGB",
+            }
+            .to_string(),
+        ),
+        // Only while the map is on screen, as the depth map's.
+        (
+            "Precision",
+            if current.showing == Showing::Auxiliary(Auxiliary::GainMap) {
+                precision(&current.shown)
+            } else {
+                String::new()
+            },
+        ),
+        (
+            "Described by",
+            match map.lift {
+                Lift::Iso(_) => "ISO 21496-1",
+                Lift::Apple { .. } => "Apple",
+            }
+            .to_string(),
+        ),
+        ("HDR headroom", format!("{stops:.1} stops above SDR white")),
+        ("Lift", map.lift_range().map(lift).unwrap_or_default()),
+        (
+            "Applied",
+            applied(face.lift.as_ref().map_or(0.0, |lift| lift.weight()), stops),
+        ),
+    ]
+}
+
+/// The least and the most a gain map raises the picture by, in stops: how
+/// far its brightest highlights go up, from where it leaves the picture as
+/// it is. A map that darkens somewhere says so with a sign.
+fn lift([low, high]: [f32; 2]) -> String {
+    // Within a twentieth of a stop of nothing is nothing, at the tenths the
+    // range is written in; adding zero makes a negative zero positive.
+    let low = if low.abs() < 0.05 { 0.0 } else { low + 0.0 };
+    if low >= 0.0 {
+        format!("up to {high:.1} stops")
+    } else {
+        format!("{low:+.1} to {high:+.1} stops").replace('-', "\u{2212}")
+    }
 }
 
 /// What the panel says about the depth map the picture carries, whichever
@@ -1773,17 +1816,18 @@ fn precision(face: &crate::ui::Face) -> String {
         .unwrap_or_default()
 }
 
-/// How much of a gain map's lift is on screen, at `weight`: all of it, a
-/// share, or none — which is what a display with no room above white gets.
-fn applied(weight: f32) -> String {
+/// How much of a gain map's lift of `stops` is on screen, at `weight`, in
+/// stops: all of it, a share, or none — which is what a display with no
+/// room above white gets.
+fn applied(weight: f32, stops: f32) -> String {
     if weight >= 1.0 {
-        "all".to_string()
+        format!("all {stops:.1} stops")
     } else if weight <= 0.0 {
         "none: the display has no room above white".to_string()
     } else {
         format!(
-            "{:.0}%, as much as the display has room for",
-            weight * 100.0
+            "{:.1} of {stops:.1} stops, as much as the display has room for",
+            weight * stops
         )
     }
 }
