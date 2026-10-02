@@ -133,4 +133,32 @@ mod tests {
         assert_eq!(tag(&note, 99), None);
         assert_eq!(tag(b"Nikon\0", 33), None);
     }
+
+    /// An iPhone 17's note carries LONG8 entries (type 16) beside the two,
+    /// and those must not cost the directory.
+    #[test]
+    fn a_long8_entry_does_not_hide_the_two() {
+        let mut note = b"Apple iOS\0\0\x01MM".to_vec();
+        note.extend_from_slice(&3u16.to_be_bytes());
+        let entry = |tag: u16, kind: u16, offset: u32| {
+            [
+                &tag.to_be_bytes()[..],
+                &kind.to_be_bytes(),
+                &1u32.to_be_bytes(),
+                &offset.to_be_bytes(),
+            ]
+            .concat()
+        };
+        let values = 16 + 3 * 12;
+        note.extend_from_slice(&entry(23, 16, values as u32));
+        note.extend_from_slice(&entry(33, 10, values as u32 + 8));
+        note.extend_from_slice(&entry(48, 10, values as u32 + 16));
+        note.extend_from_slice(&7u64.to_be_bytes());
+        note.extend_from_slice(&101i32.to_be_bytes());
+        note.extend_from_slice(&100i32.to_be_bytes());
+        note.extend_from_slice(&(-3i32).to_be_bytes());
+        note.extend_from_slice(&2i32.to_be_bytes());
+        assert!((tag(&note, 33).unwrap() - 1.01).abs() < 1e-6);
+        assert_eq!(tag(&note, 48), Some(-1.5));
+    }
 }

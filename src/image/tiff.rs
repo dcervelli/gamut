@@ -171,13 +171,16 @@ pub fn entries_at(block: &[u8], order: Order, at: usize, skipping: &[u16]) -> Op
     Some(entries)
 }
 
-/// The size of one component of each TIFF type.
+/// The size of one component of each TIFF type. BigTIFF's three 8-byte
+/// integers turn up in classic directories too: an iPhone's maker note
+/// writes LONG8 among its tags, and one type unknown here would lose the
+/// whole directory.
 fn type_size(kind: u16) -> Option<u16> {
     Some(match kind {
         1 | 2 | 6 | 7 => 1,
         3 | 8 => 2,
         4 | 9 | 11 | 13 => 4,
-        5 | 10 | 12 => 8,
+        5 | 10 | 12 | 16 | 17 | 18 => 8,
         _ => return None,
     })
 }
