@@ -973,6 +973,7 @@ magick "$work/color.png" +repage -background black -extent 32x32 \
 for i in 0 1 2 3; do
   cjxl -d 0 -e 1 --quiet "$work/dng-tile-$i.png" "$work/dng-tile-$i.jxl"
 done
+dng_jxl dng-jxl.dng "$work"/dng-tile-{0,1,2,3}.jxl
 
 # ------------------------------------------------------- negative fixtures
 # A DNG cut off inside its directory: claimed by the raw decoder, since the

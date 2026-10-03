@@ -87,6 +87,9 @@ struct Fixture {
     /// The depth map the file carries, where it carries one. Every other
     /// fixture carries none, so none is made up.
     depth: Option<Depth>,
+    /// The size of the camera's JPEG the file carries beside its picture,
+    /// where it carries one. Every other fixture carries none.
+    camera_jpeg: Option<[u32; 2]>,
 }
 
 /// A depth map as the four probes read it: the code the map holds at each,
@@ -113,6 +116,7 @@ const PLAIN: Fixture = Fixture {
     sequence: None,
     first_frame: None,
     depth: None,
+    camera_jpeg: None,
 };
 
 /// Two frames or pages, playing for ever where it plays.
@@ -1738,6 +1742,24 @@ const FIXTURES: &[Fixture] = &[
         tolerance: DEVELOPED,
         ..PLAIN
     },
+    // An iPhone's ProRAW, in small: Linear Raw in JPEG XL tiles, ten-bit
+    // codes through a linearization table, the camera's JPEG beside it.
+    // LibRaw cannot unpack it, so `decode::raw::linear` develops it; the
+    // matrix makes the camera's space Rec. 2020, and the pattern comes back.
+    Fixture {
+        file: "dng-jxl.dng",
+        covers: "DNG 1.7, Linear Raw in JPEG XL tiles developed without LibRaw",
+        channels: Channels::Rgb,
+        kind: Kind::U16,
+        color: LINEAR_2020,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: DEVELOPED,
+        camera_jpeg: Some([32, 24]),
+        ..PLAIN
+    },
     // A PNG under a TIFF name, decoded by sniffing rather than extension.
     Fixture {
         file: "mislabeled.tif",
@@ -1966,24 +1988,32 @@ fn every_fixture_says_what_its_light_is_referred_to() {
     }
 }
 
-/// No fixture carries a picture of itself, and none offers the camera's
-/// JPEG: a preview is a courtesy, never a failure, so every fixture answers
-/// the question. What the one raw here says of its own — that it could
-/// carry one and does not — is `decode::raw`'s test.
+/// Only the fixtures that say so carry a picture of themselves, and offer
+/// it as the camera's JPEG at the size it decodes to: a preview is a
+/// courtesy, never a failure, so every fixture answers the question.
 #[test]
 fn every_fixture_answers_for_its_preview() {
     for fixture in FIXTURES {
         let path = directory().join(fixture.file);
         let preview = crate::image::decode::preview(&path, Overrides::default())
             .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
-        assert!(preview.is_none(), "{} carries a preview", fixture.file);
         let camera = crate::image::decode::camera_jpeg(&path)
             .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
-        assert!(
-            !matches!(camera, CameraJpeg::Present(_)),
-            "{} offers the camera's JPEG",
-            fixture.file
-        );
+        match fixture.camera_jpeg {
+            Some(size) => {
+                let preview = preview.unwrap_or_else(|| panic!("{} has no preview", fixture.file));
+                assert_eq!([preview.width, preview.height], size, "{}", fixture.file);
+                assert_eq!(camera, CameraJpeg::Present(size), "{}", fixture.file);
+            }
+            None => {
+                assert!(preview.is_none(), "{} carries a preview", fixture.file);
+                assert!(
+                    !matches!(camera, CameraJpeg::Present(_)),
+                    "{} offers the camera's JPEG",
+                    fixture.file
+                );
+            }
+        }
     }
 }
 

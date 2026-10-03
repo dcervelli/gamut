@@ -38,6 +38,8 @@
 //! facts — and only developing the frame spends it.
 
 mod ffi;
+mod linear;
+mod profile;
 
 use std::cell::Cell;
 use std::ffi::CStr;
@@ -163,6 +165,12 @@ impl super::Decoder for Raw {
         // handle's multipliers, so it could not answer for the camera's
         // balance again, and is spent here.
         let handle = take_handle(source)?;
+        // A DNG whose picture LibRaw cannot unpack, developed here instead;
+        // turned as the developed frame and the preview are.
+        if let Some(linear) = linear::Linear::read(&handle.bytes)? {
+            let image = linear.develop(&handle.bytes)?;
+            return Ok(crate::image::orient::apply(image, handle.orientation()));
+        }
         let (width, height) = handle.output_size();
         if width == 0 || height == 0 {
             bail!("raw image is {width}x{height}");

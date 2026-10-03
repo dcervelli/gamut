@@ -11,6 +11,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A **Gain map** button at the bottom right, and `G`, for a picture carrying
   a gain map: shows the map in the picture's place, in stops, so the pixel
   readout says how far each pixel is brightened, and the picture again.
+- An iPhone's ProRAW, whose picture is compressed with JPEG XL, is
+  developed like any other raw: the camera's balance and color, in
+  Rec. 2020. Apple's own lift of the shadows is not applied, so it opens
+  darker than Photos shows it.
 
 ### Changed
 

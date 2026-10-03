@@ -171,6 +171,57 @@ pub fn entries_at(block: &[u8], order: Order, at: usize, skipping: &[u16]) -> Op
     Some(entries)
 }
 
+impl Entry {
+    /// The entry's value as bytes: its own four, or the run at its offset
+    /// in `block`, the block it was read from. `None` where the run would
+    /// pass the end of the block.
+    pub fn bytes<'a>(&'a self, block: &'a [u8]) -> Option<&'a [u8]> {
+        let size =
+            usize::try_from(u64::from(self.count) * u64::from(type_size(self.kind)?)).ok()?;
+        match &self.inline {
+            Some(inline) => inline.get(..size),
+            None => block.get(self.offset..self.offset.checked_add(size)?),
+        }
+    }
+
+    /// The entry's value as numbers, whichever of the numeric types it is
+    /// written in: a rational as its quotient, a signed type as signed.
+    /// `None` for text and bytes of no stated meaning, or a value that
+    /// passes the end of `block`.
+    pub fn numbers(&self, block: &[u8], order: Order) -> Option<Vec<f64>> {
+        let bytes = self.bytes(block)?;
+        let width = usize::from(type_size(self.kind)?);
+        let u32_at = |at: usize| order.read_u32(bytes, at);
+        let u64_at = |at: usize| {
+            let (first, second) = (u64::from(u32_at(at)?), u64::from(u32_at(at + 4)?));
+            Some(match order {
+                Order::Little => first | second << 32,
+                Order::Big => first << 32 | second,
+            })
+        };
+        (0..self.count as usize)
+            .map(|index| {
+                let at = index * width;
+                Some(match self.kind {
+                    1 => f64::from(bytes[at]),
+                    6 => f64::from(bytes[at] as i8),
+                    3 => f64::from(order.read_u16(bytes, at)?),
+                    8 => f64::from(order.read_u16(bytes, at)? as i16),
+                    4 => f64::from(u32_at(at)?),
+                    9 => f64::from(u32_at(at)? as i32),
+                    5 => f64::from(u32_at(at)?) / f64::from(u32_at(at + 4)?),
+                    10 => f64::from(u32_at(at)? as i32) / f64::from(u32_at(at + 4)? as i32),
+                    11 => f64::from(f32::from_bits(u32_at(at)?)),
+                    12 => f64::from_bits(u64_at(at)?),
+                    16 => u64_at(at)? as f64,
+                    17 => u64_at(at)? as i64 as f64,
+                    _ => return None,
+                })
+            })
+            .collect()
+    }
+}
+
 /// The size of one component of each TIFF type. BigTIFF's three 8-byte
 /// integers turn up in classic directories too: an iPhone's maker note
 /// writes LONG8 among its tags, and one type unknown here would lose the
@@ -202,6 +253,58 @@ mod tests {
         assert_eq!(header(b"II\x2c\x00"), None);
         assert_eq!(header(b"\x89PNG"), None);
         assert_eq!(header(b"II"), None, "too short to say");
+    }
+
+    /// An entry's numbers are read in the block's order, whatever type
+    /// they are written in: a rational as its quotient, signed types as
+    /// signed, a run too long for the entry from its offset.
+    #[test]
+    fn an_entrys_numbers_are_read_in_any_type() {
+        for order in [Order::Little, Order::Big] {
+            let mut block = vec![0u8; 8];
+            block.extend(order.u32(3));
+            block.extend(order.u32(4));
+            block.extend(order.u32((-1i32) as u32));
+            block.extend(order.u32(2));
+            let entry = |kind, count, inline: Option<[u8; 4]>| Entry {
+                tag: 0,
+                kind,
+                count,
+                inline,
+                offset: 8,
+            };
+            let rational = entry(5, 1, None).numbers(&block, order).unwrap();
+            assert_eq!(rational, [0.75]);
+            let signed = entry(10, 1, None);
+            let signed = Entry {
+                offset: 16,
+                ..signed
+            }
+            .numbers(&block, order)
+            .unwrap();
+            assert_eq!(signed, [-0.5]);
+            let mut shorts = [0u8; 4];
+            shorts[..2].copy_from_slice(&order.u16(7));
+            shorts[2..].copy_from_slice(&order.u16(0xffff));
+            assert_eq!(
+                entry(3, 2, Some(shorts)).numbers(&block, order).unwrap(),
+                [7.0, 65535.0]
+            );
+            assert_eq!(
+                entry(8, 2, Some(shorts)).numbers(&block, order).unwrap(),
+                [7.0, -1.0]
+            );
+            assert!(
+                entry(5, 3, None).numbers(&block, order).is_none(),
+                "past the end"
+            );
+            assert!(
+                entry(2, 4, Some(*b"abc\0"))
+                    .numbers(&block, order)
+                    .is_none(),
+                "text"
+            );
+        }
     }
 
     /// A directory's entries are read in the block's own order, an entry

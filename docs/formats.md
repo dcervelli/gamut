@@ -383,8 +383,9 @@ written beside them. Making a picture of that — demosaicing, balancing,
 converting out of the camera's own primaries, and the special case every
 camera model is — is what [LibRaw](https://www.libraw.org) does, and every
 raw developer on the desktop reads its files through it. So `decode::raw`
-binds the system library, the way HEIF does, and does not develop anything
-itself. The library's C interface is a handle and free functions, and the
+binds the system library, the way HEIF does, and develops nothing itself
+but the one kind of DNG the library cannot unpack (see **JPEG XL Linear
+Raw** below). The library's C interface is a handle and free functions, and the
 dozen this program calls are declared by hand in `decode::raw::ffi`: the two
 bindings on crates.io were last published in 2015 and 2021, against
 libraries whose structs have moved since. Two structs are transcribed, for
@@ -470,6 +471,48 @@ this machine, LibRaw's OpenMP threads doing the demosaic; an X-Trans frame
 takes three times that, its interpolation being three passes rather than
 one.
 
+**JPEG XL Linear Raw.** DNG 1.7 added JPEG XL as a compression, and an
+iPhone's ProRAW uses it: the picture is Linear Raw — three values a pixel,
+demosaiced by the phone — in tiles of 2016 pixels, each a JPEG XL file of
+sixteen-bit samples holding ten-bit codes, with a linearization table of
+1024 entries beside them. LibRaw parses such a file and hands over its
+preview, but unpacks JPEG XL only through Adobe's DNG SDK, which neither
+Homebrew's build nor Arch's is made with, and fails with "Unsupported file
+format". Building LibRaw against the SDK would mean carrying both, and
+libjxl, in the package; what is left to do once the tiles are decoded is
+small, since there is no demosaic, and `jxl-oxide` is in the tree already.
+So `raw::linear` develops these files itself, asked first in `Raw::decode`
+on the bytes LibRaw's handle already holds: `Linear::read` answers `None`
+for every other file, which goes on to LibRaw, and refuses by name a JPEG
+XL DNG that is not Linear Raw, a mosaic among them.
+
+The development is the specification's, chosen to be what LibRaw does to a
+Linear Raw it can read. The tiles are decoded in parallel on rayon's pool,
+each developed in place and copied into the picture under a lock, so the
+memory held is the picture and a tile per thread rather than the picture
+twice. A value goes through the linearization table, the black level with
+its per-row and per-column deltas, and the white, clipped to 0..1; then
+through one matrix to linear Rec. 2020, which `raw::profile` works out: the
+color matrices blended for the light the as-shot neutral says the picture
+was taken in, found by iterating the light and the blend together as the
+specification does, McCamy's cubic placing a chromaticity on the
+temperature scale; the forward matrices instead where the file has a pair;
+the neutral, at its largest channel's saturation, made white at a luminance
+of 1; and Bradford's transform from that white to D65. The camera
+calibration matrices are taken as the identity, since they apply only under
+a signature match a phone's own profile does not make.
+
+The file's instructions about how it should *look* are left alone, as
+LibRaw's development leaves a camera's curve alone: the baseline exposure
+(−1.27 EV on the iPhone sampled), the profile's tone curve, and the
+`ProfileGainTableMap`, a grid of gains by position and brightness that is
+Apple's local tone mapping, lifting shadows by as much as twelve times. The
+developed picture is therefore darker in the shadows than Photos shows it,
+and the camera's JPEG is the iPhone's rendering. Turning is LibRaw's
+reading of the orientation, as for the developed frame, and LibRaw's size
+for the file is the full picture with no crop, so the probe and the develop
+agree. A 48-megapixel ProRAW develops in about a second on this machine.
+
 **The preview.** Every raw carries the camera's own JPEG of the frame,
 which LibRaw copies out without decoding anything — `unpack_thumb` and
 `make_mem_thumb` — and `Raw::preview` hands it back through the JPEG
@@ -502,7 +545,10 @@ rather than threading a second answer out of `decode`. A read of the JPEG
 knows its size from the pixels and asks nothing more. The three states are
 kept apart because the window says different things about each: nothing for
 a file that is not a raw, and, for a raw with none while the JPEG is asked
-for, that the developed picture is standing in.
+for, that the developed picture is standing in. A fourth, `Only`, is not
+the decoder's answer but the loader's: a raw whose development failed and
+whose JPEG was shown in its place, for which there is nothing to switch to
+(see [interface](interface.md#the-cameras-jpeg)).
 
 **The metadata.** The panel reads a raw's EXIF where a TIFF-shaped one
 keeps it, at the front, and most formats are TIFF-shaped. Five are not, and
@@ -530,6 +576,16 @@ interpolation is exact on a flat field; the tolerance is for LibRaw's
 output matrices, which are written to four decimal places.
 `bad-truncated.dng` is the same file cut inside its directory, claimed by
 the entries that survive and then refused by the library.
+
+`dng-jxl.dng` is an iPhone's ProRAW in small, written by the same script:
+the camera's JPEG of the pattern in the first directory, and in a SubIFD
+the pattern as Linear Raw in four JPEG XL tiles — the bottom two padded
+past the picture — of ten-bit codes, through a linearization table that is
+a square, so that a code taken for a value comes out far too dark. Its
+matrix is `dng-cfa.dng`'s, and it develops to the pattern. LibRaw fails on
+it exactly as it does on the phone's file. `bad-dng-jxl.dng` is the same
+with each tile cut forty bytes in: it will not develop, and the loader
+shows its JPEG instead.
 
 ## JPEG XL
 

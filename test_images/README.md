@@ -71,9 +71,9 @@ mapping.
 | ICO directory | a PNG entry that is not RGBA and one carrying an `iCCP` profile, both of which `image`'s own ICO decoder refuses, and a two-size directory whose larger entry is the shallower |
 | BMP | 24-bit, 32-bit with bitfield masks and alpha, a 4-bit palette, an 8-bit palette with `BI_RLE8` runs, and one whose rows are stored top-down |
 | netpbm | binary PPM and PGM at 8 bits, binary PPM at 16, an ASCII PPM, a bitmap at one bit per pixel, a PAM with alpha, and a PGM whose `MAXVAL` is 1023 rather than the width of its samples |
-| Camera raw | a DNG of RGGB-mosaiced counts, twelve bits in sixteen-bit words, with a color matrix that makes the camera's space Rec. 2020 — the one raw format anything but a camera can write, developed through LibRaw the way every other raw is |
+| Camera raw | a DNG of RGGB-mosaiced counts, twelve bits in sixteen-bit words, with a color matrix that makes the camera's space Rec. 2020 — the one raw format anything but a camera can write, developed through LibRaw the way every other raw is; and a DNG 1.7 laid out as an iPhone's ProRAW, the camera's JPEG first and the picture as Linear Raw in JPEG XL tiles of ten-bit codes with a linearization table, which LibRaw cannot unpack and the program develops itself |
 | Routing | `mislabeled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff`, `.heif` and `.pnm` spellings |
-| Failure | `unsupported.tga`, `bad-truncated.png`, `bad-truncated.dng`, and `bad-dng-jxl.dng` — a DNG 1.7 laid out as an iPhone's ProRAW, the picture as Linear Raw in JPEG XL tiles cut short and the camera's JPEG beside them whole, which the window shows in the picture's place |
+| Failure | `unsupported.tga`, `bad-truncated.png`, `bad-truncated.dng`, and `bad-dng-jxl.dng` — `dng-jxl.dng` with its tiles cut short and the camera's JPEG beside them whole, which the window shows in the picture's place |
 
 `src/image/decode/fixture_tests.rs` asserts that this directory and its
 fixture table stay in step, so a file cannot be added without a test and a
