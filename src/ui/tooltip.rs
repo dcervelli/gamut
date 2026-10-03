@@ -233,8 +233,9 @@ pub struct Conditions {
     pub room: Room,
     /// Whether the surface switch has anything to switch, and why not.
     pub hdr: Hdr,
-    /// Whether the file on screen is a raw with the camera's JPEG in it,
-    /// which is what the switch between the two needs.
+    /// Whether the file on screen is a raw with the camera's JPEG in it and
+    /// a developed picture beside it, which is what the switch between the
+    /// two needs.
     pub camera_jpeg: bool,
     /// Whether the picture on screen carries a depth map, which is what
     /// the depth toggle needs.

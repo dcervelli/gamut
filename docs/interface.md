@@ -559,11 +559,18 @@ camera's JPEG through `decode::Opened::camera_picture` where it was asked for an
 the file has one, the developed frame through `decode::Opened::decode` otherwise.
 A raw without a JPEG, or with one that will not decode, is read as developed
 and the read succeeds, so a step onto one is not a step onto a broken file.
+The other way round holds too: a raw whose own data will not develop — a
+compression nothing here reads, or counts cut short, as `bad-dng-jxl.dng`'s
+are — is read as its JPEG by
+`loader::undeveloped`, and arrives as `CameraJpeg::Only`. That is the one
+picture the file has to show, so the switch is left out for it as for a raw
+with none, and the preference is left alone for the files after it.
 `Ready` carries back what was read and `CameraJpeg`, whether the file has one,
 and both land on `Current`, which is what the bottom bar's switch
 (`Pass::camera_switch`), the tooltip (`Namer::tooltip`, from `Namer::camera`)
 and `Conditions::camera_jpeg` read. When the JPEG was asked for and the file
-has none, `App::apply` says so in a toast.
+has none, `App::apply` says so in a toast, and when the developed picture was
+asked for and only the JPEG could be shown, in another.
 
 The switch wears `camera`'s mark and the word for the picture up, `RAW` or
 `JPEG`, the mark saying the rest; where it is read out rather than seen it

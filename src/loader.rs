@@ -297,8 +297,9 @@ pub(crate) fn decode_rendering(
 /// the camera's JPEG. The camera's JPEG where it was asked for and is there
 /// to be read; otherwise the developed picture, which is what a raw with no
 /// JPEG in it shows rather than failing — a step onto one is not a step
-/// onto a broken file. Each stage behind its own panic guard, as in
-/// [`read`]'s.
+/// onto a broken file. A raw whose own data will not develop shows its
+/// JPEG the same way, as [`CameraJpeg::Only`]. Each stage behind its own
+/// panic guard, as in [`read`]'s.
 pub(crate) fn decode_rendering_of(
     opened: &mut decode::Opened,
     overrides: Overrides,
@@ -334,9 +335,45 @@ pub(crate) fn decode_rendering_of(
         None => {
             let camera_jpeg = guard("looking for the camera's JPEG", || opened.camera_jpeg())
                 .unwrap_or(CameraJpeg::Unavailable);
-            let (image, decoding) = guard("decoding", || opened.decode(overrides, page))?;
-            Ok((image, decoding, Rendering::Developed, camera_jpeg))
+            match guard("decoding", || opened.decode(overrides, page)) {
+                Ok((image, decoding)) => Ok((image, decoding, Rendering::Developed, camera_jpeg)),
+                // Not where the JPEG was asked for and has failed already.
+                Err(error) if rendering == Rendering::Developed && page.is_none() => {
+                    undeveloped(opened, overrides, camera_jpeg, error)
+                }
+                Err(error) => Err(error),
+            }
         }
+    }
+}
+
+/// The camera's JPEG of a raw whose own data would not develop — a
+/// compression the library cannot read, counts that are not all there —
+/// shown rather than the development's failure, which is said on the
+/// terminal. Where there is no JPEG either, or it will not decode, the
+/// development's failure is the read's.
+fn undeveloped(
+    opened: &mut decode::Opened,
+    overrides: Overrides,
+    camera_jpeg: CameraJpeg,
+    error: anyhow::Error,
+) -> Result<(DecodedImage, std::time::Duration, Rendering, CameraJpeg)> {
+    if !matches!(camera_jpeg, CameraJpeg::Present(_)) {
+        return Err(error);
+    }
+    match guard("reading the camera's JPEG", || {
+        opened.camera_picture(overrides)
+    }) {
+        Ok(Some((image, decoding))) => {
+            eprintln!(
+                "{}: {}",
+                crate::PROGRAM,
+                crate::escape_controls(&format!("{error:#}"))
+            );
+            let only = CameraJpeg::Only([image.width, image.height]);
+            Ok((image, decoding, Rendering::CameraJpeg, only))
+        }
+        Ok(None) | Err(_) => Err(error),
     }
 }
 

@@ -2399,7 +2399,7 @@ impl App {
                 .as_ref()
                 .and_then(|current| match current.camera_jpeg {
                     CameraJpeg::Present(_) => Some(current.rendering),
-                    CameraJpeg::Missing | CameraJpeg::Unavailable => None,
+                    CameraJpeg::Only(_) | CameraJpeg::Missing | CameraJpeg::Unavailable => None,
                 }),
         }
     }

@@ -865,10 +865,125 @@ out = b"II\x2a\x00" + struct.pack("<I", directory_at) + struct.pack("<H", len(en
 open(sys.argv[1], "wb").write(out)
 DNG
 
+# A DNG 1.7 laid out as an iPhone's ProRAW is: the camera's JPEG of the
+# picture in the first directory, and in a SubIFD the picture itself as
+# Linear Raw — three channels, demosaiced already — in 16x16 tiles, each a
+# JPEG XL file. As an iPhone's are, the tiles are sixteen-bit codestreams
+# holding ten-bit codes, which a linearization table of 1024 entries maps
+# onto 0..65535 — here a square, so that a code read as a value is far too
+# dark. The pattern is padded to whole tiles with black, as a tiled TIFF's
+# last row and column are. The matrix is `dng-cfa.dng`'s, making the
+# camera's space Rec. 2020.
+#   dng_jxl OUT TILE...
+dng_jxl() {
+  local out=$1; shift
+  magick "$work/color.png" -quality 95 "$work/dng-preview.jpg"
+  python3 - "$out" "$work/dng-preview.jpg" "$@" <<'DNG'
+import struct, sys
+
+out, preview = sys.argv[1], open(sys.argv[2], "rb").read()
+tiles = [open(path, "rb").read() for path in sys.argv[3:]]
+WIDTH, HEIGHT, TILE = 32, 24, 16
+
+matrix = [1716651, -355671, -253366, -666684, 1616481, 15769, 17640, -42771, 942103]
+SHORT, LONG, RATIONAL, SRATIONAL, ASCII, BYTE = 3, 4, 5, 10, 2, 1
+
+def pack(kind, values):
+    if kind in (ASCII, BYTE):
+        return bytes(values)
+    if kind == SHORT:
+        return struct.pack(f"<{len(values)}H", *values)
+    if kind == LONG:
+        return struct.pack(f"<{len(values)}I", *values)
+    code = "<II" if kind == RATIONAL else "<ii"
+    return b"".join(struct.pack(code, *v) for v in values)
+
+# A value that is a name is an offset, filled in once the blocks are placed.
+first = [
+    (254, LONG, [1]),                                  # a reduced picture
+    (256, LONG, [WIDTH]), (257, LONG, [HEIGHT]),
+    (258, SHORT, [8, 8, 8]), (259, SHORT, [7]),        # JPEG
+    (262, SHORT, [6]),                                 # YCbCr
+    (271, ASCII, b"gamut\0"), (272, ASCII, b"fixture\0"),
+    (273, LONG, "preview"), (274, SHORT, [1]), (277, SHORT, [3]),
+    (278, LONG, [HEIGHT]), (279, LONG, [len(preview)]),
+    (330, LONG, "raw"),                                # SubIFDs
+    (50706, BYTE, bytes([1, 7, 0, 0])), (50707, BYTE, bytes([1, 7, 0, 0])),
+    (50708, ASCII, b"gamut fixture\0"),
+    (50721, SRATIONAL, [(m, 1000000) for m in matrix]),
+    (50728, RATIONAL, [(1, 1)] * 3),                   # AsShotNeutral
+    (50778, SHORT, [21]),                              # D65
+]
+raw = [
+    (254, LONG, [0]),                                  # the picture itself
+    (256, LONG, [WIDTH]), (257, LONG, [HEIGHT]),
+    (258, SHORT, [10, 10, 10]), (259, SHORT, [52546]), # JPEG XL
+    (262, SHORT, [34892]),                             # Linear Raw
+    (277, SHORT, [3]), (284, SHORT, [1]),
+    (322, LONG, [TILE]), (323, LONG, [TILE]),
+    (324, LONG, "tiles"), (325, LONG, [len(t) for t in tiles]),
+    (50712, SHORT, [round(65535 * (code / 1023) ** 2) for code in range(1024)]),
+    (50717, LONG, [65535] * 3),                        # WhiteLevel
+]
+
+def padded(data):
+    return data + (b"\0" if len(data) % 2 else b"")
+
+def size(entries):
+    return 2 + 12 * len(entries) + 4
+
+offsets = {"first": 8}
+offsets["raw"] = offsets["first"] + size(first)
+blocks = b""
+blocks_at = offsets["raw"] + size(raw)
+offsets["preview"] = blocks_at
+blocks += padded(preview)
+offsets["tiles"] = []
+for tile in tiles:
+    offsets["tiles"].append(blocks_at + len(blocks))
+    blocks += padded(tile)
+values_at = blocks_at + len(blocks)
+values = b""
+
+def directory(entries):
+    global values
+    written = struct.pack("<H", len(entries))
+    for tag, kind, given in sorted(entries, key=lambda entry: entry[0]):
+        if isinstance(given, str):
+            given = offsets[given] if isinstance(offsets[given], list) else [offsets[given]]
+        data = pack(kind, given)
+        written += struct.pack("<HHI", tag, kind, len(given))
+        if len(data) <= 4:
+            written += data.ljust(4, b"\0")
+        else:
+            written += struct.pack("<I", values_at + len(values))
+            values += padded(data)
+    return written + struct.pack("<I", 0)
+
+directories = directory(first) + directory(raw)
+open(out, "wb").write(b"II\x2a\x00" + struct.pack("<I", 8) + directories + blocks + values)
+DNG
+}
+
+# The pattern cut into the four tiles `dng_jxl` takes, padded to whole
+# tiles, as ten-bit codes: full scale, 65535, becomes 1023.
+magick "$work/color.png" +repage -background black -extent 32x32 \
+  -crop 16x16 +repage -depth 16 -evaluate Multiply 0.015609979 \
+  "PNG48:$work/dng-tile-%d.png"
+for i in 0 1 2 3; do
+  cjxl -d 0 -e 1 --quiet "$work/dng-tile-$i.png" "$work/dng-tile-$i.jxl"
+done
+
 # ------------------------------------------------------- negative fixtures
 # A DNG cut off inside its directory: claimed by the raw decoder, since the
 # entries that survive say what it is, then refused by LibRaw.
 head -c 100 dng-cfa.dng > bad-truncated.dng
+# A JPEG XL DNG whose tiles are cut off forty bytes in: the picture will not
+# develop, and the camera's JPEG beside it is whole.
+for i in 0 1 2 3; do
+  head -c 40 "$work/dng-tile-$i.jxl" > "$work/dng-tile-cut-$i.jxl"
+done
+dng_jxl bad-dng-jxl.dng "$work"/dng-tile-cut-{0,1,2,3}.jxl
 # A PNG header followed by rubbish: the decoder is chosen, then fails.
 { printf '\211PNG\r\n\032\n'; head -c 64 /dev/zero | tr '\0' 'X'; } > bad-truncated.png
 # A real image in a format this build does not include. Targa has no decoder

@@ -464,6 +464,10 @@ Caveats:
   wide-gamut file.
 - **Lens corrections are not applied,** and neither is noise reduction: the
   frame is the sensor's, distortion and vignetting included.
+- **A raw that cannot be developed opens as the camera's JPEG,** with no
+  button to switch, and says so as it opens. A file that is damaged, or
+  that holds its picture in a form `gamut` does not read, still shows what
+  the camera made of it.
 - **The information panel reads every format's metadata,** including the
   ones that keep it somewhere other than where a TIFF would, and adds the
   color temperature the camera's white balance was set for, which the

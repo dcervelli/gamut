@@ -1759,6 +1759,7 @@ const REJECTED: &[(&str, &str)] = &[
     ("unsupported.tga", "unsupported image format"),
     ("bad-truncated.png", "decoding"),
     ("bad-truncated.dng", "decoding"),
+    ("bad-dng-jxl.dng", "decoding"),
 ];
 
 /// Extensions the registry advertises that share a decode path with another

@@ -2266,6 +2266,32 @@ fn a_raw_without_a_camera_jpeg_falls_back_to_the_developed_picture() {
     assert!(app.files.is_idle(), "nothing asked for");
 }
 
+/// A raw whose own data will not develop, asked for as the developed
+/// picture, shows the camera's JPEG rather than failing, says so, and
+/// offers no switch: there is nothing to switch to, and the preference
+/// stays as it was.
+#[test]
+fn a_raw_that_will_not_develop_falls_back_to_the_camera_jpeg() {
+    let path = fixture("bad-dng-jxl.dng");
+    let mut app = open(vec![path.clone()], vec![path]);
+    answer(&mut app, Reload::Fresh);
+    let current = app.current.as_ref().expect("the camera's JPEG is up");
+    assert_eq!(current.rendering, Rendering::CameraJpeg);
+    assert_eq!(current.camera_jpeg, CameraJpeg::Only([32, 24]));
+    assert_eq!(app.files.index(), 0);
+    assert_eq!(
+        app.toasts.showing().map(|toast| toast.message.as_str()),
+        Some(ONLY_CAMERA_JPEG_SHOWN)
+    );
+    assert!(!app.conditions().camera_jpeg);
+    assert!(matches!(
+        app.press(crate::ui::Control::CameraJpeg),
+        Effect::Nothing
+    ));
+    assert_eq!(app.rendering, Rendering::Developed);
+    assert!(app.files.is_idle(), "nothing asked for");
+}
+
 /// The depth toggle answers only for a picture with a depth map, and
 /// then turns on without anything being read again: the map came with
 /// the picture, and the picture stays.

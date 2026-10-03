@@ -21,6 +21,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   many of those stops the display is applying. The four gain map rows leave
   the *Image* section.
 
+### Fixed
+
+- A raw that cannot be developed but carries the camera's JPEG — a damaged
+  file, or one holding its picture in a form not read here — opens as that
+  JPEG, saying so, rather than failing.
+
 ## 0.10.0 - 2026-10-01
 
 ### Added

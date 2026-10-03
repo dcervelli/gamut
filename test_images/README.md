@@ -7,7 +7,7 @@ from the outside world.
 
 Regenerate with `./generate.sh` — it is the authoritative description of how
 each file was made. Most fixtures need only ImageMagick; the HEIF ones need
-`heif-enc` from libheif, the JPEG XL ones `cjxl` from libjxl, and the
+`heif-enc` from libheif, the JPEG XL ones — the JPEG XL DNGs among them — `cjxl` from libjxl, and the
 measurement rasters at the end need GDAL, and one of them libtiff's `tiffcp`. Twenty fixtures need Python as well,
 because ImageMagick will not write what they exist for: neither `cICP` nor
 `iCCP` for PNG, nor a `gAMA` or `cHRM` other than sRGB's own, nor an `eXIf`
@@ -16,7 +16,9 @@ an `EXIF` chunk nor an animation for WebP, an EXIF segment on a JPEG made
 from a PNG, a depth map in a JPEG's XMP, for ICO neither a PNG-compressed
 entry nor a directory that mixes depths, and for BMP no top-down row order;
 nor will `heif-enc` write a depth map beside a HEIF. Each is assembled
-afterwards around output ImageMagick or `heif-enc` did write.
+afterwards around output ImageMagick or `heif-enc` did write. The DNGs are
+written by Python whole, around the JPEG and JPEG XL tiles the others made,
+since nothing else writes one.
 
 `display-p3.icc` is an input rather than a fixture: it is the profile the three
 ICC-tagged files are tagged with, checked in beside them and not regenerated
@@ -71,7 +73,7 @@ mapping.
 | netpbm | binary PPM and PGM at 8 bits, binary PPM at 16, an ASCII PPM, a bitmap at one bit per pixel, a PAM with alpha, and a PGM whose `MAXVAL` is 1023 rather than the width of its samples |
 | Camera raw | a DNG of RGGB-mosaiced counts, twelve bits in sixteen-bit words, with a color matrix that makes the camera's space Rec. 2020 — the one raw format anything but a camera can write, developed through LibRaw the way every other raw is |
 | Routing | `mislabeled.tif` (a PNG, found by sniffing), `.jpeg`, `.tiff`, `.heif` and `.pnm` spellings |
-| Failure | `unsupported.tga`, `bad-truncated.png`, `bad-truncated.dng` |
+| Failure | `unsupported.tga`, `bad-truncated.png`, `bad-truncated.dng`, and `bad-dng-jxl.dng` — a DNG 1.7 laid out as an iPhone's ProRAW, the picture as Linear Raw in JPEG XL tiles cut short and the camera's JPEG beside them whole, which the window shows in the picture's place |
 
 `src/image/decode/fixture_tests.rs` asserts that this directory and its
 fixture table stay in step, so a file cannot be added without a test and a

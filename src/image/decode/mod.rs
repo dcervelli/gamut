@@ -401,6 +401,10 @@ pub enum CameraJpeg {
     /// A raw that carries one, this size across and down once turned the
     /// way the developed picture is.
     Present([u32; 2]),
+    /// A raw that carries one, this size, and whose own data would not
+    /// develop: the JPEG is the only picture there is, and so there is
+    /// nothing to switch between.
+    Only([u32; 2]),
 }
 
 /// Overrides for files whose headers cannot say what they mean. A 16-bit TIFF

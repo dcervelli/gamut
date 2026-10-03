@@ -570,7 +570,9 @@ file that looks as the camera showed it.
 Some cameras write a JPEG the full size of the frame; others write a smaller
 one, around two megapixels, and the top bar says how large the picture on
 screen is. A raw with no JPEG in it has no button, and shows its developed
-picture while the camera's JPEG is chosen, saying so as it opens.
+picture while the camera's JPEG is chosen, saying so as it opens. A raw that
+cannot be developed has no button either, and shows its JPEG while the
+developed picture is chosen, saying so as it opens.
 
 A picture that carries a depth map — a phone's portrait, say — has a
 button with three axes on it, the third dashed, between that one and `HDR`.

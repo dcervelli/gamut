@@ -2758,11 +2758,18 @@ impl App {
         // The camera's JPEG was asked for and the file has none: said, since
         // the button that would say it is not drawn for such a file. Not for
         // a file rewritten on disk, which said it when it arrived.
-        if self.rendering == Rendering::CameraJpeg
-            && camera_jpeg == CameraJpeg::Missing
-            && matches!(file.mode, Reload::Fresh | Reload::Rendering)
-        {
-            self.toast(NO_CAMERA_JPEG_SHOWN, Level::Message);
+        // So is the other way round: the developed picture asked for, and
+        // the file's own data would not develop.
+        if matches!(file.mode, Reload::Fresh | Reload::Rendering) {
+            match (self.rendering, camera_jpeg) {
+                (Rendering::CameraJpeg, CameraJpeg::Missing) => {
+                    self.toast(NO_CAMERA_JPEG_SHOWN, Level::Message);
+                }
+                (Rendering::Developed, CameraJpeg::Only(_)) => {
+                    self.toast(ONLY_CAMERA_JPEG_SHOWN, Level::Message);
+                }
+                _ => {}
+            }
         }
         // The loader measured the base; a surface with room above white
         // shows the lift, and the numbers follow it.
@@ -3212,6 +3219,10 @@ const RECONFIGURED: &str = "Configuration reloaded.";
 
 /// Said when a raw arrives with the camera's JPEG asked for and none in it.
 const NO_CAMERA_JPEG_SHOWN: &str = "No camera JPEG in this file; showing the developed picture.";
+
+/// Said when a raw arrives with the developed picture asked for, and its
+/// own data would not develop.
+const ONLY_CAMERA_JPEG_SHOWN: &str = "Could not develop this raw; showing the camera JPEG.";
 
 /// How a file arriving stands to the picture on screen, which is what
 /// decides what carries over to it and what starts afresh.
