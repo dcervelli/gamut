@@ -277,6 +277,9 @@ image/         the data model, nothing GPU
 render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws;
                  UiPaint is what egui drew, and the ui-layer pass hands it to egui-wgpu
+  adapter.rs     which GPU draws the window: the one with a monitor connected, read from
+                 /sys/class/drm, the integrated first among several; WGPU_ADAPTER_NAME and
+                 WGPU_POWER_PREF override it
   color.rs       Color, the sRGB color the interface and the theme speak in
   placement.rs   Placement (where the image lands) and Upscale (the magnification filter)
   upload.rs      texture format choice and the transfer-function LUTs; the "sampled texel is linear" invariant
