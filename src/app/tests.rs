@@ -3954,7 +3954,7 @@ fn the_wheel_and_the_clicks_do_what_their_slots_say() {
     app.motion = None;
     let (image, viewport) = (app.image_size(), app.viewport());
     let mut dragged = app.view;
-    let by = ui::WHEEL_PIXELS_PER_STEP * app.scale_factor();
+    let by = ui::WHEEL_PIXELS_PER_STEP * app.pixels_per_point();
     dragged.pan_by(-by, by, image, viewport);
     assert_ne!(
         dragged.position(image, viewport),
@@ -3989,6 +3989,97 @@ fn the_wheel_and_the_clicks_do_what_their_slots_say() {
         Effect::Redraw
     );
     assert_eq!(app.view.zoom(image, viewport), 1.0);
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// The interface's scale steps a rung at a time by its keys, stops at the
+/// top of the ladder owing no frame, comes back to the monitor's own on
+/// the reset, and is what the state file is handed as the loop ends.
+#[test]
+fn the_interface_scale_steps_by_key_and_is_kept() {
+    use input::Action::{ScaleDown, ScaleReset, ScaleUp};
+    use ui::scale::{DEFAULT, SCALES};
+
+    let (mut app, dir) = app_over("ui-scale", &[("a.png", 64, 48)]);
+    app.headless = Some(WINDOW);
+    assert_eq!(app.ui_scale, DEFAULT);
+    assert_eq!(app.perform(ScaleUp), Effect::Redraw);
+    assert_eq!(app.perform(ScaleUp), Effect::Redraw);
+    assert_eq!(app.ui_scale, SCALES[3]);
+    assert_eq!(app.pixels_per_point(), SCALES[3]);
+    assert_eq!(
+        app.toasts.showing().map(|toast| toast.message.as_str()),
+        Some("Interface scale: 150%")
+    );
+    assert_eq!(app.perform(ScaleDown), Effect::Redraw);
+    assert_eq!(app.ui_scale, SCALES[2]);
+    assert_eq!(app.kept_state().ui_scale, SCALES[2]);
+    assert_eq!(app.perform(ScaleReset), Effect::Redraw);
+    assert_eq!(app.ui_scale, DEFAULT);
+    assert_eq!(app.perform(ScaleReset), Effect::Nothing);
+
+    // At the top of the ladder there is nowhere to go.
+    while app.perform(ScaleUp) == Effect::Redraw {}
+    assert_eq!(app.ui_scale, SCALES[SCALES.len() - 1]);
+    assert_eq!(app.perform(ScaleUp), Effect::Nothing);
+    assert_eq!(app.kept_state().ui_scale, SCALES[SCALES.len() - 1]);
+
+    // The window is the same size in device pixels; the interface has
+    // fewer points of it to lay out in.
+    let logical = app.logical_size();
+    assert_eq!(logical, WINDOW.map(|side| side / SCALES[SCALES.len() - 1]));
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// A trackpad's scroll arrives in the interface's points and is turned back
+/// into device pixels by the same scale, so the picture follows the fingers
+/// as far at any interface scale: a scroll of so many device pixels pans the
+/// picture by that many.
+#[test]
+fn the_wheel_pans_as_far_at_any_interface_scale() {
+    use crate::gestures::{Behavior, Slot, WheelAction};
+    use crate::ui::Command;
+
+    let (mut app, dir) = app_over("ui-scale-wheel", &[("a.png", 64, 48)]);
+    app.headless = Some(WINDOW);
+    let mut gestures = Gestures::table();
+    gestures.set(
+        Slot::read("image.wheel").unwrap(),
+        Behavior::Wheel(WheelAction::Pan),
+    );
+    app.gestures = Rc::new(gestures);
+    app.pointer.modifiers = winit::keyboard::ModifiersState::empty();
+    let _ = app.perform(input::Action::ZoomTo(16.0));
+    app.motion = None;
+    let device = [30.0, -20.0];
+    for ui_scale in [1.0, 2.0] {
+        let _ = app.rescale(ui_scale);
+        let (image, viewport) = (app.image_size(), app.viewport());
+        let mut expected = app.view;
+        expected.pan_by(-device[0], -device[1], image, viewport);
+        let points = device.map(|pixels| pixels / app.pixels_per_point());
+        let delta = points.map(|points| points / ui::WHEEL_PIXELS_PER_STEP);
+        assert_eq!(
+            app.act(Command::Wheel {
+                delta,
+                notched: false,
+                held: None,
+            }),
+            Effect::Redraw
+        );
+        let (got, wanted) = (
+            app.view.position(image, viewport),
+            expected.position(image, viewport),
+        );
+        assert!(
+            (got.u[0] - wanted.u[0]).abs() < 1e-3
+                && (got.u[1] - wanted.u[1]).abs() < 1e-3
+                && got.v == wanted.v,
+            "{ui_scale}: {got:?} {wanted:?}"
+        );
+    }
 
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }

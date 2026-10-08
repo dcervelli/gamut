@@ -7,7 +7,8 @@
 //! toggle pressed in the window leaves it alone. The state,
 //! `$XDG_STATE_HOME/gamut/state`, is the program's: what was left where it
 //! was set by hand — the file list's width where it was dragged, the
-//! loupe's magnification where the wheel left it, the order its menu put
+//! loupe's magnification where the wheel left it, how large the interface
+//! was made, the order its menu put
 //! the list in, how the pointer's readout was last written — written when
 //! the window
 //! closes, and nothing lost when it is deleted.
@@ -33,7 +34,7 @@ use anyhow::{Context, Result};
 use crate::app::keymap::{Chord, Keymap};
 use crate::gestures::{Behavior, Gestures, Slot};
 use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
-use crate::ui::{filmstrip, loupe};
+use crate::ui::{filmstrip, loupe, scale};
 use crate::{PROGRAM, shown_path, xdg};
 
 /// The configuration: which panels the window opens with, and what the keys
@@ -366,6 +367,8 @@ pub struct State {
     pub filmstrip_width: f32,
     /// One of [`loupe::MAGNIFICATIONS`].
     pub loupe_magnification: f32,
+    /// How large the interface is drawn, on top of the monitor's own scale.
+    pub ui_scale: f32,
     /// What the file list was last sorted by, and which way.
     pub order: filmstrip::Order,
     /// Whether a raw opens as the camera's JPEG of it rather than as the
@@ -384,6 +387,7 @@ impl Default for State {
         Self {
             filmstrip_width: filmstrip::SLOT_DEFAULT,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
+            ui_scale: scale::DEFAULT,
             order: filmstrip::Order::default(),
             camera_jpeg: false,
             pixel_format: PixelFormat::default(),
@@ -405,7 +409,7 @@ struct Kept {
 }
 
 /// Every line of the state file, in the order it is written.
-const KEPT: [Kept; 8] = [
+const KEPT: [Kept; 9] = [
     Kept {
         name: "filmstrip_width",
         get: |state| state.filmstrip_width.to_string(),
@@ -425,6 +429,18 @@ const KEPT: [Kept; 8] = [
                 && loupe::MAGNIFICATIONS.contains(&number)
             {
                 state.loupe_magnification = number;
+            }
+        },
+    },
+    Kept {
+        name: "ui_scale",
+        get: |state| state.ui_scale.to_string(),
+        set: |state, value| {
+            if let Ok(number) = value.parse::<f32>()
+                && number.is_finite()
+                && scale::RANGE.contains(&number)
+            {
+                state.ui_scale = number;
             }
         },
     },
@@ -770,7 +786,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 98, "{uncommented}");
+        assert_eq!(keys, 101, "{uncommented}");
         // A Mac's two more: the wheel with Command, and the pinch.
         let slots = if cfg!(target_os = "macos") { 12 } else { 10 };
         assert_eq!(gestures, slots, "{uncommented}");
@@ -916,6 +932,7 @@ mod tests {
         let state = State {
             filmstrip_width: 212.0,
             loupe_magnification: 8.0,
+            ui_scale: 1.5,
             order: filmstrip::Order {
                 sort: filmstrip::Sort::Date,
                 direction: filmstrip::Direction::Descending,
@@ -967,6 +984,7 @@ mod tests {
         let state = State::parse(
             "filmstrip_width = 100000\n\
              loupe_magnification = 3\n\
+             ui_scale = 9\n\
              sort = shoe size\n\
              sort_direction = sideways\n\
              camera_jpeg = maybe\n\

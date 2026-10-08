@@ -95,7 +95,9 @@ pub struct Scene<'a> {
     pub display: &'a Display,
     /// What egui drew this frame.
     pub ui: &'a UiPaint,
-    /// Physical pixels to the logical one.
+    /// The monitor's own scale — the window's physical pixels to its
+    /// logical one — for the checkerboard, which stays the same size
+    /// however large the interface is drawn. Not the interface's point.
     pub scale: f32,
     pub backdrop: Backdrop,
     /// Whether the surface has room above white — see [`Headroom`] — which

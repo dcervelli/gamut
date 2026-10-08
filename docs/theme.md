@@ -131,7 +131,7 @@ Two more resist being themed and are not:
 
   The screening itself is done on the CPU, one column of the plot at a time.
   egui has one blend, so the planes cannot be laid over one another and left
-  to the GPU; instead each column — one to a bin, a logical pixel wide — is
+  to the GPU; instead each column — one to a device pixel — is
   cut into stretches at the heights of the planes standing in it, and each
   stretch is filled with what the planes over it come to, screened in code,
   which on pure primaries over near-black is the same picture a GPU blend

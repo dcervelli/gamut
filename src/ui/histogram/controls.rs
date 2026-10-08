@@ -23,7 +23,6 @@ pub(super) fn controls(
     panel: Rect,
 ) -> Option<String> {
     let panels = pass.panels;
-    let scale = pass.input.scale;
     let gray = current.image.is_gray();
     let bars = plot_area(panel, gray);
 
@@ -127,15 +126,11 @@ pub(super) fn controls(
         let grid = pass.grid;
         let snap = |value: f32| grid.snap(value);
         let (top, bottom) = (snap(face.y), snap(face.bottom()));
-        let steps = (face.width * scale).max(1.0) as usize;
-        for step in 0..steps {
-            let edge = |step: usize| snap(face.x + face.width * step as f32 / steps as f32);
-            let (left, right) = (edge(step), edge(step + 1));
-            let t = (step as f32 + 0.5) / steps as f32;
+        for column in grid.columns(face.x, face.width) {
             ui.painter().rect_filled(
-                egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
+                egui::Rect::from_min_max(pos2(column.left, top), pos2(column.right, bottom)),
                 0.0,
-                Color::from_linear(map.color(t)),
+                Color::from_linear(map.color(column.t_center())),
             );
         }
     }

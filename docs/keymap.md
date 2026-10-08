@@ -151,7 +151,11 @@ the logical key, since a layout that types with AltGr means what it types.
 
 egui zooms its whole interface on Command with `+`, `-` or `0`, which are
 the Mac's zoom chords here, so `Gui::new` turns that off; on Linux it was
-Ctrl's, and nothing wanted it there either.
+Ctrl's. The interface's own scale is the key table's instead
+(`interface.scale.*`): Ctrl with `=`, `-` and `0` on Linux, the desktop's
+chords for an interface's zoom, which the picture's plain `+`, `-` and `0`
+leave free; and Command with Option on a Mac, since Command alone there is
+already the picture's zoom, as it is in Preview.
 
 ## Gestures
 
