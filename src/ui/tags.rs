@@ -557,7 +557,7 @@ fn nothing(pass: &mut Pass, ui: &mut egui::Ui, width: f32) {
         icon::SEARCH_ALERT,
         icon::square(pass.grid, mark, ICON_SIDE),
         ink,
-        theme.panel_background.into(),
+        theme.bar_background.into(),
     );
     let at = pos2(
         x + ICON_SIDE + NOTHING_GAP,
@@ -652,7 +652,7 @@ fn row(
             let ground = if response.hovered() {
                 theme.button_hover
             } else {
-                theme.panel_background
+                theme.bar_background
             };
             icon::paint(
                 &painter,

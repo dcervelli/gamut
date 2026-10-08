@@ -32,8 +32,8 @@ settings are:
 | `show_ui` | `true` | The panels around the picture, which `` ` `` hides and shows |
 | `show_minimap` | `true` | The minimap, while the picture is larger than the window |
 | `show_filmstrip` | `true` | The file list, while there is more than one file |
-| `show_histogram` | `false` | The histogram panel |
-| `show_info` | `false` | The file information panel |
+| `show_histogram` | `false` | The histogram, in the panel down the right; it wins over `show_info` when both are on |
+| `show_info` | `false` | The file information, in the panel down the right |
 | `log_counts` | `false` | The histogram's bars as tall as the logarithm of their counts |
 | `browse_folder` | `true` | A single file opened by itself steps on through the other images in its folder |
 | `exiftool` | `exiftool` | The program the info panel's *Raw Data* tab reads every tag with: a name looked for on your `PATH` and where packages put it, or a path to it |
@@ -191,7 +191,7 @@ them, and `browse_folder` waits for the next start.
 `~/.local/state/gamut/state` (under `$XDG_STATE_HOME` if you set it), or
 `~/Library/Application Support/gamut/state` on a Mac, is where
 `gamut` remembers settings you change by hand: how wide you dragged the file
-list, what the list is sorted by and which way, how far the loupe
+list and the panel down the right, what the list is sorted by and which way, how far the loupe
 magnifies, whether a raw opens as the camera's JPEG, and how the pixel
 under the pointer is read out: its value, and for a map its place and how a
 latitude is written. It is written when the window closes and read when the next window

@@ -1,6 +1,9 @@
 # The information panel
 
-`i` or the info button opens the panel down the right of the window. It
+`i` or the info button opens the panel down the right of the window, beside
+the picture, where the histogram is shown too: the histogram's button puts
+it in the information's place, and the button of whichever is showing
+closes the panel. Drag the panel's left edge to widen it. It
 lists what the file says about itself, section by section, in the order
 below. A field the file does not fill in is left out, and so is a section
 with nothing in it. A click on a field copies its value; a click on a

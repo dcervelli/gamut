@@ -125,7 +125,7 @@ anchored, since row `n` is then another file, and is left to the reveal
 that a reorder or a step brings. A resize does not reveal: on every step
 of a drag it would snap the file on screen to an edge.
 
-The panel is part of the chrome rather than a floating panel: the picture
+The panel is part of the chrome rather than floating over the picture: the picture
 is fitted beside it, so its width has to be known before egui lays
 anything out. `chrome::Parts` says whether it and the transport bar are
 up, and the width its thumbnails are fitted into; `Chrome::new` gives it
@@ -138,8 +138,10 @@ back and forward pair and stays put; the rows scroll under it. Hiding the
 interface takes the head with the bars and leaves the rows, down the whole
 left edge of the window: `chrome::content_area` gives the picture what the
 list leaves to its right, `Pass::file_list` draws the panel on its own, and
-`App::filmstrip_showing` does not ask whether the interface is up. The key
-that also closes the floating panels closes the list with them. The index
+`App::filmstrip_showing` does not ask whether the interface is up. The
+[side panel](interface.md#the-side-panel) on the other side is laid out
+the same way. The key that also closes the other panels closes the list
+with them. The index
 and name are a title band above the slot rather than beside it, which is
 what keeps the strip one thumbnail wide.
 

@@ -85,7 +85,7 @@ pub fn loupe_wheel(wheel: Option<&str>, key: Option<&str>) -> Option<String> {
 }
 
 /// What the maximize button says under its name: the press with Shift, which
-/// closes the floating panels as it hides the interface.
+/// closes the panels that stay without the bars as it hides the interface.
 pub const MAXIMIZE_SHIFTED: &str = "Hide all panels and toggle the UI";
 
 /// What the copy of the picture says while a region is up, which is what it
@@ -229,7 +229,8 @@ pub struct Conditions {
     /// pixel's, and whether one of them is a latitude.
     pub georeferenced: bool,
     pub geographic: bool,
-    /// Whether the content area has room for each floating panel.
+    /// Whether the window has room for each of what the side panel holds,
+    /// and for the help popup.
     pub room: Room,
     /// Whether the surface switch has anything to switch, and why not.
     pub hdr: Hdr,

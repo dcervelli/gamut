@@ -1,5 +1,5 @@
-//! The floating histogram panel: its geometry, the words on it, and the
-//! header and rows it is laid out with. The plot is `plot`, the band and
+//! The histogram, at the head of the side panel: its geometry, the words on
+//! it, and the header and rows it is laid out with. The plot is `plot`, the band and
 //! its handles `track`, the buttons `controls` and the exposure's slider
 //! `slider`, each a file beside this one.
 
@@ -24,13 +24,10 @@ use super::Rect;
 use super::chrome::{BUTTON_SIZE, ICON_SIDE, Pass};
 use super::icon;
 use super::outline;
-use super::panel;
 use super::slider::{HANDLE_GRIP, HANDLE_WIDTH, Hand, handle};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{
-    BECOMES, Command, Control, Current, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, TEXT_SIZE,
-};
+use super::{BECOMES, Command, Control, Current, PANEL_INSET, PANEL_WIDTH, TEXT_SIZE};
 
 /// What the three rows of settings under the band take off the panel's
 /// height: each row and the gap above it, under the plot's own inset —
@@ -44,14 +41,15 @@ use super::{
 /// back as much as where a rule is chosen. The curve, because the exposure
 /// is: a stop up puts the top of any file above white, and the curve is
 /// what fits it back into a surface that stops there. One height for every
-/// file, so the information column under the panel never jumps.
+/// file, so the panel never jumps from one file to the next.
 const ROWS_HEIGHT: f32 = PLOT_INSET + 3.0 * (ROW_GAP + ROW_HEIGHT);
 
-/// The panel: as wide as anything else floating over the content area, and
-/// tall enough for the line the readout is set on, a plot, the band of what
-/// the display makes of its axis, the row of false colors a gray image has
+/// The histogram at its own size: the side panel at its narrowest, and tall
+/// enough for the line the readout is set on, a plot, the band of what the
+/// display makes of its axis, the row of false colors a gray image has
 /// under that, and the three rows of settings. What a window has to have
-/// room for before the toggle is lit — see [`super::PANELS_ROOM`].
+/// room for before the toggle is alive — see [`super::PANELS_ROOM`]. A
+/// wider side panel widens it, by whole steps — see [`panel`].
 pub const SIZE: [f32; 2] = [
     PANEL_WIDTH,
     2.0 * PANEL_INSET
@@ -265,22 +263,31 @@ fn readout_placement(bars: Rect, width: f32, ends: [f32; 2]) -> (f32, bool) {
     (x, fits)
 }
 
-/// The panel's own rectangle inside `content`: the top right corner, inside
-/// the padding everything floating over the image keeps.
+/// The histogram's own rectangle at the head of the side panel `side`, on a
+/// display of `scale` device pixels to the logical one.
 ///
-/// `None` where the content area is too small to take it, as the information
-/// panel's [`info::panel`](super::info::panel) is `None` in a window too
-/// short for it. The panel is one size for a file — the plot's bins are a
-/// logical pixel each and the rows under it are set to what they say, so
-/// there is nothing here to give — and a panel drawn larger than the area
-/// it floats over would cover the picture it is about and run off the
-/// window besides.
+/// [`SIZE`]'s height, and as wide as the plot comes out with the buttons
+/// beside it: the widest plot that gives every bin the same whole number of
+/// device pixels, and never narrower than a logical pixel to each. Stepped
+/// rather than stretched to the panel: a plot whose bins came out of
+/// different widths would be drawing a comb that is not in the picture. So
+/// it grows in jumps as the panel widens, and stands in the middle of the
+/// panel between them.
 ///
-/// Public because the pointer is tested against the whole panel from outside
-/// the frame: what lands on it belongs to it, and must not reach the picture
-/// it is floating over.
-pub fn panel(content: Rect) -> Option<Rect> {
-    panel::fit(content, SIZE, SIZE, panel::Place::TopRight)
+/// Public because the pointer is tested against it from outside the frame
+/// as well: see [`marked`].
+pub fn panel(side: Rect, scale: f32) -> Rect {
+    let bins = BINS as f32;
+    let room = side.width - TOOLBAR_WIDTH - 2.0 * PANEL_INSET;
+    let steps = (room * scale / bins).floor();
+    let plot = (steps * bins / scale).max(bins);
+    let width = TOOLBAR_WIDTH + plot + 2.0 * PANEL_INSET;
+    Rect::new(
+        side.x + ((side.width - width) / 2.0).max(0.0).round(),
+        side.y,
+        width,
+        SIZE[1],
+    )
 }
 
 /// The ground the bins stand on inside that panel, with the label line
@@ -555,8 +562,8 @@ fn hovered_bin(bars: Rect, cursor: Option<[f32; 2]>) -> Option<usize> {
 /// the plot, and otherwise the one that counted the pixel it is over on the
 /// picture. `None` when it is over neither.
 ///
-/// The plot comes first because the panel floats over the picture, so a
-/// pointer on the panel is on the axis and not on the pixel behind it.
+/// The plot comes first: a pointer on the plot is reading the axis, and is
+/// on no pixel of the picture besides.
 ///
 /// One bin either way, and so one rule either way: the panel draws bars, and
 /// a marker on it can only honestly point at one of them. What the bin is
@@ -569,11 +576,10 @@ fn hovered_bin(bars: Rect, cursor: Option<[f32; 2]>) -> Option<usize> {
 /// the frame it was drawn in has gone out of date.
 pub fn marked(
     current: &Current,
-    content: Rect,
+    panel: Rect,
     cursor: Option<[f32; 2]>,
     pointer: Option<[u32; 2]>,
 ) -> Option<usize> {
-    let panel = panel(content)?;
     let plot = plot_area(panel, current.image.is_gray());
     if let Some(bin) = hovered_bin(plot, cursor) {
         return Some(bin);
@@ -647,42 +653,18 @@ fn share_words(share: f32) -> Option<String> {
     })
 }
 
-/// Draws the histogram in the top-right of `content`, the area the panels
-/// leave free — above the information panel, the order the two toggles that
-/// open them are stacked in.
+/// Draws the histogram at the head of the side panel `side`.
 ///
 /// Color images get four planes — red, green, blue and luminance — over the
 /// range their color channels span; gray images keep the single luminance
 /// plane over theirs.
-///
-/// The panel is opaque to the pointer: what lands on it belongs to it rather
-/// than to the picture it is floating over.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
-    let Some(current) = pass.current else {
-        return;
-    };
-    let content = pass.content;
-    let Some(panel) = panel(content) else {
-        return;
-    };
-    let theme = pass.theme;
-    if pass.input.waiting {
-        panel::waiting(ui.ctx(), "histogram", Some("Histogram panel"), panel, theme);
-        return;
-    }
-    panel::area("histogram", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
-        let (_, body) =
-            ui.allocate_exact_size(egui::Rect::from(panel).size(), Sense::CLICK | Sense::DRAG);
-        body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
-        ui.painter().rect_filled(
-            egui::Rect::from(panel),
-            PANEL_RADIUS,
-            theme.panel_background,
-        );
-        plot(pass, ui, current, panel, content);
-        let held = controls(pass, ui, current, panel);
-        header(pass, ui, current, panel, held);
-    });
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, side: Rect) {
+    let panel = panel(side, pass.input.scale);
+    let body = ui.allocate_rect(egui::Rect::from(panel), Sense::CLICK | Sense::DRAG);
+    body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
+    plot(pass, ui, current, panel);
+    let held = controls(pass, ui, current, panel);
+    header(pass, ui, current, panel, held);
 }
 
 /// The line above the plot: what the pointer is reading, in the middle, and

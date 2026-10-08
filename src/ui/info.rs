@@ -1,5 +1,5 @@
-//! The info panel: what the file is, as a column of words down the right of
-//! the content area.
+//! The info panel: what the file is, as a column of words down the side
+//! panel.
 //!
 //! The only part of the interface with more to say than fits, so it is the
 //! only part that scrolls: the column lives in a scroll area, under a header
@@ -43,9 +43,7 @@ use super::pixel;
 use super::style::{SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, TOGGLE_RADIUS};
 use super::tags::Tab;
 use super::tooltip::{Tip, Tooltip};
-use super::{
-    Current, PADDING, PANEL_INSET, PANEL_RADIUS, PANEL_WIDTH, RULE_WIDTH, TEXT_SIZE, rule,
-};
+use super::{Current, PANEL_INSET, PANEL_RADIUS, RULE_WIDTH, TEXT_SIZE, rule};
 
 /// The heading of the regions the metadata marks out on the picture.
 const REGIONS: &str = "Regions";
@@ -58,8 +56,8 @@ const GAIN_MAP: &str = "Gain map";
 const SHOWING: &str = "Showing";
 
 /// Below this the panel would show its header, two facts and a scrollbar, so
-/// it stays off instead. There is no matching minimum for the width: the
-/// panel is [`PANEL_WIDTH`] wide or it is not on screen.
+/// it stays off instead. The least width is the side panel's own — see
+/// [`super::side::WIDTH_MIN`].
 pub(super) const INFO_MIN_HEIGHT: f32 = 160.0;
 
 /// The size a field's name is written at, against [`TEXT_SIZE`] for what it
@@ -245,41 +243,6 @@ impl Contents {
     }
 }
 
-/// Where the panel goes: down the right of `content`, starting under the
-/// histogram when that is showing as well — `above`, which is where it is —
-/// and at the top of the content when it is not, the order the two toggles
-/// are stacked in.
-///
-/// `None` when the window has no room for a column worth reading, which is
-/// also what keeps the panel off screen rather than shrunk to nothing.
-///
-/// It is one width or it is not there: the column is read at the same measure
-/// whatever the window is doing. In a window narrow enough for the panel and
-/// the minimap to want the same strip the panel takes it, being drawn after —
-/// it is on screen because it was asked for, and the minimap is a guide to a
-/// picture the panel is already covering.
-pub fn panel(content: Rect, above: Option<Rect>) -> Option<Rect> {
-    // The histogram takes the top of the column's strip; the panel starts
-    // below it rather than being drawn over it. Only where the histogram is
-    // on screen, which the caller settles from the window as well as the
-    // toggle: a window with no room for the plot is not one the column has
-    // to start below. It arrives as a rectangle rather than as a constant
-    // because it may not be there at all.
-    let taken = above.map_or(0.0, |histogram| histogram.height + PADDING);
-    let below = Rect::new(
-        content.x,
-        content.y + taken,
-        content.width,
-        content.height - taken,
-    );
-    super::panel::fit(
-        below,
-        [PANEL_WIDTH, f32::INFINITY],
-        [PANEL_WIDTH, INFO_MIN_HEIGHT],
-        super::panel::Place::TopRight,
-    )
-}
-
 /// The width of the button for `copies`: its mark, whatever label goes
 /// before it, and what is kept clear around them.
 fn chip_width(ui: &egui::Ui, label: Option<&str>) -> f32 {
@@ -462,21 +425,11 @@ fn tabs(pass: &mut Pass, ui: &mut egui::Ui) {
     }
 }
 
-/// Draws the panel: the header, and under it the column of everything the
-/// file has to say, scrolled by egui and read out by a click.
-pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
-    let Some(current) = pass.current else {
-        return;
-    };
+/// Draws the panel down the whole of the side panel, `panel`: the header,
+/// and under it the column of everything the file has to say, scrolled by
+/// egui and read out by a click.
+pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel: Rect) {
     let content = pass.content;
-    let Some(panel) = panel(content, super::histogram_shown(content, pass.panels)) else {
-        return;
-    };
-    let theme = pass.theme;
-    if pass.input.waiting {
-        super::panel::waiting(ui.ctx(), "info", None, panel, theme);
-        return;
-    }
     let area = egui::Rect::from(panel);
     // What the regions are drawn on while the pointer is on their rows: the
     // layer the picture's own marks are painted on, under every panel, this
@@ -488,43 +441,38 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         } else {
             egui::Rect::NOTHING
         });
-    super::panel::area("info", panel, egui::Order::Middle).show(ui.ctx(), |ui| {
-        egui::Frame::NONE
-            .fill(theme.panel_background.into())
-            .corner_radius(PANEL_RADIUS)
-            .inner_margin(egui::Margin::same(PANEL_INSET as i8))
-            .show(ui, |ui| {
-                let inside = area.size() - Vec2::splat(2.0 * PANEL_INSET);
-                ui.set_min_size(inside);
-                ui.set_max_size(inside);
-                ui.spacing_mut().item_spacing = Vec2::ZERO;
+    let inside = area.shrink(PANEL_INSET);
+    ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
+        let inside = inside.size();
+        ui.set_min_size(inside);
+        ui.set_max_size(inside);
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
 
-                // The header: the two tabs at the left, and at the right
-                // what copies the one on screen.
-                ui.horizontal(|ui| {
-                    tabs(pass, ui);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        match pass.panels.info_tab {
-                            Tab::Facts => copy_all(pass, ui),
-                            Tab::Tags => copy_menu(pass, ui),
-                        }
-                    });
-                });
-                // A hairline between the header and the column, which
-                // says that the column runs on under the header rather
-                // than stopping short of it.
-                ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
-                rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
-                ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
-
-                let input = pass.input;
-                match (pass.panels.info_tab, &input.tags) {
-                    (Tab::Tags, Some(tags)) => {
-                        super::tags::show(pass, ui, tags, inside.x);
-                    }
-                    _ => column(pass, ui, current, &picture),
+        // The header: the two tabs at the left, and at the right
+        // what copies the one on screen.
+        ui.horizontal(|ui| {
+            tabs(pass, ui);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                match pass.panels.info_tab {
+                    Tab::Facts => copy_all(pass, ui),
+                    Tab::Tags => copy_menu(pass, ui),
                 }
             });
+        });
+        // A hairline between the header and the column, which
+        // says that the column runs on under the header rather
+        // than stopping short of it.
+        ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+        rule(pass, ui, inside.x - SCROLLBAR_GUTTER);
+        ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+
+        let input = pass.input;
+        match (pass.panels.info_tab, &input.tags) {
+            (Tab::Tags, Some(tags)) => {
+                super::tags::show(pass, ui, tags, inside.x);
+            }
+            _ => column(pass, ui, current, &picture),
+        }
     });
 }
 
@@ -742,7 +690,7 @@ fn marked_heading(
                 mark,
                 icon::square(grid, rect, COPY_ICON),
                 theme.accent.into(),
-                theme.panel_background.into(),
+                theme.bar_background.into(),
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if section.showing {
@@ -791,7 +739,7 @@ fn showing_width(ui: &egui::Ui) -> f32 {
 fn paint_showing(ui: &egui::Ui, rect: egui::Rect, theme: &Theme, grid: icon::Grid) {
     let galley = showing_galley(ui);
     let ink: egui::Color32 = theme.accent.into();
-    let ground: egui::Color32 = theme.panel_background.into();
+    let ground: egui::Color32 = theme.bar_background.into();
     let painter = ui.painter();
     painter.rect_stroke(
         rect,
@@ -1085,7 +1033,7 @@ fn line(
     reserve: f32,
 ) -> Option<egui::Rect> {
     let grid = pass.grid;
-    let ground = pass.theme.panel_background;
+    let ground = pass.theme.bar_background;
     let left = ui.cursor().min.x;
     let mut marked = None;
     ui.horizontal_wrapped(|ui| {

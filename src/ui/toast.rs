@@ -178,8 +178,8 @@ impl Toasts {
 /// window is where the eye already is, and the foot is the one edge of that
 /// area with nothing floating against it. Not in a bar, because a bar
 /// describes what is on screen and this describes what was just done. Over
-/// the panels that float over the picture, so that a message raised while
-/// the histogram is open is still read: it is about what just happened, and
+/// whatever else floats over the picture, so that a message raised while
+/// the minimap is up is still read: it is about what just happened, and
 /// nothing on screen outranks that for as long as it is up. A menu is drawn
 /// over it still, a menu being the thing that is being looked at while it is
 /// open.

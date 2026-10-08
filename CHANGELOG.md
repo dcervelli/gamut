@@ -14,6 +14,15 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The histogram and the file information no longer float over the picture.
+  They are shown one at a time in a panel down the right, beside the
+  picture rather than over it, which is fitted into what the panel leaves.
+  The two buttons in the right strip choose which it shows, and the button
+  of the one showing closes it. Drag the panel's left edge to widen it; the
+  width is remembered between runs. The panel stays when `` ` `` hides the
+  bars, and `~` closes it. Where `show_histogram` and `show_info` are both
+  on, the histogram is shown; `--info` on its own shows the information
+  whatever the configuration says.
 - The information panel describes a picture's gain map in a *Gain map*
   section of its own after *Image*, which wears the *Showing* pill while the
   map is shown: its size and samples, whose description it is, the HDR

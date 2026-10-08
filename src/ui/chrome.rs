@@ -21,7 +21,7 @@ use super::icon::{self, Mark};
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
 use super::{
-    Current, FrameInput, MENU_OFFSET, PADDING, Panels, Room, filmstrip, menu, pixel, status,
+    Current, FrameInput, MENU_OFFSET, PADDING, Panels, Room, filmstrip, menu, pixel, side, status,
 };
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{CameraJpeg, Rendering};
@@ -108,15 +108,19 @@ const BORDER_WIDTH: f32 = 1.0;
 /// and every pixel beyond that is one the mark does not have.
 pub(super) const ICON_SIDE: f32 = BUTTON_SIZE - 6.0;
 
-/// The window chrome: the four panels, and the fifth a file of frames or
-/// pages brings with it.
+/// The window chrome: the four panels, the fifth a file of frames or pages
+/// brings with it, and the file list and the side panel where they are up.
 ///
 /// Top and bottom span the full width; left and right are nested between
 /// them, so the corners belong to the horizontal bars and the vertical ones
-/// never have to reason about where a bar ends. The transport bar, where
-/// there is one, is a second bar above the bottom one, nested between the
-/// strips as the picture is: the strips run down to the bottom bar either
-/// way, and the transport bar is taken off the foot of what they leave.
+/// never have to reason about where a bar ends. The side panel is nested
+/// between the bars as the strips are, inside the right strip, so that the
+/// buttons choosing what it holds stay where they are as it opens. The
+/// transport bar, where there is one, is a second bar above the bottom one,
+/// nested between the left strip and whatever is right of the picture as
+/// the picture is: the strips and the side panel run down to the bottom bar
+/// either way, and the transport bar is taken off the foot of what they
+/// leave.
 #[derive(Clone, Copy)]
 pub struct Chrome {
     pub top: Rect,
@@ -130,6 +134,9 @@ pub struct Chrome {
     /// panel is given its size by `Pass::file_list` from the same slot.
     #[cfg_attr(not(test), allow(dead_code, reason = "the geometry is whole"))]
     pub filmstrip: Option<Rect>,
+    /// The side panel, between the picture and the right strip, from the top
+    /// bar to the bottom one. `None` while it is not showing.
+    pub side: Option<Rect>,
     /// The bar of playback controls, above the bottom bar and between the
     /// strips, for an animation or a file of pages. `None` for a still.
     pub transport: Option<Rect>,
@@ -137,12 +144,14 @@ pub struct Chrome {
 
 /// The parts of the chrome that come and go, and so what its geometry is
 /// derived from besides the window size: whether the file on screen brings
-/// the transport bar with it, and whether the file list is up and the
-/// width its thumbnails are fitted into, which the panel's width is made from.
+/// the transport bar with it, whether the file list is up and the width its
+/// thumbnails are fitted into, which the panel's width is made from, and
+/// whether the side panel is up and how wide it is asked to be.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Parts {
     pub transport: bool,
     pub filmstrip: Option<f32>,
+    pub side: Option<f32>,
 }
 
 impl Parts {
@@ -151,6 +160,7 @@ impl Parts {
     pub const NONE: Parts = Parts {
         transport: false,
         filmstrip: None,
+        side: None,
     };
 }
 
@@ -174,6 +184,14 @@ impl Chrome {
         });
         // Where the picture starts: past the file list and the left strip.
         let inner = strip + side;
+        // The side panel has its own width unless what the file list and
+        // the strips leave is less, and then it has that.
+        let panel = parts
+            .side
+            .map_or(0.0, |width| width.min((size[0] - inner - side).max(0.0)));
+        // Where the picture ends: short of the side panel and the right
+        // strip.
+        let outer = (size[0] - side - panel).max(inner);
 
         Self {
             top: Rect::new(0.0, 0.0, size[0], bar),
@@ -182,14 +200,10 @@ impl Chrome {
             filmstrip: parts
                 .filmstrip
                 .map(|_| Rect::new(0.0, bar, strip, (size[1] - bar).max(0.0))),
-            transport: parts.transport.then(|| {
-                Rect::new(
-                    inner,
-                    size[1] - 2.0 * bar,
-                    (size[0] - side - inner).max(0.0),
-                    bar,
-                )
-            }),
+            side: parts.side.map(|_| Rect::new(outer, bar, panel, middle)),
+            transport: parts
+                .transport
+                .then(|| Rect::new(inner, size[1] - 2.0 * bar, (outer - inner).max(0.0), bar)),
             bottom: Rect::new(strip, size[1] - bar, (size[0] - strip).max(0.0), bar),
         }
     }
@@ -200,10 +214,11 @@ impl Chrome {
         let floor = self
             .transport
             .map_or(self.bottom.y, |transport| transport.y);
+        let end = self.side.map_or(self.right.x, |side| side.x);
         Rect::new(
             self.left.right(),
             self.top.bottom(),
-            (self.right.x - self.left.right()).max(0.0),
+            (end - self.left.right()).max(0.0),
             (floor - self.top.bottom()).max(0.0),
         )
     }
@@ -213,17 +228,58 @@ impl Chrome {
 /// when the panels are showing, the whole window when they are not.
 /// `parts` says which of the panels that come and go are up.
 ///
-/// With the panels hidden a floating panel still sits in the corner of the
-/// window rather than where the panels that are not there would have put it.
-/// The file list is the one part that stays when the panels go — its rows,
-/// not its head — so with it up the window is what it leaves to the right.
+/// With the panels hidden what floats over the picture still sits in the
+/// corner of the window rather than where the panels that are not there
+/// would have put it.
+/// The file list and the side panel are the parts that stay when the panels
+/// go — the list's rows, not its head — so with either up the window is what
+/// they leave between them.
 pub fn content_area(logical: [f32; 2], show_ui: bool, parts: Parts) -> Rect {
     if show_ui {
         Chrome::new(logical, parts).content()
     } else {
         let strip = bare_strip(logical[0], parts);
-        Rect::new(strip, 0.0, (logical[0] - strip).max(0.0), logical[1])
+        let side = bare_side(logical[0] - strip, parts);
+        Rect::new(strip, 0.0, (logical[0] - strip - side).max(0.0), logical[1])
     }
+}
+
+/// How wide the side panel is with the panels hidden: its own width, or
+/// what the file list leaves of the window, `rest`, where that is less, and
+/// nothing while it is not up. Down the whole right edge of the window.
+fn bare_side(rest: f32, parts: Parts) -> f32 {
+    parts.side.map_or(0.0, |width| width.min(rest.max(0.0)))
+}
+
+/// The room the side panel would have, across and down, with the rest of
+/// `parts` up: between the left strip and the right one while the panels
+/// are showing, and between the file list and the window's edge while they
+/// are not; the bars' height between them, or the window's. Whether `parts`
+/// has the side panel up makes no difference, so the answer is the same
+/// before it opens as after: what a button choosing what it holds is dead
+/// by.
+pub fn side_room(logical: [f32; 2], show_ui: bool, parts: Parts) -> [f32; 2] {
+    let parts = Parts {
+        side: None,
+        ..parts
+    };
+    if show_ui {
+        let chrome = Chrome::new(logical, parts);
+        [
+            (chrome.right.x - chrome.left.right()).max(0.0),
+            chrome.right.height,
+        ]
+    } else {
+        let strip = bare_strip(logical[0], parts);
+        [(logical[0] - strip).max(0.0), logical[1]]
+    }
+}
+
+/// How wide the side panel comes out, where it is up: what it is asked for,
+/// or the room there is where that is less.
+pub fn side_width(logical: [f32; 2], show_ui: bool, parts: Parts) -> Option<f32> {
+    let width = parts.side?;
+    Some(width.min(side_room(logical, show_ui, parts)[0]))
 }
 
 /// How wide the file list is with the panels hidden: its own width, or the
@@ -243,7 +299,7 @@ pub fn bare_strip(width: f32, parts: Parts) -> f32 {
 /// this, which is why toggling the interface re-fits a fitted image on the
 /// very next frame.
 pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, parts: Parts) -> Viewport {
-    if !show_ui && parts.filmstrip.is_none() {
+    if !show_ui && parts.filmstrip.is_none() && parts.side.is_none() {
         return Viewport::whole(size);
     }
     let content = content_area([size[0] / scale, size[1] / scale], show_ui, parts);
@@ -270,11 +326,16 @@ pub(super) struct Pass<'a> {
     /// What the panels leave in the middle, where the picture is and the
     /// things floating over it are placed.
     pub content: Rect,
-    /// Which of the floating panels the content has room for.
+    /// What the window has room for: what the side panel holds, and the
+    /// help popup.
     pub room: Room,
     /// Where the file list was laid out this pass, if it is up: what its
     /// grip is put along the edge of, once the picture is laid out under it.
     pub file_list: Option<Area>,
+    /// The same for the side panel: what its grip is put along the edge of.
+    pub side_panel: Option<Area>,
+    /// The parts of the chrome that are up this pass.
+    pub parts: Parts,
     pub commands: Vec<Command>,
 }
 
@@ -337,8 +398,35 @@ impl Pass<'_> {
         self.file_list = Some(list.response.rect);
     }
 
-    /// The four panels, and everything on them; and the transport bar for a
-    /// file that has one.
+    /// The side panel, where it is up: inside the right strip while the
+    /// panels are up, and down the whole right edge of the window on its
+    /// own while they are hidden, as the file list is down the left. Given
+    /// its width by the application, as the file list is: `side::grip`
+    /// asks for a new one, and the next frame is laid out at it.
+    pub fn side_panel(&mut self, ui: &mut Ui) {
+        let Some(shown) = self.input.side else {
+            return;
+        };
+        let Some(width) = side_width(self.input.logical, self.panels.show_ui, self.parts) else {
+            return;
+        };
+        let frame = egui::Frame::NONE.fill(self.theme.bar_background.into());
+        let panel = egui::Panel::right("side")
+            .exact_size(width)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(frame)
+            .show(ui, |ui| {
+                let area = ui.max_rect();
+                let rect = Rect::new(area.min.x, area.min.y, area.width(), area.height());
+                side::show(self, ui, shown.side, rect);
+            });
+        self.hairline(ui, panel.response.rect, Edge::Left);
+        self.side_panel = Some(panel.response.rect);
+    }
+
+    /// The four panels, and everything on them; the side panel where it is
+    /// up; and the transport bar for a file that has one.
     pub fn bars(&mut self, ui: &mut Ui) {
         let fill: egui::Color32 = self.theme.bar_background.into();
         let frame = egui::Frame::NONE.fill(fill);
@@ -376,8 +464,11 @@ impl Pass<'_> {
             .frame(frame)
             .show(ui, |ui| self.right_strip(ui));
         self.hairline(ui, right.response.rect, Edge::Left);
-        // After the strips, so that it nests between them and above the
-        // bottom bar, as `Chrome` lays it out.
+        // After the right strip, so that egui nests it inside the strip and
+        // between the bars, as `Chrome` lays it out.
+        self.side_panel(ui);
+        // After the strips and the side panel, so that it nests between
+        // them and above the bottom bar, as `Chrome` lays it out.
         if let Some(transport) = self.input.transport.clone() {
             let bar = egui::Panel::bottom("transport")
                 .exact_size(BAR_HEIGHT)
@@ -906,7 +997,8 @@ impl Pass<'_> {
     }
 
     /// The right strip: the histogram toggle above the information toggle,
-    /// the order the two panels they open are stacked in, and the help
+    /// the two choosing what the side panel beside them holds — lit for the
+    /// one it holds, and that one's press taking it down — and the help
     /// button up from the foot, where the minimap toggle is on the other
     /// side. Each of the three is dead where the window has no room for
     /// what it opens. A window too short for both ends drops the help
@@ -1203,6 +1295,7 @@ mod tests {
             Parts {
                 transport: true,
                 filmstrip: None,
+                side: None,
             },
         );
         let transport = chrome.transport.expect("asked for");
@@ -1236,7 +1329,8 @@ mod tests {
                 true,
                 Parts {
                     transport: true,
-                    filmstrip: None
+                    filmstrip: None,
+                    side: None,
                 }
             )
             .height,
@@ -1252,6 +1346,7 @@ mod tests {
         let parts = Parts {
             transport: true,
             filmstrip: Some(filmstrip::SLOT_MIN),
+            side: None,
         };
         let chrome = Chrome::new(WINDOW, parts);
         let strip = chrome.filmstrip.expect("asked for");
@@ -1303,6 +1398,7 @@ mod tests {
         let parts = |slot| Parts {
             transport: false,
             filmstrip: Some(slot),
+            side: None,
         };
         let narrow = Chrome::new(WINDOW, parts(filmstrip::SLOT_MIN));
         let wide = Chrome::new(WINDOW, parts(filmstrip::SLOT_MAX));
@@ -1326,6 +1422,7 @@ mod tests {
                 Parts {
                     transport: true,
                     filmstrip: Some(filmstrip::SLOT_MIN),
+                    side: None,
                 },
             );
             let transport = chrome.transport.expect("asked for");

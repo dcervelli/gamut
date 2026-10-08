@@ -1,18 +1,9 @@
 use super::*;
-use crate::ui::histogram;
 use std::time::Duration;
 
 use crate::image::exif::{Entry, Exif, Section};
 use crate::image::sequence::Sequence;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
-
-/// A window's worth of content area, for the panel to be placed in.
-const CONTENT: Rect = Rect {
-    x: 50.0,
-    y: 30.0,
-    width: 900.0,
-    height: 640.0,
-};
 
 fn current() -> Current {
     let image = DecodedImage::new(
@@ -604,63 +595,6 @@ fn a_value_that_would_break_a_row_is_quoted() {
     );
     assert_eq!(quoted("a \"quoted\" word"), "\"a \"\"quoted\"\" word\"");
     assert_eq!(quoted("two\nlines"), "\"two\nlines\"");
-}
-
-/// The panel keeps out of the way of the two widgets it shares the
-/// content area with, and stays off screen where it cannot.
-#[test]
-fn the_panel_gives_way_to_the_histogram_and_to_a_small_window() {
-    let tallest = histogram::SIZE;
-    let histogram = histogram::panel(CONTENT);
-    let with = panel(CONTENT, histogram).expect("room");
-    let without = panel(CONTENT, None).expect("room");
-    // The same width as the histogram, and the same width whether or not
-    // the column it holds is long enough to need a scrollbar.
-    assert_eq!(with.width, tallest[0]);
-    assert_eq!(with.width, without.width);
-    assert_eq!(with.right(), without.right());
-    // The histogram has the top of the strip; the column starts below it
-    // and the two end together.
-    assert_eq!(with.y, without.y + tallest[1] + PADDING);
-    assert_eq!(with.bottom(), without.bottom());
-    // Top right of the content area, when the histogram is not there.
-    assert_eq!(without.right(), CONTENT.right() - PADDING);
-    assert_eq!(without.y, CONTENT.y + PADDING);
-
-    // It shows wherever it fits with its margins — a window that holds
-    // the panel and not much else still holds the panel — and nowhere
-    // narrower or shorter than that.
-    let snug = Rect::new(0.0, 0.0, PANEL_WIDTH + 2.0 * PADDING, 640.0);
-    assert!(panel(snug, None).is_some(), "{snug:?}");
-    assert_eq!(
-        panel(
-            Rect::new(0.0, 0.0, PANEL_WIDTH + 2.0 * PADDING - 1.0, 640.0),
-            None
-        ),
-        None
-    );
-    assert_eq!(panel(Rect::new(0.0, 0.0, 900.0, 140.0), None), None);
-
-    // Room for the column, but not once the histogram has had the top of
-    // the strip: the tallest panel, the gap under it, and a pixel short
-    // of a column below that.
-    let squeezed = Rect::new(
-        0.0,
-        0.0,
-        900.0,
-        tallest[1] + 3.0 * PADDING + INFO_MIN_HEIGHT - 1.0,
-    );
-    let plot = histogram::panel(squeezed);
-    assert!(plot.is_some(), "the plot fits");
-    assert!(panel(squeezed, None).is_some());
-    assert_eq!(panel(squeezed, plot), None);
-
-    // And a window too short for the plot takes nothing off the column
-    // for it. The toggle is on, but there is no plot on screen for the
-    // column to start below — and its own toggle is dead as well.
-    let short = Rect::new(0.0, 0.0, 900.0, 200.0);
-    assert!(histogram::panel(short).is_none(), "the plot does not fit");
-    assert!(panel(short, None).is_some());
 }
 
 #[test]

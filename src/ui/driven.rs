@@ -102,8 +102,7 @@ fn panels() -> Panels {
     Panels {
         show_ui: true,
         show_filmstrip: false,
-        show_histogram: false,
-        show_info: false,
+        side: None,
         show_luma: true,
         show_planes: true,
         log_counts: false,
@@ -153,6 +152,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         zoom_box: None,
         transport: None,
         filmstrip: None,
+        side: None,
         chooser: None,
         tags: None,
         rename: None,
@@ -199,9 +199,23 @@ fn open(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, Sta
 }
 
 fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, State> {
+    let mut input = input(logical, count);
+    // The side panel up where it is asked for and the window has room for
+    // it, as `App::side_showing` decides, at the width it opens at.
+    let parts = super::chrome::Parts::NONE;
+    input.side = panels
+        .side
+        .filter(|side| super::room(logical, panels.show_ui, parts).holds(*side))
+        .map(|side| super::side::Shown {
+            side,
+            width: super::side::WIDTH_DEFAULT,
+        });
+    if let Some(shown) = input.side {
+        input.viewport.width -= shown.width;
+    }
     let state = State {
         ready: false,
-        input: input(logical, count),
+        input,
         panels,
         current: Some(photograph()),
         view: View::new(),
@@ -573,7 +587,7 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
     use crate::image::Transfer;
 
     let mut with_histogram = panels();
-    with_histogram.show_histogram = true;
+    with_histogram.side = Some(super::side::Side::Histogram);
     let mut harness = open(WINDOW, 1, with_histogram);
     assert!(
         harness.query_by_label("Window 0").is_some(),
@@ -687,19 +701,25 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
 /// The curves are dead under a false color, which clips at the top of its
 /// ramp whatever curve is chosen, and refuse the press; the ramps beside
 /// them stay live, and the gray one brings the curves back.
-/// While another file is on its way in, the panels about the picture keep
-/// their place and their size and say nothing of the picture leaving: none
-/// of the histogram's rows, and nothing on the information panel to copy.
-/// The place is the one worked out for the panel, from the first pass: what
-/// takes the pointer is where the panel is drawn.
+/// The side panel is laid out where the chrome's geometry says, between
+/// the picture and the right strip, and the histogram at its head; while
+/// another file is on its way in it keeps that place and says nothing of
+/// the picture leaving: none of the histogram's rows, and nothing on the
+/// information to copy.
 #[test]
-fn the_panels_wait_for_the_file_coming_in() {
-    let mut both = panels();
-    both.show_histogram = true;
-    both.show_info = true;
-    let mut harness = open(WINDOW, 2, both);
-    let content = super::chrome::content_area(WINDOW, true, super::chrome::Parts::NONE);
-    let placed = super::histogram::panel(content).expect("the window has room for it");
+fn the_side_panel_waits_for_the_file_coming_in() {
+    use super::side::{Side, WIDTH_DEFAULT};
+
+    let mut with_histogram = panels();
+    with_histogram.side = Some(Side::Histogram);
+    let mut harness = open(WINDOW, 2, with_histogram);
+    // Up against the right strip, under the top bar: where the strip's
+    // first button is, less the room the strip keeps around it.
+    let toggle = harness.get_by_label("Histogram").rect();
+    let strip = toggle.center().x - SIDE_WIDTH / 2.0;
+    let top = toggle.top() - super::chrome::BAR_PADDING;
+    let side = super::Rect::new(strip - WIDTH_DEFAULT, top, WIDTH_DEFAULT, 400.0);
+    let placed = super::histogram::panel(side, 1.0);
     let full = harness.get_by_label("Histogram panel").rect();
     assert_eq!(
         full,
@@ -709,16 +729,58 @@ fn the_panels_wait_for_the_file_coming_in() {
         )
     );
     assert!(harness.query_by_label("Window 0").is_some());
-    assert!(harness.query_by_label("Copy All").is_some());
+    assert!(
+        harness.query_by_label("Copy All").is_none(),
+        "one at a time"
+    );
 
     harness.state_mut().input.waiting = true;
     // A few passes rather than a run: the spinner asks for a pass on every
     // pass, and would never let a run settle.
     harness.run_steps(3);
-    assert_eq!(harness.get_by_label("Histogram panel").rect(), full);
+    assert!(harness.query_by_label("Histogram panel").is_some());
     assert!(harness.query_by_label("Window 0").is_none());
     assert!(harness.query_by_label("Curve 0").is_none());
+
+    let mut with_info = panels();
+    with_info.side = Some(Side::Info);
+    let mut harness = open(WINDOW, 2, with_info);
+    assert!(harness.query_by_label("Copy All").is_some());
+    assert!(
+        harness.query_by_label("Window 0").is_none(),
+        "one at a time"
+    );
+    harness.state_mut().input.waiting = true;
+    harness.run_steps(3);
     assert!(harness.query_by_label("Copy All").is_none());
+}
+
+/// A drag of the side panel's edge asks for the width that puts the edge
+/// under the hand, held between the least and the most the panel is.
+#[test]
+fn the_side_panels_edge_is_dragged_to_a_width() {
+    use super::side::{Side, WIDTH_DEFAULT, WIDTH_MAX, WIDTH_MIN};
+
+    let mut with_info = panels();
+    with_info.side = Some(Side::Info);
+    let toggle = open(WINDOW, 1, with_info).get_by_label("Histogram").rect();
+    let edge = toggle.center().x - SIDE_WIDTH / 2.0 - WIDTH_DEFAULT;
+    let y = WINDOW[1] / 2.0;
+    let asked = |to: f32| {
+        let mut harness = open(WINDOW, 1, with_info);
+        drag(&mut harness, [edge, y], [to, y])
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::SideWidth(width) => Some(width),
+                _ => None,
+            })
+            .next_back()
+    };
+    assert_eq!(asked(edge - 60.0), Some(WIDTH_DEFAULT + 60.0));
+    assert_eq!(asked(0.0), Some(WIDTH_MAX));
+    // It opens at its narrowest, so a drag narrower asks for nothing new.
+    assert_eq!(WIDTH_DEFAULT, WIDTH_MIN);
+    assert_eq!(asked(WINDOW[0]), None);
 }
 
 #[test]
@@ -743,7 +805,7 @@ fn the_curves_are_dead_under_a_false_color() {
     current.stats = stats;
 
     let mut with_histogram = panels();
-    with_histogram.show_histogram = true;
+    with_histogram.side = Some(super::side::Side::Histogram);
     let mut harness = open(WINDOW, 1, with_histogram);
     harness.state_mut().current = Some(current);
     harness.run();
@@ -2350,7 +2412,13 @@ fn a_click_on_the_count_leaves_the_chooser_for_the_press_to_close() {
 /// in the table and stacked alike, rather than leaving it blank.
 #[test]
 fn the_help_popup_says_a_line_is_unbound() {
-    for window in [WINDOW, [PANELS_ROOM[0] + 2.0 * SIDE_WIDTH + 20.0, 700.0]] {
+    for window in [
+        WINDOW,
+        [
+            super::PANEL_WIDTH + 2.0 * super::PADDING + 2.0 * SIDE_WIDTH + 20.0,
+            700.0,
+        ],
+    ] {
         let mut harness = open(window, 1, panels());
         harness.state_mut().help = vec![help::Section {
             title: "Files",
@@ -2377,7 +2445,10 @@ fn the_help_popup_says_a_line_is_unbound() {
 #[test]
 fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
     let mut harness = open(
-        [PANELS_ROOM[0] + 2.0 * SIDE_WIDTH + 20.0, 700.0],
+        [
+            super::PANEL_WIDTH + 2.0 * super::PADDING + 2.0 * SIDE_WIDTH + 20.0,
+            700.0,
+        ],
         1,
         panels(),
     );
@@ -2474,7 +2545,7 @@ fn the_tags_tab_filters_copies_and_folds() {
     use super::tags;
 
     let mut shown = panels();
-    shown.show_info = true;
+    shown.side = Some(super::side::Side::Info);
     shown.info_tab = tags::Tab::Tags;
     let mut harness = build(WINDOW, 1, shown);
     let row = |kind, depth, name: &str, value: &str| tags::Row {
@@ -2560,7 +2631,7 @@ fn the_raw_data_tab_without_exiftool_offers_a_way_out() {
     use super::tags;
 
     let mut shown = panels();
-    shown.show_info = true;
+    shown.side = Some(super::side::Side::Info);
     shown.info_tab = tags::Tab::Tags;
     let mut harness = build(WINDOW, 1, shown);
     harness.state_mut().input.tags = Some(tags::Input {

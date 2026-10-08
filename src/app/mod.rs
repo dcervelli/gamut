@@ -54,10 +54,10 @@ use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, News, Thumb, Thumbnailer};
 use crate::timing;
 use crate::trash::Trash;
-use crate::ui::chrome::{Parts, content_area, image_viewport};
+use crate::ui::chrome::{Parts, image_viewport};
 use crate::ui::toast::{self, Level, Toasts};
 use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Rect, Toast};
+use crate::ui::{self, Current, FileFacts, FrameInput, Panels, Toast};
 use crate::view::{View, Viewport};
 use crate::watch::{self, Watch};
 use filmstrip::Filmstrip;
@@ -493,9 +493,13 @@ pub struct App {
     /// the strip was last drawn from. Whether the strip is up is
     /// [`Panels::show_filmstrip`].
     filmstrip: Filmstrip,
+    /// How wide the side panel is asked to be, held between
+    /// [`ui::side::WIDTH_MIN`] and [`ui::side::WIDTH_MAX`]. What it holds,
+    /// if it is up, is [`Panels::side`].
+    side_width: f32,
     /// Where what is kept from one run to the next is written back to when
-    /// the window closes: the file list's width and the loupe's
-    /// magnification.
+    /// the window closes: the file list's and the side panel's widths and
+    /// the loupe's magnification.
     state: StateFile,
     /// The files that have been on screen, for going back and forward
     /// through them.
@@ -732,6 +736,9 @@ impl App {
             chooser: Chooser::default(),
             thumbs: Thumbs::default(),
             filmstrip: Filmstrip::default(),
+            side_width: kept_state
+                .side_width
+                .clamp(ui::side::WIDTH_MIN, ui::side::WIDTH_MAX),
             state,
             visited: Visited::default(),
             read_rates: HashMap::new(),
@@ -749,12 +756,19 @@ impl App {
             panels: Panels {
                 show_ui: config.show_ui,
                 show_filmstrip: config.show_filmstrip,
-                show_histogram: config.show_histogram,
+                // The histogram where both are asked for: it is the first
+                // of the two buttons.
+                side: if config.show_histogram {
+                    Some(ui::side::Side::Histogram)
+                } else if config.show_info {
+                    Some(ui::side::Side::Info)
+                } else {
+                    None
+                },
                 show_luma: true,
                 show_planes: true,
                 log_counts: config.log_counts,
                 mark_clipped: false,
-                show_info: config.show_info,
                 show_minimap: config.show_minimap,
                 show_grid: false,
                 show_loupe: false,
@@ -1012,7 +1026,8 @@ impl App {
     /// that tab, with room for it — the reading the frame draws it by, so
     /// that what is drawn and what is run cannot disagree.
     pub(super) fn tags_showing(&self) -> bool {
-        self.panels.show_info && self.panels.info_tab == ui::tags::Tab::Tags && self.room().info
+        self.side_showing() == Some(ui::side::Side::Info)
+            && self.panels.info_tab == ui::tags::Tab::Tags
     }
 
     /// Puts the information panel up on `tab`, or takes it down where it is
@@ -1022,10 +1037,10 @@ impl App {
         if self.refuses(ui::Control::Info) {
             return Effect::Nothing;
         }
-        if self.panels.show_info && self.panels.info_tab == tab {
-            self.panels.show_info = false;
+        if self.panels.side == Some(ui::side::Side::Info) && self.panels.info_tab == tab {
+            self.panels.side = None;
         } else {
-            self.panels.show_info = true;
+            self.panels.side = Some(ui::side::Side::Info);
             self.panels.info_tab = tab;
             if self.tags_showing() {
                 self.request_tags();
@@ -1097,6 +1112,24 @@ impl App {
     /// without its head.
     pub(super) fn filmstrip_showing(&self) -> bool {
         self.panels.show_filmstrip && self.files.len() > 1
+    }
+
+    /// What the side panel holds while it is on screen: what was asked for,
+    /// where the window has room for it, and while there is something open
+    /// for it to be about — the empty window has its buttons in the middle,
+    /// and nothing for a histogram or a column of facts to say. Hiding the
+    /// interface leaves it up, as it leaves the file list.
+    pub(super) fn side_showing(&self) -> Option<ui::side::Side> {
+        let side = self.panels.side?;
+        if self.is_empty() {
+            return None;
+        }
+        let room = ui::room(
+            self.logical_size(),
+            self.panels.show_ui,
+            self.parts_but_side(),
+        );
+        room.holds(side).then_some(side)
     }
 
     /// What is known about `path` that the list is ordered by: what its
@@ -1606,28 +1639,30 @@ impl App {
         [physical[0] / scale, physical[1] / scale]
     }
 
-    /// Whether the content area has room for each of the two panels that
-    /// float over it. The frame builder works this out for itself; it is
-    /// worked out here as well for the presses and the tooltips, which have
-    /// to answer between frames.
+    /// Whether the window has room for each of what the side panel holds,
+    /// and for the help popup. The frame builder works this out for itself;
+    /// it is worked out here as well for the presses and the tooltips,
+    /// which have to answer between frames.
     pub(super) fn room(&self) -> ui::Room {
-        ui::room(self.content(), &self.panels)
-    }
-
-    /// What the panels leave free for the image and for whatever floats over
-    /// it, in the logical pixels those are laid out in. The frame builder
-    /// works this out for itself; it is worked out here as well for the hit
-    /// tests, which have to answer between frames.
-    fn content(&self) -> Rect {
-        content_area(self.logical_size(), self.panels.show_ui, self.parts())
+        ui::room(self.logical_size(), self.panels.show_ui, self.parts())
     }
 
     /// Which of the panels that come and go are up: what the chrome's
     /// geometry is derived from besides the window size.
     fn parts(&self) -> Parts {
         Parts {
+            side: self.side_showing().map(|_| self.side_width),
+            ..self.parts_but_side()
+        }
+    }
+
+    /// The same with the side panel left out, which is all whether there is
+    /// room for it is decided by — see [`ui::chrome::side_room`].
+    fn parts_but_side(&self) -> Parts {
+        Parts {
             transport: self.has_transport(),
             filmstrip: self.filmstrip_showing().then(|| self.filmstrip.slot()),
+            side: None,
         }
     }
 
@@ -2001,6 +2036,10 @@ impl App {
             zoom_box: self.marking.zoom_box(),
             transport: self.transport(),
             filmstrip,
+            side: self.side_showing().map(|side| ui::side::Shown {
+                side,
+                width: self.side_width,
+            }),
             chooser,
             tags,
             rename,
@@ -3580,6 +3619,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.copying.join_all();
         self.state.save(State {
             filmstrip_width: self.filmstrip.slot(),
+            side_width: self.side_width,
             loupe_magnification: self.panels.loupe_magnification,
             order: self.filmstrip.order(),
             camera_jpeg: self.rendering == Rendering::CameraJpeg,

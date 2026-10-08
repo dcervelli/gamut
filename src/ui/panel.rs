@@ -1,16 +1,13 @@
 //! Where a thing floating over the picture goes, and the area it is drawn
-//! in: the one placement every panel is fitted by, and the one opening
-//! every panel makes.
+//! in: the one placement every panel is fitted by, the one opening every
+//! panel makes, and the spinner a panel waits for a file behind.
 
-use super::style::PANEL_RADIUS;
 use super::{PADDING, Rect};
 use crate::theme::Theme;
 
 /// Where on the content a panel stands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Place {
-    /// The top-right corner, inside the padding.
-    TopRight,
     /// Across the top, centered.
     TopCenter,
     /// The middle of the content.
@@ -36,11 +33,10 @@ pub fn fit(content: Rect, most: [f32; 2], least: [f32; 2], place: Place) -> Opti
         return None;
     }
     let x = match place {
-        Place::TopRight => content.right() - PADDING - size[0],
         Place::TopCenter | Place::Center => content.x + (content.width - size[0]) / 2.0,
     };
     let y = match place {
-        Place::TopRight | Place::TopCenter => content.y + PADDING,
+        Place::TopCenter => content.y + PADDING,
         Place::Center => content.y + (content.height - size[1]) / 2.0,
     };
     Some(Rect::new(
@@ -70,39 +66,26 @@ pub fn area(name: &'static str, panel: Rect, order: egui::Order) -> egui::Area {
 /// How far across the spinner a waiting panel shows is.
 const SPINNER_SIDE: f32 = 16.0;
 
-/// A panel about a file still on its way in: its background where the panel
-/// stands and at the size it has, so that nothing moves when the file
-/// arrives, and a spinner in the middle of it in place of what it will say.
-/// Nothing on it can be pressed — whatever it held acted on the picture
-/// being stepped away from — but it still takes the pointer from the
-/// picture under it, as the panel will. `name` is what the panel is called
-/// to a screen reader when it is full, where it is called anything.
-pub fn waiting(
-    ctx: &egui::Context,
-    id: &'static str,
-    name: Option<&'static str>,
-    panel: Rect,
-    theme: &Theme,
-) {
-    let rect = egui::Rect::from_min_size(
-        egui::pos2(panel.x, panel.y),
-        egui::vec2(panel.width, panel.height),
+/// A panel about a file still on its way in: a spinner in the middle of it
+/// in place of what it will say, on the ground already there, at the size
+/// the panel has so that nothing moves when the file arrives. Nothing on it
+/// can be pressed — whatever it held acted on the picture being stepped
+/// away from — but it still takes the pointer whole, as the panel will.
+/// `name` is what the panel is called to a screen reader when it is full,
+/// where it is called anything.
+pub fn spinner(ui: &mut egui::Ui, panel: Rect, name: Option<&'static str>, theme: &Theme) {
+    let rect = egui::Rect::from(panel);
+    let body = ui.allocate_rect(rect, egui::Sense::CLICK | egui::Sense::DRAG);
+    if let Some(name) = name {
+        body.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, name));
+    }
+    let spinner = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(SPINNER_SIDE));
+    ui.put(
+        spinner,
+        egui::Spinner::new()
+            .size(SPINNER_SIDE)
+            .color(theme.text_dim),
     );
-    area(id, panel, egui::Order::Middle).show(ctx, |ui| {
-        let (_, body) = ui.allocate_exact_size(rect.size(), egui::Sense::CLICK | egui::Sense::DRAG);
-        if let Some(name) = name {
-            body.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, name));
-        }
-        ui.painter()
-            .rect_filled(rect, PANEL_RADIUS, theme.panel_background);
-        let spinner = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(SPINNER_SIDE));
-        ui.put(
-            spinner,
-            egui::Spinner::new()
-                .size(SPINNER_SIDE)
-                .color(theme.text_dim),
-        );
-    });
 }
 
 #[cfg(test)]
@@ -122,20 +105,18 @@ mod tests {
     #[test]
     fn a_fixed_panel_is_placed_whole_or_not_at_all() {
         let size = [300.0, 200.0];
-        let corner = fit(CONTENT, size, size, Place::TopRight).unwrap();
-        assert_eq!(
-            (corner.x, corner.y, corner.width, corner.height),
-            (900.0 - PADDING - 300.0, 50.0 + PADDING, 300.0, 200.0)
-        );
         let middle = fit(CONTENT, size, size, Place::Center).unwrap();
         assert_eq!((middle.x, middle.y), (350.0, 250.0));
         let top = fit(CONTENT, size, size, Place::TopCenter).unwrap();
-        assert_eq!((top.x, top.y), (350.0, 50.0 + PADDING));
+        assert_eq!(
+            (top.x, top.y, top.width, top.height),
+            (350.0, 50.0 + PADDING, 300.0, 200.0)
+        );
 
         let narrow = Rect::new(0.0, 0.0, 300.0 + 2.0 * PADDING - 1.0, 600.0);
-        assert_eq!(fit(narrow, size, size, Place::TopRight), None);
+        assert_eq!(fit(narrow, size, size, Place::TopCenter), None);
         let just = Rect::new(0.0, 0.0, 300.0 + 2.0 * PADDING, 600.0);
-        assert!(fit(just, size, size, Place::TopRight).is_some());
+        assert!(fit(just, size, size, Place::TopCenter).is_some());
     }
 
     /// A panel that can give takes the room there is, down to the least it

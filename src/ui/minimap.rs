@@ -60,10 +60,7 @@ pub fn placement(
 /// bottom-left of `content` and never enlarged past life size, since a map of
 /// a thirty-pixel image blown up to fill the box would be a map of nothing.
 ///
-/// The corner its own toggle sits in, at the foot of the left panel, and the
-/// corner the two panels that describe the file leave alone — they come down
-/// the right — so the map and the picture's own facts are never fitted into
-/// the same strip.
+/// The corner its own toggle sits in, at the foot of the left panel.
 ///
 /// `None` when there is no room for one worth reading, which is what keeps it
 /// off screen in a window dragged down small.

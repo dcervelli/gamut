@@ -37,33 +37,26 @@ use palette::{BLACK, WHITE, mix};
 ///
 /// One value per role rather than per widget: the histogram's axis label and
 /// the minimap's outline are not separately themeable, they are "text on a
-/// floating panel" and "a hairline over the image", and there are few enough
+/// panel" and "a hairline over the image", and there are few enough
 /// roles that a theme can be reasoned about whole.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Theme {
     /// Whether the palette reads light-on-dark or dark-on-light: what the
     /// derivation reads to know which way is away from the page.
     pub mode: Mode,
-    /// The four panels, and the window behind the image.
+    /// The four panels, the file list and the side panel, and the window
+    /// behind the image.
     pub bar_background: Color,
     /// The hairline along a panel's inner edge, and the other square of the
     /// checkerboard behind a transparent image.
     pub border: Color,
-    /// The panel a popup's cells sit on. The bars' color rather than the
-    /// floating panel's, and for the same reason the cells are drawn like the
-    /// toggles in the side panels: what is on a menu are buttons, and the ink
+    /// The panel a popup's cells sit on. The bars' color, and for the same
+    /// reason the cells are drawn like the toggles in the side strips: what is on a menu are buttons, and the ink
     /// buttons are drawn in is made to read against the bars. Near enough to
     /// opaque to be read through — a menu is what is being looked at while it
     /// is open — but not quite, so that it still reads as lying over the
     /// image rather than as another piece of the chrome.
     pub menu_background: Color,
-    /// The panels that float over the image: the histogram and the file's
-    /// information. The bars' own color, so that words over the picture are
-    /// read on the same ground as the words in the bars — in `text_primary`
-    /// and `text_dim`, which are made to sit on it. Mildly transparent, so
-    /// that it reads as lying over the picture rather than as another piece
-    /// of the chrome.
-    pub panel_background: Color,
     pub button_idle: Color,
     pub button_hover: Color,
     /// The band a table's headings sit on, across the top of it — the help
@@ -145,15 +138,8 @@ const HUE_SPREAD: u8 = 40;
 /// own dark end is never overridden; what the cap catches is the light theme,
 /// whose deepest color is nothing of the kind.
 const DEEP_VALUE_CEIL: f32 = 0.14;
-/// How opaque a floating panel is. Enough of the image comes through to place
-/// the panel over it; not enough to compete with what is written on it — and
-/// the information panel is a long column of small words, which is the most
-/// that is ever asked of this ground.
-const PANEL_ALPHA: u8 = 245;
-
-/// How opaque a popup's panel is. Higher than the panels that float over the
-/// image permanently: the picture coming through a menu competes with the
-/// choices on it.
+/// How opaque a popup's panel is: nearly, the picture coming through a menu
+/// competing with the choices on it.
 const MENU_ALPHA: u8 = 251;
 
 impl Theme {
@@ -164,7 +150,6 @@ impl Theme {
         bar_background: Color::rgb(18, 18, 22),
         border: Color::rgb(38, 38, 46),
         menu_background: Color::rgba(18, 18, 22, MENU_ALPHA),
-        panel_background: Color::rgba(18, 18, 22, PANEL_ALPHA),
         button_idle: Color::rgba(255, 255, 255, 20),
         button_hover: Color::rgba(255, 255, 255, 45),
         heading: Color::rgba(255, 255, 255, 48),
@@ -281,7 +266,6 @@ impl Theme {
             bar_background: background,
             border,
             menu_background: background.with_alpha(MENU_ALPHA),
-            panel_background: background.with_alpha(PANEL_ALPHA),
             button_idle: foreground.with_alpha(Theme::FALLBACK.button_idle.a),
             button_hover: foreground.with_alpha(Theme::FALLBACK.button_hover.a),
             heading: foreground.with_alpha(Theme::FALLBACK.heading.a),
@@ -401,7 +385,6 @@ impl Theme {
             bar_background: window,
             border,
             menu_background: window.with_alpha(MENU_ALPHA),
-            panel_background: window.with_alpha(PANEL_ALPHA),
             button_idle: ink.with_alpha(Theme::FALLBACK.button_idle.a),
             button_hover: ink.with_alpha(Theme::FALLBACK.button_hover.a),
             heading: ink.with_alpha(Theme::FALLBACK.heading.a),
@@ -488,9 +471,8 @@ mod tests {
     }
 
     /// A menu is a handful of buttons, and buttons are drawn in ink made to
-    /// read against the bars — so a menu's panel is the bars' surface, and so
-    /// is a floating panel's. The menu is only the more opaque of the two:
-    /// the picture coming through it competes with the choices on it.
+    /// read against the bars — so a menu's panel is the bars' surface, read
+    /// through only just.
     #[test]
     fn every_panel_over_the_image_sits_on_the_bars_own_surface() {
         for source in [TOKYO, SPARSE] {
@@ -499,16 +481,11 @@ mod tests {
                 theme.menu_background,
                 theme.bar_background.with_alpha(MENU_ALPHA)
             );
-            assert_eq!(
-                theme.panel_background,
-                theme.bar_background.with_alpha(PANEL_ALPHA)
-            );
-            // Read through, but only just.
-            assert!(theme.menu_background.a > theme.panel_background.a);
+            assert!(theme.menu_background.a < 255);
         }
 
-        // Including on a light theme, where they are light: nothing is
-        // screened onto either, so neither has a reason to be dark.
+        // Including on a light theme, where it is light: nothing is screened
+        // onto it, so it has no reason to be dark.
         let light = Theme::from_palette(&palette(SPARSE));
         assert_eq!(light.mode, Mode::Light);
     }

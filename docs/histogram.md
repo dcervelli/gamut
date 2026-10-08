@@ -24,10 +24,10 @@ menu. The panel is an instrument, not `Display`'s fields laid out as rows.
 
 Three rows of settings under the band — *Exposure*, *Window*, *Curve* —
 and every file gets all three, so the panel is one height
-(`histogram::SIZE`) for every file and for the whole of a file's stay. The
-information column starts under the panel, and a column that jumped from one
-file to the next, or every time a handle was dragged past white, would be a
-column no one could read.
+(`histogram::SIZE`) for every file and for the whole of a file's stay. A
+panel whose controls jumped from one file to the next, or every time a
+handle was dragged past white, would be a panel no one could keep a hand
+on.
 
 Three kinds of file use this program — `AutoWindow::default_for` splits on
 `Referred`, and the colormaps, the float TIFF and the GeoTIFF keys say who
@@ -64,9 +64,11 @@ rather than a thing to see. There is one curve to roll off with —
 [color.md](color.md) says why only one.
 
 `histogram::SIZE` is what `ui::PANELS_ROOM` — the least window the
-interface fits in — is measured against, and what `ui::room` and
-`info::panel` work from, so that the toggles and the column agree with the
-panel about how tall it is.
+interface fits in — is measured against, and what `ui::room` works from, so
+that the toggle agrees with the panel about how tall it is. Its width is the
+[side panel's](interface.md#the-side-panel) least; a wider side panel
+widens the plot only in whole device pixels to the bin, as that section
+says.
 
 The three windows are named for what they do — *As stored*, *Full range*,
 *Trimmed* — rather than for the rule that does it, which the tooltip says,
@@ -304,8 +306,9 @@ is looked at for; the full primaries, at a pixel to the bin, come out as a
 hedge of pure red, green and blue spikes that the eye cannot leave alone.
 The ground is the same in every theme and so are the inks, so the reading is
 the same everywhere — see [theme](theme.md) for the two things that resist
-being themed. A bin is a logical pixel, which fixes the panel's width and is
-why nothing here smooths the plot.
+being themed. A bin is at least a logical pixel, and always a whole number
+of device pixels, which fixes the panel's least width and is why nothing
+here smooths the plot.
 
 ## What goes dead
 

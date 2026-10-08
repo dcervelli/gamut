@@ -69,7 +69,7 @@ fn open(paths: Vec<PathBuf>, named: Vec<PathBuf>) -> App {
 #[test]
 fn a_configuration_read_again_rebinds_the_keys() {
     let mut app = opened_on_nothing();
-    app.panels.show_histogram = true;
+    app.panels.side = Some(ui::side::Side::Histogram);
     let mut config = options().config;
     config
         .keys
@@ -82,7 +82,7 @@ fn a_configuration_read_again_rebinds_the_keys() {
     assert_eq!(app.keys.spelled("interface.help"), "F1");
     assert_eq!(app.open_map_link, "https://example.com/?{lat},{lng}");
     assert_eq!(app.exiftool.configured(), "/opt/exiftool/exiftool");
-    assert!(app.panels.show_histogram);
+    assert_eq!(app.panels.side, Some(ui::side::Side::Histogram));
     let toast = app.toasts.showing().expect("the reload is said");
     assert_eq!(toast.message, RECONFIGURED);
 
@@ -105,7 +105,7 @@ fn the_tags_tab_reads_each_file_once_while_it_is_up() {
     // goes nowhere, so each stays waited for.
     app.exiftool = exiftool::Program::at(Path::new("/nonexistent/exiftool"));
     let _ = app.press(ui::Control::Info);
-    assert!(app.panels.show_info);
+    assert_eq!(app.panels.side, Some(ui::side::Side::Info));
     assert_eq!(app.tags.asked(), 0, "the panel opens on the facts");
 
     let _ = app.press(ui::Control::InfoTab(ui::tags::Tab::Tags));
@@ -1056,7 +1056,7 @@ fn escape_brings_the_interface_back_before_it_quits() {
     // And with it back, Escape is the quit it always was.
     assert_eq!(app.perform(Action::Dismiss), Effect::Quit);
 
-    // The key that closes the floating panels on its way says it too:
+    // The key that closes the panels on its way says it too:
     // what it hides is the same thing, by the same route.
     app.said_how_to_restore = false;
     let _ = app.perform(Action::ToggleInterfaceAndPanels);
@@ -2068,7 +2068,9 @@ fn the_transport_bar_is_the_arriving_files_from_the_key() {
 
     let _ = app.step(true);
     assert!(input(&mut app).transport.is_none(), "b's header is unread");
-    let bare = app.content();
+    let content =
+        |app: &App| ui::chrome::content_area(app.logical_size(), app.panels.show_ui, app.parts());
+    let bare = content(&app);
     let _ = app.chooser.learn(
         &b,
         Facts {
@@ -2092,7 +2094,7 @@ fn the_transport_bar_is_the_arriving_files_from_the_key() {
         })
     );
     assert!(app.parts().transport, "the bar takes its room at the key");
-    assert!(app.content().height < bare.height);
+    assert!(content(&app).height < bare.height);
     assert_eq!(app.press(ui::Control::StepForward), Effect::Nothing);
 
     std::fs::remove_dir_all(dir).expect("we just wrote it");
@@ -3252,7 +3254,7 @@ fn the_file_list_comes_up_beside_the_picture_and_shows_what_is_pressed() {
 
 /// Hiding the interface leaves the file list up without its head, the
 /// picture beside it rather than under it; the key that closes the
-/// floating panels with the bars closes the list too.
+/// other panels with the bars closes the list too.
 #[test]
 fn hiding_the_interface_keeps_the_file_list_and_the_full_hide_closes_it() {
     use crate::app::input::Action;
@@ -3743,18 +3745,65 @@ fn a_press_says_what_it_owes() {
     // A window a pixel across has no room for the histogram.
     let histogram = ui::Tip::Control(ui::Control::Histogram);
     assert_eq!(app.press(ui::Control::Histogram), Effect::Nothing);
-    assert!(!app.panels.show_histogram);
+    assert_eq!(app.panels.side, None);
     assert_eq!(
         app.namer().tooltip(histogram).map(|tooltip| tooltip.title),
         Some(vec![ui::tooltip::NO_ROOM.to_string()])
     );
     app.headless = Some(WINDOW);
     assert_eq!(app.press(ui::Control::Histogram), Effect::Redraw);
-    assert!(app.panels.show_histogram);
+    assert_eq!(app.panels.side, Some(ui::side::Side::Histogram));
     assert_ne!(
         app.namer().tooltip(histogram).map(|tooltip| tooltip.title),
         Some(vec![ui::tooltip::NO_ROOM.to_string()])
     );
+}
+
+/// The histogram's and the information's buttons are tabs of the side panel:
+/// it holds one of the two at a time, the button of the one it holds takes it
+/// down, and the picture is fitted into what it leaves at the width its edge
+/// was dragged to — held between the least and the most the panel is.
+#[test]
+fn the_side_panel_holds_one_of_the_two_at_its_own_width() {
+    use ui::side::{Side, WIDTH_MAX, WIDTH_MIN};
+
+    let (mut app, dir) = app_over("side-panel", &[("a.png", 8, 8)]);
+    app.headless = Some(WINDOW);
+    let content =
+        |app: &App| ui::chrome::content_area(app.logical_size(), app.panels.show_ui, app.parts());
+    let bare = content(&app);
+
+    let _ = app.press(ui::Control::Histogram);
+    assert_eq!(app.side_showing(), Some(Side::Histogram));
+    assert!(app.panels.lit(ui::Control::Histogram));
+    assert!(!app.panels.lit(ui::Control::Info));
+    assert_eq!(content(&app).width, bare.width - app.side_width);
+
+    let _ = app.press(ui::Control::Info);
+    assert_eq!(app.side_showing(), Some(Side::Info));
+    assert!(!app.panels.lit(ui::Control::Histogram));
+    assert_eq!(content(&app).width, bare.width - app.side_width);
+
+    let _ = app.act(ui::Command::SideWidth(WIDTH_MAX + 100.0));
+    assert_eq!(app.side_width, WIDTH_MAX);
+    assert_eq!(content(&app).width, bare.width - WIDTH_MAX);
+    let _ = app.act(ui::Command::SideWidth(0.0));
+    assert_eq!(app.side_width, WIDTH_MIN);
+
+    let _ = app.press(ui::Control::Info);
+    assert_eq!(app.side_showing(), None);
+    assert_eq!(content(&app), bare);
+
+    // The bars hidden, it stays, down the window's edge; the key that
+    // hides the panels with them takes it down.
+    let _ = app.press(ui::Control::Histogram);
+    let _ = app.perform(input::Action::ToggleInterface);
+    assert_eq!(app.side_showing(), Some(Side::Histogram));
+    assert_eq!(content(&app).right(), WINDOW[0] - app.side_width);
+    let _ = app.perform(input::Action::ToggleInterface);
+    let _ = app.perform(input::Action::ToggleInterfaceAndPanels);
+    assert_eq!(app.panels.side, None);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A click on the interface reaches the application: the grid button,
@@ -4450,7 +4499,12 @@ fn i_and_shift_i_each_put_up_their_own_tab() {
     let (mut app, dir) = app_over("info-keys", &[("a.png", 8, 8)]);
     app.headless = Some(WINDOW);
     app.exiftool = exiftool::Program::at(Path::new("/nonexistent/exiftool"));
-    let shown = |app: &App| (app.panels.show_info, app.panels.info_tab);
+    let shown = |app: &App| {
+        (
+            app.panels.side == Some(ui::side::Side::Info),
+            app.panels.info_tab,
+        )
+    };
 
     let _ = app.perform(input::Action::ToggleRawData);
     assert_eq!(shown(&app), (true, Tab::Tags));
@@ -4458,10 +4512,10 @@ fn i_and_shift_i_each_put_up_their_own_tab() {
     let _ = app.perform(input::Action::ToggleInfo);
     assert_eq!(shown(&app), (true, Tab::Facts));
     let _ = app.perform(input::Action::ToggleInfo);
-    assert!(!app.panels.show_info);
+    assert_eq!(app.panels.side, None);
     let _ = app.perform(input::Action::ToggleRawData);
     let _ = app.perform(input::Action::ToggleRawData);
-    assert!(!app.panels.show_info);
+    assert_eq!(app.panels.side, None);
 
     let _ = app.press(ui::Control::Info);
     assert_eq!(shown(&app), (true, Tab::Tags), "the button keeps the tab");

@@ -683,8 +683,9 @@ impl App {
             Does::Action(_) => false,
             Does::Magnification(times) => panels.loupe_magnification == times,
             Does::Control(control) => match control {
-                // The toggles that are one flag of the panels, read through
-                // the one reading of which — see `Panels::flag_mut`.
+                // The toggles that are one flag of the panels, and the two
+                // choosing what the side panel holds, read through the one
+                // reading of which — see `Panels::lit`.
                 Control::Filmstrip
                 | Control::Minimap
                 | Control::Histogram

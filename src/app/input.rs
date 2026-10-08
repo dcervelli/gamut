@@ -2082,16 +2082,15 @@ impl App {
                     self.toast(message, Level::Message);
                 }
             }
-            // The three panels float over the image rather than inside the
-            // bars, and the file list keeps its rows when the bars go, so
-            // hiding the interface leaves all four behind. This asks for
-            // the picture on its own, and closes them on the way. They stay
+            // The minimap floats over the image rather than inside the bars,
+            // and the file list and the side panel stay when the bars go,
+            // so hiding the interface leaves all three behind. This asks
+            // for the picture on its own, and closes them on the way. They stay
             // closed when the bars come back: what the key put away, it is
             // not the key's business to bring out again.
             ToggleInterfaceAndPanels => {
                 self.panels.show_minimap = false;
-                self.panels.show_histogram = false;
-                self.panels.show_info = false;
+                self.panels.side = None;
                 self.panels.show_filmstrip = false;
                 return self.perform(ToggleInterface);
             }
@@ -2385,7 +2384,7 @@ impl App {
             },
             index: self.files.target(),
             count: self.files.len(),
-            show_histogram: self.panels.show_histogram,
+            show_histogram: self.panels.side == Some(ui::side::Side::Histogram),
             state: self
                 .current
                 .as_ref()
@@ -2588,6 +2587,10 @@ impl App {
             // what the wider or narrower list leaves on the next frame.
             ui::Command::FilmstripSlot(slot) => {
                 self.filmstrip.set_slot(slot);
+            }
+            // The side panel's edge was dragged, the same way.
+            ui::Command::SideWidth(width) => {
+                self.side_width = width.clamp(ui::side::WIDTH_MIN, ui::side::WIDTH_MAX);
             }
         }
         Effect::Redraw
@@ -3033,10 +3036,8 @@ impl App {
             // marks are where `w` lands too, so that the key and the button
             // beside the panel's band cannot come to mean different things.
             Control::Minimap
-            | Control::Histogram
             | Control::Grid
             | Control::Loupe
-            | Control::Info
             | Control::Luma
             | Control::Planes
             | Control::Log
@@ -3046,9 +3047,20 @@ impl App {
                     .flag_mut(widget)
                     .expect("each of these toggles one flag");
                 *flag = !*flag;
+                Effect::Redraw
+            }
+            // The two buttons choosing what the side panel holds, as tabs
+            // do: the one it holds takes it down, and the other puts itself
+            // up in its place. Refused above where the window has no room.
+            Control::Histogram => {
+                self.panels.choose(ui::side::Side::Histogram);
+                Effect::Redraw
+            }
+            Control::Info => {
+                self.panels.choose(ui::side::Side::Info);
                 // The panel up again on the Tags tab reads the file it is
                 // about, which may have changed while it was down.
-                if widget == Control::Info && self.tags_showing() {
+                if self.tags_showing() {
                     self.request_tags();
                 }
                 Effect::Redraw

@@ -168,7 +168,7 @@ pub(super) fn track(
             band.height + 2.0 * HANDLE_REACH,
         ));
         let hand = if on { Hand::On } else { Hand::Off };
-        handle(painter, theme, grid, mark, hand, t, theme.panel_background);
+        handle(painter, theme, grid, mark, hand, t, theme.bar_background);
     }
     said
 }

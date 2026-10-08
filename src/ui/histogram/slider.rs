@@ -14,7 +14,7 @@ use crate::ui::slider::{self as line, Line};
 /// keys or `--exposure`, stands hollow at the end, as a band handle out past
 /// the plot does.
 pub(super) fn slider(pass: &mut Pass, ui: &mut egui::Ui, exposure: f32, room: Rect) {
-    let ground = pass.theme.panel_background;
+    let ground = pass.theme.bar_background;
     let asked = line::show(
         pass,
         ui,

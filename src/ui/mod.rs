@@ -19,6 +19,7 @@ pub mod loupe;
 pub mod menu;
 pub mod minimap;
 pub mod rename;
+pub mod side;
 mod slider;
 pub mod standin;
 pub mod tags;
@@ -203,12 +204,11 @@ const MENU_OFFSET: f32 = PADDING / 2.0;
 /// The gap between a floating panel's edge and what is on it.
 const PANEL_INSET: f32 = 10.0;
 
-/// How wide the panels that float over the content area are. The histogram
-/// fixes it: wide enough that a bin is exactly one logical pixel, which is
+/// How wide the histogram is at its own size, which is the side panel at its
+/// narrowest: wide enough that a bin is exactly one logical pixel, which is
 /// what keeps its bars evenly spaced instead of some of them landing astride
-/// a pixel boundary and coming out fatter than their neighbors. The
-/// information panel takes the same width so that the two line up down the
-/// right of the window, whether or not either has anything else on it.
+/// a pixel boundary and coming out fatter than their neighbors. The help
+/// popup opens no narrower.
 const PANEL_WIDTH: f32 = histogram::TOOLBAR_WIDTH + BINS as f32 + 2.0 * PANEL_INSET;
 
 use style::PANEL_RADIUS;
@@ -477,8 +477,9 @@ pub struct Panels {
     /// there is a list to show: one file is no list, and the toggle for it
     /// is not drawn.
     pub show_filmstrip: bool,
-    pub show_histogram: bool,
-    pub show_info: bool,
+    /// What the side panel down the right of the picture holds, if it is up:
+    /// the histogram or the information, never both — see [`side`].
+    pub side: Option<side::Side>,
     /// Which of the histogram's planes are drawn. Both can be off: the panel
     /// still has its response curve and its ramp to read, and a toggle that
     /// refuses to switch off is a toggle that owes an explanation.
@@ -536,8 +537,6 @@ impl Panels {
         Some(match control {
             Control::Filmstrip => &mut self.show_filmstrip,
             Control::Minimap => &mut self.show_minimap,
-            Control::Histogram => &mut self.show_histogram,
-            Control::Info => &mut self.show_info,
             Control::Grid => &mut self.show_grid,
             Control::Loupe => &mut self.show_loupe,
             Control::Luma => &mut self.show_luma,
@@ -549,10 +548,26 @@ impl Panels {
     }
 
     /// Whether the flag `control` toggles is on — see [`Panels::flag_mut`]
-    /// — and `false` for a control that toggles none, which is never lit.
+    /// — or, for the two buttons choosing what the side panel holds, whether
+    /// it holds theirs; and `false` for a control that is neither, which is
+    /// never lit.
     pub fn lit(&self, control: Control) -> bool {
+        if let Some(side) = self.side
+            && control == side.control()
+        {
+            return true;
+        }
         let mut panels = *self;
         panels.flag_mut(control).is_some_and(|flag| *flag)
+    }
+
+    /// Asks for `side` in the side panel, or takes the panel down where it
+    /// holds `side` already: what the button choosing it does.
+    pub fn choose(&mut self, side: side::Side) {
+        self.side = match self.side == Some(side) {
+            true => None,
+            false => Some(side),
+        };
     }
 }
 
@@ -656,6 +671,9 @@ pub struct FrameInput {
     /// not — which is what decides whether the panel is there, and so
     /// where the picture starts.
     pub filmstrip: Option<filmstrip::Input>,
+    /// The side panel, on every frame it is up, and `None` while it is not:
+    /// asked for, with room for what it holds, and something open.
+    pub side: Option<side::Shown>,
     /// The file chooser, on every frame it is open, and `None` while it is
     /// not. Whether it is open is egui's to say — see
     /// [`chooser::id`] — and this has to be handed over on every frame it
@@ -716,6 +734,7 @@ pub fn show(
     let parts = chrome::Parts {
         transport: input.transport.is_some(),
         filmstrip: input.filmstrip.as_ref().map(|strip| strip.slot),
+        side: input.side.map(|shown| shown.width),
     };
     let content = chrome::content_area(input.logical, panels.show_ui, parts);
     let mut pass = Pass {
@@ -727,21 +746,27 @@ pub fn show(
         namer,
         grid: icon::Grid::new(input.scale),
         content,
-        room: room(content, panels),
+        room: room(input.logical, panels.show_ui, parts),
         file_list: None,
+        side_panel: None,
+        parts,
         commands: Vec::new(),
     };
     if panels.show_ui {
         pass.bars(ui);
     } else {
-        // The one part of the chrome that stays when the rest goes.
+        // The two parts of the chrome that stay when the rest goes.
         pass.file_list(ui);
+        pass.side_panel(ui);
     }
     pass.picture(ui);
-    // After the picture, which it overhangs while the panels are hidden,
-    // so that the edge is the grip's and not the picture's drag.
+    // After the picture, which they overhang while the panels are hidden,
+    // so that the edges are the grips' and not the picture's drag.
     if let Some(strip) = &input.filmstrip {
         filmstrip::grip(&mut pass, ui, strip.slot);
+    }
+    if let Some(shown) = input.side {
+        side::grip(&mut pass, ui, shown.width);
     }
     match current {
         Some(current) => pass.overlays(ui, current),
@@ -1050,15 +1075,14 @@ impl Pass<'_> {
 
     /// What floats over the picture, in the order it is stacked: the grid
     /// under everything, then the region marked out on the picture, then
-    /// the minimap, then the message about what was just done — over the
-    /// panels rather than among them, and there whether or not the bars
-    /// are, since what it says does not stop being true because they are
-    /// away.
+    /// the minimap, then the message about what was just done — there
+    /// whether or not the bars are, since what it says does not stop being
+    /// true because they are away.
     fn overlays(&mut self, ui: &mut egui::Ui, current: &Current) {
         let content = self.content;
         let zoom = self.view.zoom(current.size(), self.input.viewport);
-        // Under the floating panels, which are read against the image and
-        // would be harder to read over a grid as well. The minimap's
+        // Under the minimap, which is read against the image and would be
+        // harder to read over a grid as well. The minimap's
         // thumbnail is not one of them — the image layer draws it, below the
         // whole interface — so the grid is told to leave its rectangle alone.
         // What marks up the picture marks up the one it was drawn for, which
@@ -1089,8 +1113,8 @@ impl Pass<'_> {
                 self.theme,
             );
         }
-        // Under the panels, like the grid: the region marks up the picture,
-        // and a panel over the picture is over the region too. The box
+        // Under the minimap, like the grid: the region marks up the picture,
+        // and what floats over the picture is over the region too. The box
         // being dragged out to zoom to goes over the region, being the
         // newer of the two marks and the one under the hand.
         if picture {
@@ -1101,12 +1125,6 @@ impl Pass<'_> {
         loupe::show(self, ui);
         if self.input.minimap_on_screen {
             minimap::show(self, ui);
-        }
-        if self.panels.show_histogram && self.room.histogram {
-            histogram::show(self, ui);
-        }
-        if self.panels.show_info && self.room.info {
-            info::show(self, ui);
         }
         if let Some(message) = &self.input.toast {
             toast::show(self, ui, message);
@@ -1121,11 +1139,10 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
     show_grid.then(|| grid::label(grid::step(zoom, scale)))
 }
 
-/// The content area both floating panels need at once: the strip they share
-/// is [`PANEL_WIDTH`] wide, and down it go the histogram at its own fixed
-/// height, the gap between the two, and the least column the information
-/// panel will show — each inside the padding everything floating over the
-/// image keeps.
+/// The room the side panel needs for both of what it holds, across between
+/// the strips and down between the bars: as wide as it is at its narrowest,
+/// and as tall as the histogram, which is taller than the least column the
+/// information is shown in.
 ///
 /// What a window opens at least this large for, where the monitor has the
 /// room to spare — see `app::window`. A window that opens smaller than its
@@ -1135,18 +1152,22 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
 /// Derived rather than written down, and `the_panels_room_is_room_for_both`
 /// holds it to what [`room`] actually answers.
 pub const PANELS_ROOM: [f32; 2] = [
-    PANEL_WIDTH + 2.0 * PADDING,
-    histogram::SIZE[1] + info::INFO_MIN_HEIGHT + 3.0 * PADDING,
+    side::WIDTH_MIN,
+    if histogram::SIZE[1] > info::INFO_MIN_HEIGHT {
+        histogram::SIZE[1]
+    } else {
+        info::INFO_MIN_HEIGHT
+    },
 ];
 
-/// Whether the content area has room for each of the two panels that float
-/// over the top right of it.
+/// Whether the window has room for each of what the side panel holds, and
+/// for the help popup.
 ///
-/// Both are fixed at [`PANEL_WIDTH`], and the histogram is fixed in height as
-/// well, so in a small enough window there is nothing to give and the panel
-/// stays off rather than covering the picture it is about. Held together in
-/// one answer because the two are stacked: the histogram takes the top of the
-/// strip, and what it takes is height the information panel does not have.
+/// The side panel is never narrower than [`side::WIDTH_MIN`] — the histogram
+/// is a bin to a logical pixel, so there is nothing for it to give — and the
+/// histogram is one height as well, so in a small enough window there is
+/// nothing to give and the button is dead rather than the panel shrunk
+/// below what it can be read at.
 ///
 /// Asked by the frame builder and by the application, which have to agree
 /// about what is on screen: a toggle that quietly set something no one could
@@ -1159,26 +1180,29 @@ pub struct Room {
     pub help: bool,
 }
 
-/// What `content` has room for, with `panels` saying which of the two is
-/// asked for — the histogram's take counting against the information panel
-/// only where the histogram is on screen, see [`histogram_shown`]. The
-/// histogram is one height for every file, so the file has no say.
-pub fn room(content: Rect, panels: &Panels) -> Room {
-    Room {
-        histogram: histogram::panel(content).is_some(),
-        info: info::panel(content, histogram_shown(content, panels)).is_some(),
-        help: help::panel(content).is_some(),
+impl Room {
+    /// Whether there is room for the side panel holding `side`.
+    pub fn holds(&self, side: side::Side) -> bool {
+        match side {
+            side::Side::Histogram => self.histogram,
+            side::Side::Info => self.info,
+        }
     }
 }
 
-/// Where the histogram is on screen, or `None` where it is not: its toggle
-/// is off, or the window has no room for it. What the information column
-/// starts below.
-fn histogram_shown(content: Rect, panels: &Panels) -> Option<Rect> {
-    panels
-        .show_histogram
-        .then(|| histogram::panel(content))
-        .flatten()
+/// What a window `logical` in size has room for, with `parts` of the chrome
+/// up. Whether the side panel is among them makes no difference to whether
+/// there is room for it — see [`chrome::side_room`] — but does to the help
+/// popup, which opens over the picture beside it. The histogram is one
+/// height for every file, so the file has no say.
+pub fn room(logical: [f32; 2], show_ui: bool, parts: chrome::Parts) -> Room {
+    let [across, down] = chrome::side_room(logical, show_ui, parts);
+    let wide = across >= side::WIDTH_MIN;
+    Room {
+        histogram: wide && down >= histogram::SIZE[1],
+        info: wide && down >= info::INFO_MIN_HEIGHT,
+        help: help::panel(chrome::content_area(logical, show_ui, parts)).is_some(),
+    }
 }
 
 /// The hairline drawn across a column: above every section of the
@@ -1288,41 +1312,42 @@ mod tests {
         assert_eq!(tiny.for_side(20.0), tiny.copies[0]);
     }
 
-    /// [`PANELS_ROOM`] is a sum of the constants the two panels are laid out
-    /// from, and this is what holds it to what they do with them: a content
-    /// area that size has room for both at once, and one a pixel smaller in
-    /// either direction does not.
+    /// [`PANELS_ROOM`] is made of the constants the side panel and what it
+    /// holds are laid out from, and this is what holds it to what they do
+    /// with them: a window whose room between the strips and the bars is
+    /// that size has room for both, and one a pixel smaller in either
+    /// direction does not.
     #[test]
     fn the_panels_room_is_room_for_both() {
-        let panels = Panels {
-            show_ui: true,
-            show_filmstrip: false,
-            show_histogram: true,
-            show_info: true,
-            show_luma: true,
-            show_planes: true,
-            log_counts: false,
-            mark_clipped: false,
-            show_minimap: true,
-            show_grid: false,
-            show_loupe: false,
-            loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
-            pixel_format: PixelFormat::default(),
-            coordinate_format: CoordinateFormat::default(),
-            geographic_format: GeographicFormat::default(),
-            info_tab: tags::Tab::Facts,
+        let chrome = [2.0 * chrome::SIDE_WIDTH, 2.0 * chrome::BAR_HEIGHT];
+        let area = |width: f32, height: f32| {
+            room(
+                [width + chrome[0], height + chrome[1]],
+                true,
+                chrome::Parts::default(),
+            )
         };
-        let area = |width, height| room(Rect::new(0.0, 0.0, width, height), &panels);
 
-        assert_eq!(
-            area(PANELS_ROOM[0], PANELS_ROOM[1]),
-            Room {
-                histogram: true,
-                info: true,
-                help: true,
-            }
-        );
+        let both = area(PANELS_ROOM[0], PANELS_ROOM[1]);
+        assert!(both.histogram && both.info, "{both:?}");
         assert!(!area(PANELS_ROOM[0] - 1.0, PANELS_ROOM[1]).histogram);
-        assert!(!area(PANELS_ROOM[0], PANELS_ROOM[1] - 1.0).info);
+        assert!(!area(PANELS_ROOM[0] - 1.0, PANELS_ROOM[1]).info);
+        assert!(!area(PANELS_ROOM[0], PANELS_ROOM[1] - 1.0).histogram);
+    }
+
+    /// The side panel's room is the same with it open as with it shut, so
+    /// that opening it cannot make the button that opened it dead.
+    #[test]
+    fn opening_the_side_panel_leaves_its_room_alone() {
+        let window = [900.0, 600.0];
+        let shut = chrome::Parts::default();
+        let open = chrome::Parts {
+            side: Some(side::WIDTH_MAX),
+            ..shut
+        };
+        for show_ui in [true, false] {
+            let (a, b) = (room(window, show_ui, shut), room(window, show_ui, open));
+            assert_eq!((a.histogram, a.info), (b.histogram, b.info));
+        }
     }
 }

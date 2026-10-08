@@ -703,6 +703,12 @@ pub fn parse_args() -> Result<Option<Args>> {
         Err(error) => return Err(error),
     };
     let (mut config, complaint) = Config::load();
+    // The side panel holds one of the two, the histogram where both are
+    // on, so a flag asking for the information alone is not overruled by
+    // the configuration's asking for the histogram.
+    if info == Some(true) && histogram.is_none() {
+        config.show_histogram = false;
+    }
     config.show_histogram = histogram.unwrap_or(config.show_histogram);
     config.show_info = info.unwrap_or(config.show_info);
     config.show_minimap = minimap.unwrap_or(config.show_minimap);

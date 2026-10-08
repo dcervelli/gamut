@@ -147,7 +147,7 @@ pub(super) fn bar_fraction(count: u32, peak: u32, log: bool) -> f32 {
 /// The plot itself: the bins, the pointer's rule, the shares clipped at
 /// either end, the band along the foot and — where the display is doing
 /// anything — the response curve over the lot.
-pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, content: Rect) {
+pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     let theme = pass.theme;
     let panels = pass.panels;
     let input = pass.input;
@@ -246,7 +246,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect, c
     // rule standing through the plot is what a pointer wants and what a
     // permanent annotation does not: this one is only there while it is
     // being aimed, and it has to be followed up from the axis to the curve.
-    let marked = marked(current, content, input.cursor, input.pointer);
+    let marked = marked(current, panel, input.cursor, input.pointer);
     if let Some(across) = marked.map(bin_across) {
         painter.rect_filled(
             egui::Rect::from(grid.rect(Rect::new(

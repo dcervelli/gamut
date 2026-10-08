@@ -37,9 +37,9 @@ const MIN_WINDOW: [u32; 2] = [320, 240];
 /// rounding being half a device pixel at worst.
 const FLOOR_SLACK: f64 = 1.0;
 
-/// The window that has room for both floating panels at once: the content
-/// area [`ui::PANELS_ROOM`] asks for, the chrome around it, and
-/// [`FLOOR_SLACK`].
+/// The window that has room for the side panel whichever of its two it
+/// holds: the room between the strips and the bars [`ui::PANELS_ROOM`] asks
+/// for, the chrome around it, and [`FLOOR_SLACK`].
 ///
 /// The floor a window opens at instead of [`MIN_WINDOW`], where the monitor
 /// has the room to spare. A window that opens too small for its own interface
@@ -271,8 +271,8 @@ fn wanted_window(monitor: Monitor, image: [f32; 2]) -> [f64; 2] {
     ]
 }
 
-/// The smallest window this monitor should be given: one with room for both
-/// panels where the monitor can hold it, and [`MIN_WINDOW`] where it cannot —
+/// The smallest window this monitor should be given: one with room for the
+/// side panel where the monitor can hold it, and [`MIN_WINDOW`] where it cannot —
 /// a floor that did not fit the screen would be a window off the edge of it,
 /// which is the thing the rest of this is for.
 fn floor_for(room: [f64; 2]) -> [f64; 2] {
@@ -515,8 +515,9 @@ mod tests {
     }
 
     /// A picture smaller than the interface still opens a window the
-    /// interface fits in: both panels can be opened in the window a tiny
-    /// image gets, so neither toggle is dead in it from the first frame.
+    /// interface fits in: the side panel can be opened on either of what it
+    /// holds in the window a tiny image gets, so neither toggle is dead in
+    /// it from the first frame.
     ///
     /// Measured against `ui::PANELS_ROOM`, which
     /// `ui::tests::the_panels_room_is_room_for_both` holds to what the panels
@@ -546,7 +547,7 @@ mod tests {
     /// fit the screen is the thing the rest of this is here to prevent.
     #[test]
     fn a_monitor_too_small_for_the_panels_keeps_the_smallest_window() {
-        let cramped = [monitor(500, 400, 1.0)];
+        let cramped = [monitor(360, 300, 1.0)];
         let size = window_size(&cramped, Some([32.0, 24.0]), None);
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }

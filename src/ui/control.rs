@@ -471,6 +471,8 @@ pub enum Command {
     /// The file list's edge was dragged: the width its thumbnails are
     /// fitted into, which the panel's width is made from.
     FilmstripSlot(f32),
+    /// The side panel's edge was dragged: the width it is asked to be.
+    SideWidth(f32),
 }
 
 /// What a region on the picture is in: nothing, waiting for the drag that

@@ -69,10 +69,9 @@ pub struct Condition {
 
 /// The popup at most this tall; how wide is [`POPUP_WIDTH`].
 const HEIGHT_MAX: f32 = 640.0;
-/// The least the popup will open at: the width of the two panels that
-/// float over the picture, and the least height the information panel
-/// takes — a title and a few stacked rows fit in that — so that the help
-/// comes and goes with them, and its button is dead where theirs are.
+/// The least the popup will open at: the side panel at its narrowest, and
+/// the least height the information takes in it — a title and a few
+/// stacked rows fit in that.
 const WIDTH_MIN: f32 = super::PANEL_WIDTH;
 const HEIGHT_MIN: f32 = info::INFO_MIN_HEIGHT;
 /// Inside this width the three columns of a row go one under the other
@@ -420,20 +419,11 @@ mod tests {
         assert!(panel(Rect::new(0.0, 0.0, 800.0, 150.0)).is_none());
     }
 
-    /// The popup opens in exactly the content area the information panel
-    /// opens in, and not in one a pixel narrower or shorter: the two
-    /// buttons go dead together.
+    /// The popup opens in a content area with room for its least size
+    /// inside the padding, and not in one a pixel narrower or shorter.
     #[test]
-    fn the_popup_needs_what_the_information_panel_needs() {
-        let fits = |width: f32, height: f32| {
-            let content = Rect::new(0.0, 0.0, width, height);
-            assert_eq!(
-                panel(content).is_some(),
-                info::panel(content, None).is_some(),
-                "{width} by {height}"
-            );
-            panel(content).is_some()
-        };
+    fn the_popup_needs_its_least_size() {
+        let fits = |width: f32, height: f32| panel(Rect::new(0.0, 0.0, width, height)).is_some();
         let least = [WIDTH_MIN + 2.0 * PADDING, HEIGHT_MIN + 2.0 * PADDING];
         assert!(fits(least[0], least[1]));
         assert!(!fits(least[0] - 1.0, least[1]));

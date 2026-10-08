@@ -4,8 +4,7 @@ The interface takes its colors from the desktop rather than carrying its own.
 On [Omarchy](https://omarchy.org) the active theme is materialized as a
 palette file, and `src/theme/` reads it, resolves it, and derives the
 handful of roles the chrome actually needs — panel, hairline, primary and dim
-text, accent, the menu panel, the ground the panels that float over the image
-are read on. Switching the desktop's theme is picked up on the same
+text, accent, and the menu panel. Switching the desktop's theme is picked up on the same
 250 ms poll as the file on screen, so an open window changes with everything
 else rather than staying in the theme it opened under.
 
@@ -138,10 +137,9 @@ Two more resist being themed and are not:
   would give.
 
   The panel *around* the plot is not one of these. Nothing is screened onto
-  it, so it is the bars' own surface, mildly transparent, with the same ink on
-  it as the bars carry — the same panel the file's information is read on, and
-  the same one a popup's cells sit on, that last held nearer to opaque since
-  the picture coming through a menu is what the choices on it compete with.
+  it, so it is the bars' own surface, with the same ink on it as the bars
+  carry — the side panel the file's information is read on as well, and the
+  surface a popup's cells sit on, that last just short of opaque.
 * **The luminance plane is a neutral gray.** It stands for a pixel's value
   rather than for one of its channels, so a hue on it would read as a fourth
   color.
