@@ -2436,7 +2436,12 @@ impl App {
         timing::window_open();
         window::show_icon();
 
-        let mut renderer = match Renderer::new(window.clone(), self.output.asked) {
+        let main_device = self
+            .output
+            .monitors
+            .as_ref()
+            .and_then(Monitors::main_device);
+        let mut renderer = match Renderer::new(window.clone(), self.output.asked, main_device) {
             Ok(renderer) => renderer,
             Err(error) => {
                 crate::report(&error);
