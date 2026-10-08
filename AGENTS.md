@@ -114,6 +114,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  value in whichever of `PixelFormat`'s three ways is in force
   menu.rs        the popup menus' contents: the zoom menu's choices and cells, the
                  pixel-format cells, and the menus of copies and of the file with each item's key beside it
+  scale.rs       the interface's scale on top of the monitor's: SCALES, the rungs the keys
+                 step along, and RANGE, what the state file keeps
   rename.rs      the rename dialog: a modal with the name in a field, judge() saying what is
                  wrong with what has been typed as it is typed, and OK and Cancel; the
                  field, the line under it and the buttons both dialogs are drawn with

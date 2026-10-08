@@ -11,6 +11,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A **Gain map** button at the bottom right, and `G`, for a picture carrying
   a gain map: shows the map in the picture's place, in stops, so the pixel
   readout says how far each pixel is brightened, and the picture again.
+- The interface can be drawn larger or smaller than the monitor's own scale
+  makes it, without the picture changing: `Ctrl+=` and `Ctrl+-` step it
+  between 75% and 300%, and `Ctrl+0` puts it back (`⌥⌘=`, `⌥⌘-` and `⌥⌘0`
+  on a Mac, and *Increase Interface Scale*, *Decrease Interface Scale* and
+  *Reset Interface Scale* in the View menu), and a message says the new
+  scale. The size is remembered in the state file as `ui_scale`. Closes #2.
 
 ### Changed
 
@@ -23,6 +29,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
+- The histogram's bars are even at a fractional monitor scale such as 1.25,
+  where every other bin came out a device pixel wider than its neighbors;
+  the band under the plot and the false-color swatches likewise.
 - On Linux with two GPUs, the window is drawn on the one a monitor is
   connected to. It used to be drawn on the integrated GPU, which on a desktop
   whose monitor is plugged into a discrete card showed a black window. Where

@@ -141,6 +141,12 @@ pub enum Action {
     /// steps with the secondary button held.
     ToggleLoupe,
     CycleMagnification,
+    /// The interface drawn a rung larger or smaller on top of the monitor's
+    /// own scale, or at the monitor's own: see [`ui::scale`]. The picture
+    /// is not in it.
+    ScaleUp,
+    ScaleDown,
+    ScaleReset,
     /// Exposure, by this many stops.
     Exposure(f32),
     CycleAutoWindow,
@@ -947,6 +953,38 @@ pub static ROWS: &[Row] = &[
             [key('L')]
         ),
     },
+    // The desktop's chords for the interface's own zoom, which the plain
+    // `+`, `-` and `0` of the zoom leave free.
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Increase interface scale",
+        keys: one!(
+            "interface.scale.up",
+            ScaleUp,
+            [typed(CTRL, '='), typed(CTRL, '+')]
+        ),
+    },
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Decrease interface scale",
+        keys: one!(
+            "interface.scale.down",
+            ScaleDown,
+            [typed(CTRL, '-'), typed(CTRL, '_')]
+        ),
+    },
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Reset interface scale",
+        keys: one!(
+            "interface.scale.reset",
+            ScaleReset,
+            [digit(CTRL, KeyCode::Digit0)]
+        ),
+    },
     // The three that work the histogram's plot, under the key that opens it.
     Row {
         section: Section::Interface,
@@ -1369,7 +1407,9 @@ pub static ROWS: &[Row] = &[
 /// menu shortcuts a Mac user already knows — `Cmd+0`, `Cmd+Z`,
 /// `Cmd+Backspace` to throw a file away, `Cmd+Q` and `Cmd+W`; and `Cmd+[`
 /// and `Cmd+]` for back and forward, as a browser has them; `Cmd+,` for the
-/// settings, and Preview's `Cmd+L` and `Cmd+R` to turn the picture. A name
+/// settings, and Preview's `Cmd+L` and `Cmd+R` to turn the picture; and
+/// the interface's scale on `Cmd+Option` with `=`, `-` and `0`, since
+/// `Cmd` with them is the picture's zoom, as Preview has it. A name
 /// not here keeps the table's chords.
 ///
 /// Applied over the table by [`Keymap::mac`](super::keymap::Keymap::mac),
@@ -1408,6 +1448,18 @@ pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
     (
         "region.shrink.down",
         &[named(CMD_SHIFT, NamedKey::ArrowDown)],
+    ),
+    (
+        "interface.scale.up",
+        &[typed(CMD_OPTION, '='), typed(CMD_OPTION, '+')],
+    ),
+    (
+        "interface.scale.down",
+        &[typed(CMD_OPTION, '-'), typed(CMD_OPTION, '_')],
+    ),
+    (
+        "interface.scale.reset",
+        &[digit(CMD_OPTION, KeyCode::Digit0)],
     ),
     ("interface.help", &[key('?'), key('/'), typed(CMD, '?')]),
     ("interface.settings", &[typed(CMD, ',')]),
@@ -2108,6 +2160,9 @@ impl App {
                 self.panels.loupe_magnification = ui::loupe::cycle(self.panels.loupe_magnification);
                 return Effect::Redraw;
             }
+            ScaleUp => return self.rescale(ui::scale::step(self.ui_scale, true)),
+            ScaleDown => return self.rescale(ui::scale::step(self.ui_scale, false)),
+            ScaleReset => return self.rescale(ui::scale::DEFAULT),
             Exposure(stops) => {
                 return self.adjust(|current, _| {
                     current.display.adjust_exposure(stops);
@@ -2705,7 +2760,7 @@ impl App {
         if delta.iter().all(|each| each.abs() < 1e-3) {
             return Effect::Nothing;
         }
-        let by = ui::WHEEL_PIXELS_PER_STEP * self.scale_factor();
+        let by = ui::WHEEL_PIXELS_PER_STEP * self.pixels_per_point();
         let [dx, dy] = [delta[0] * by, delta[1] * by];
         if notched {
             self.animate(|view, image, viewport| view.pan_by(-dx, -dy, image, viewport));

@@ -192,7 +192,7 @@ them, and `browse_folder` waits for the next start.
 `~/Library/Application Support/gamut/state` on a Mac, is where
 `gamut` remembers settings you change by hand: how wide you dragged the file
 list, what the list is sorted by and which way, how far the loupe
-magnifies, whether a raw opens as the camera's JPEG, and how the pixel
+magnifies, how large you made the interface, whether a raw opens as the camera's JPEG, and how the pixel
 under the pointer is read out: its value, and for a map its place and how a
 latitude is written. It is written when the window closes and read when the next window
 opens. You never need to edit it, and deleting it resets them all to their

@@ -23,6 +23,9 @@ Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 | `-`, `_`, `⌘-` | Zoom out one step | `zoom.out` |
 | `⌘`-Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
 | `⇧⌘`-Arrows | With a region selected, shrink it that way one pixel | `region.shrink.left` … `region.shrink.down` |
+| `⌥⌘=`, `⌥⌘+` | Increase interface scale | `interface.scale.up` |
+| `⌥⌘-`, `⌥⌘_` | Decrease interface scale | `interface.scale.down` |
+| `⌥⌘0` | Reset interface scale to the monitor's own | `interface.scale.reset` |
 | `?`, `/`, `⌘?` | Show the keys | `interface.help` |
 | `⌘,` | Open the configuration file in your text editor | `interface.settings` |
 | `q`, `⌘Q`, `⌘W` | Quit | `interface.quit` |
@@ -720,6 +723,9 @@ where all of it is set.
 | `g` | Show or hide the grid over the image | `interface.grid` |
 | `l` | Show or hide the loupe | `interface.loupe` |
 | `Shift+L` | Cycle the loupe's magnification: 2, 4, 8 or 16 times | `interface.loupe-magnification` |
+| `Ctrl+=`, `Ctrl++` | Increase interface scale; the picture is not affected | `interface.scale.up` |
+| `Ctrl+-`, `Ctrl+_` | Decrease interface scale; the picture is not affected | `interface.scale.down` |
+| `Ctrl+0` | Reset interface scale to the monitor's own | `interface.scale.reset` |
 | `x` | Select a region of the image; again, or `Esc`, removes it | `region.select` |
 | `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped → depth | `interface.pixel-format` |
 | `,` | In a georeferenced file, cycle where the pixel is read out as: pixel → projected → geographic | `interface.coordinate-format` |
@@ -729,6 +735,13 @@ where all of it is set.
 | `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same | `interface.help` |
 | `Ctrl+,` | Open the configuration file in your editor, writing it first if there is none. The button at the foot of the help popup does the same | `interface.settings` |
 | `q`, `Esc` | Quit. `Esc` closes a popup, a message or a region, or brings the panels back | `interface.quit`, `interface.dismiss` |
+
+The interface's size steps through 75%, 100%, 125%, 150%, 175%, 200%, 250%
+and 300% of what the monitor's own scale gives it, and is remembered from one
+run to the next. Use it when the panels' text is too small or too large on
+one monitor without changing every other program's: the picture stays where
+it is, and 100% zoom is still one image pixel to one screen pixel. The window
+keeps its size when you change it.
 
 The panels are opaque and the image is fitted inside them, so hiding them
 gives a fitted image more room and it re-fits immediately. The file list stays

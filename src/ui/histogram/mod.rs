@@ -67,7 +67,7 @@ pub const SIZE: [f32; 2] = [
 
 /// The room the strip of buttons down the left takes: a button's width and
 /// the gap between it and the plot. Read by [`super::PANEL_WIDTH`], which is
-/// this and the plot, so that a bin stays exactly one logical pixel wide.
+/// this and the plot, so that a bin stays exactly one point wide.
 pub(super) const TOOLBAR_WIDTH: f32 = BUTTON_SIZE + PANEL_INSET;
 /// Between one button of that strip and the next. Tighter than the gap the
 /// chrome's own strips keep, so that on a color image the four buttons
@@ -271,7 +271,7 @@ fn readout_placement(bars: Rect, width: f32, ends: [f32; 2]) -> (f32, bool) {
 /// `None` where the content area is too small to take it, as the information
 /// panel's [`info::panel`](super::info::panel) is `None` in a window too
 /// short for it. The panel is one size for a file — the plot's bins are a
-/// logical pixel each and the rows under it are set to what they say, so
+/// point each and the rows under it are set to what they say, so
 /// there is nothing here to give — and a panel drawn larger than the area
 /// it floats over would cover the picture it is about and run off the
 /// window besides.
@@ -284,8 +284,9 @@ pub fn panel(content: Rect) -> Option<Rect> {
 }
 
 /// The ground the bins stand on inside that panel, with the label line
-/// above it. The bins are one logical pixel each, so this is the full width
-/// of the plot and the room around it is drawn outside it.
+/// above it. The bins are one point each, so this is the full width of the
+/// plot and the room around it is drawn outside it; what is drawn across it
+/// is one column to the device pixel, however many points that is.
 ///
 /// Set out from the top of the panel down, and so the same whatever rows
 /// the file has under it: the rows are what the panel grows by, and the
