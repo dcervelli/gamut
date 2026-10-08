@@ -41,7 +41,13 @@ pub(crate) fn choose(instance: &wgpu::Instance, surface: &wgpu::Surface) -> Resu
     if let Some(preference) = wgpu::PowerPreference::from_env() {
         return request(instance, surface, preference);
     }
-    let cards = displaying(Path::new("/sys/class/drm"));
+    // Only Linux has the kernel's DRM directory; elsewhere the power
+    // preference alone chooses.
+    let cards = if cfg!(target_os = "linux") {
+        displaying(Path::new("/sys/class/drm"))
+    } else {
+        Vec::new()
+    };
     if !cards.is_empty() {
         let mut adapters = supporting(instance, surface);
         let infos: Vec<_> = adapters.iter().map(wgpu::Adapter::get_info).collect();
