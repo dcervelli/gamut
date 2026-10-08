@@ -10,6 +10,7 @@
 //! and it is what makes a third-party toolkit usable at all, since egui has
 //! no idea what an HDR surface is.
 
+mod adapter;
 mod color;
 mod composite;
 mod gpu;
@@ -175,23 +176,18 @@ impl Renderer {
         let size = window.inner_size();
         let (width, height) = (size.width.max(1), size.height.max(1));
 
-        // `..._from_env` reads `WGPU_BACKEND`, `WGPU_ADAPTER_NAME`,
-        // `WGPU_POWER_PREF`, `WGPU_DEBUG`, `WGPU_VALIDATION` and
-        // `WGPU_GPU_BASED_VALIDATION` from the environment. They select the
-        // backend and toggle the driver's validation layers — the user's to
-        // set, but named here so the configuration is not invisible.
+        // `..._from_env` reads `WGPU_BACKEND`, `WGPU_DEBUG`, `WGPU_VALIDATION`
+        // and `WGPU_GPU_BASED_VALIDATION` from the environment. They select
+        // the backend and toggle the driver's validation layers — the user's
+        // to set, but named here so the configuration is not invisible.
+        // `adapter::choose` reads `WGPU_ADAPTER_NAME` and `WGPU_POWER_PREF`.
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let surface = instance
             .create_surface(window.clone())
             .context("creating a drawing surface for the window")?;
 
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .context("no suitable GPU adapter found")?;
+        let adapter = adapter::choose(&instance, &surface)?;
 
         let capabilities = Capabilities::from_adapter(&adapter);
         let adapter_name = adapter.get_info().name;
