@@ -2669,6 +2669,7 @@ impl App {
         let Ready {
             image,
             stats,
+            stored,
             exif,
             gpu,
             sequence,
@@ -2846,6 +2847,7 @@ impl App {
             shown: ui::Face {
                 image,
                 stats,
+                stored,
                 display,
                 reduced,
                 lift: None,
@@ -2979,6 +2981,7 @@ impl App {
         if let Some(current) = &mut self.current {
             current.image = Arc::clone(&frame.image);
             current.stats = frame.stats.clone();
+            current.stored = frame.stored.clone();
             current.reduced = reduced.or(current.reduced);
         }
         animation.shown(head);

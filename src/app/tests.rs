@@ -243,6 +243,7 @@ fn answer(app: &mut App, mode: Reload) {
     let format = decode::reader(&path).unwrap_or_default();
     let outcome = decoded.map(|(image, _, rendering, camera_jpeg)| Ready {
         stats: Stats::scan(&image),
+        stored: Stats::stored_beside(&image, &Stats::scan(&image)),
         exif: exif::Exif::read(&path),
         image,
         gpu: None,
@@ -1819,6 +1820,7 @@ fn a_reply_the_user_has_stepped_past_is_dropped() {
         },
         outcome: Ok(Ready {
             stats: Stats::scan(&image),
+            stored: Stats::scan(&image),
             exif: exif::Exif::default(),
             image,
             gpu: None,
@@ -4458,9 +4460,14 @@ fn the_numbers_follow_the_lift_off_the_loop() {
     assert_eq!(max(&app), base, "the numbers are");
     assert_eq!(app.measured(first), Effect::Nothing, "overtaken");
     assert_eq!(max(&app), base);
+    let stored = app.current.as_ref().unwrap().stored.plot.max;
     assert_eq!(app.measured(next()), Effect::Redraw);
     let lifted = max(&app);
     assert!(lifted > base, "{lifted} over {base}");
+    // The file as stored is measured once, whatever the lift: a measure of
+    // the lift leaves it be.
+    assert_eq!(app.current.as_ref().unwrap().stored.plot.max, stored);
+    assert_eq!(stored, 1.0, "the base, as stored");
 
     // The switch, off and on: each measure is there already.
     let _ = app.toggle_hdr();

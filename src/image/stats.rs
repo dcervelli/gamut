@@ -398,6 +398,13 @@ impl Stats {
         ))
     }
 
+    /// The picture as the file stores it, beside `shown`, the scan of it as
+    /// it is shown: [`Stats::scan_as_stored`] where that is anything else,
+    /// and `shown` itself where it is not.
+    pub fn stored_beside(image: &DecodedImage, shown: &Stats) -> Self {
+        Self::scan_as_stored(image).unwrap_or_else(|| shown.clone())
+    }
+
     /// [`Stats::scan`] through `reader` over a given number of bands, so
     /// that a test can hold a divided scan against the same one undivided.
     fn scan_in(image: &DecodedImage, reader: &Reader, stride: usize, bands: usize) -> Self {

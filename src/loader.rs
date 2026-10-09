@@ -111,6 +111,9 @@ pub struct Opened {
 pub struct Ready {
     pub image: DecodedImage,
     pub stats: Stats,
+    /// The picture as the file stores it, for the histogram's plot of the
+    /// file: see [`Stats::scan_as_stored`].
+    pub stored: Stats,
     /// What the file says about the photograph, for the info panel. Read
     /// here rather than on the event loop because it is one more parse of a
     /// file whoever wrote it chose the bytes of, and this is the thread with
@@ -430,11 +433,15 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
 
     let scanned = decoded.and_then(
         |(image, decoding, exif, sequence, page, rendering, camera_jpeg, format)| {
-            let stats = guard("scanning", || Ok(Stats::scan(&image)))?;
+            let (stats, stored) = guard("scanning", || {
+                let stats = Stats::scan(&image);
+                let stored = Stats::stored_beside(&image, &stats);
+                Ok((stats, stored))
+            })?;
             Ok((
                 image,
                 decoding,
-                stats,
+                (stats, stored),
                 exif,
                 sequence,
                 page,
@@ -449,7 +456,17 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
     }
 
     let outcome = scanned.and_then(
-        |(image, decoding, stats, exif, sequence, page, rendering, camera_jpeg, format)| {
+        |(
+            image,
+            decoding,
+            (stats, stored),
+            exif,
+            sequence,
+            page,
+            rendering,
+            camera_jpeg,
+            format,
+        )| {
             // Measured once the pixels are ready to hand over, so that the time
             // reported is everything this thread did to them — the header, the
             // decode, the scan, the metadata — with the decoder's own share
@@ -470,6 +487,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             Ok(Ready {
                 image,
                 stats,
+                stored,
                 exif,
                 gpu,
                 sequence,

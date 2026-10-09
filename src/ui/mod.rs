@@ -338,7 +338,17 @@ pub struct Face {
     /// every pixel on a thread of its own, and handing that thread the image
     /// must not mean duplicating however many hundred megabytes it is.
     pub image: Arc<DecodedImage>,
+    /// The image as the display starts from it: lifted through the gain
+    /// map at the weight in force, and in the working space's primaries.
+    /// What the window, the keys that set it and the histogram's Display
+    /// section read, which `App::refresh_lift` and `App::measured` keep up
+    /// with the lift.
     pub stats: Stats,
+    /// The image as the file stores it: no lift, and in its own primaries.
+    /// What the histogram's File section plots, set once when the image
+    /// arrives; the same as `stats` where showing the image moves no color
+    /// — see [`Stats::scan_as_stored`].
+    pub stored: Stats,
     pub display: Display,
     /// The precision it lost on its way to the device, which had no format
     /// that would hold it; `None` for the usual picture, which lost nothing.
@@ -356,6 +366,7 @@ impl Face {
         let stats = Stats::scan(&image);
         Self {
             display: Display::for_image_with(&image, &stats, Default::default()),
+            stored: Stats::stored_beside(&image, &stats),
             image: Arc::new(image),
             stats,
             reduced: None,
@@ -451,6 +462,20 @@ impl Current {
             .turn
             .stored([x, y], [self.image.width, self.image.height]);
         self.image.sample(x, y, self.lift.as_deref())
+    }
+
+    /// The pixel at `(x, y)` of the turned picture as the file stores it:
+    /// no lift, and in the file's own primaries. What the histogram's File
+    /// section marks the bar of. `None` outside the picture.
+    pub fn sample_as_stored(&self, x: u32, y: u32) -> Option<Sample> {
+        let [width, height] = self.pixels();
+        if x >= width || y >= height {
+            return None;
+        }
+        let [x, y] = self
+            .turn
+            .stored([x, y], [self.image.width, self.image.height]);
+        self.image.sample_as_stored(x, y)
     }
 
     /// The depth map under `(x, y)` of the image on screen, turned, where

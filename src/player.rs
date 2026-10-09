@@ -36,6 +36,10 @@ pub struct Frame {
     /// copy's thread, the way `Current::image` is.
     pub image: Arc<DecodedImage>,
     pub stats: Stats,
+    /// The frame as the file stores it, for the histogram's plot of the
+    /// file: a second scan for a wide-gamut animation's every frame, made
+    /// here beside the first, ahead of the clock.
+    pub stored: Stats,
     /// How long it is shown for, never under [`MIN_DELAY`].
     pub delay: Duration,
 }
@@ -362,9 +366,11 @@ fn run(
             Ok(Some(frame)) => {
                 position += 1;
                 let stats = Stats::scan(&frame.image);
+                let stored = Stats::stored_beside(&frame.image, &stats);
                 let frame = Arc::new(Frame {
                     image: Arc::new(frame.image),
                     stats,
+                    stored,
                     delay: frame.delay.max(MIN_DELAY),
                 });
                 let mut cache = lock(&shared.cache);
@@ -440,6 +446,7 @@ mod tests {
         let stats = Stats::scan(&image);
         Arc::new(Frame {
             image: Arc::new(image),
+            stored: stats.clone(),
             stats,
             delay: MIN_DELAY,
         })
