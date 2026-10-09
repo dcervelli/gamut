@@ -632,11 +632,13 @@ handles are the window on every file, and the exposure is a separate thing
 on top of it: bringing the white handle in and raising the exposure make
 the same picture, but the window is found again when a file changes on disk
 or a *Window* rule is pressed, and the exposure survives that. The share
-of the picture the window is throwing away is
-written in the top corners of the plot — how much is at or below black on
+of the picture the screen is throwing away is written in the top corners of
+the Output plot at the head of the panel — how much is at or below black on
 the left, how much is at or above white on the right — and only when there
-is any, so a number there is news. Pointing at the plot names the value
-under the pointer, and what the display turns it into.
+is any, so a number there is news. Pointing at a plot names the value under
+the pointer at that stage; pointing at the picture marks the pixel on every
+plot and writes its value at each stage, from the file at the foot of the
+panel to what the screen shows at the top.
 
 `w`, or the button beside the band under the plot, paints the clipped
 pixels on the picture itself: red where any channel has reached white,

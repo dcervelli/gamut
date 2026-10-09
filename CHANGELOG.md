@@ -16,6 +16,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   bars, and `~` closes it. Where `show_histogram` and `show_info` are both
   on, the histogram is shown; `--info` on its own shows the information
   whatever the configuration says.
+- The histogram follows the picture from the file to the screen, a section
+  to a stage, with what goes out at the top: **Output**, what the screen
+  shows, with the share clipped at either end in its corners; **Display**,
+  what the window, exposure and curve act on, with the response curve
+  always drawn over it and the band, handles and settings under it; **Gain
+  map**, for a picture with one, how far the map lifts the picture in
+  stops and how much of that the screen is showing, with a button that
+  shows the map; and **File**, the picture as the file stores it, so a wide
+  gamut color sits inside the file's range there and past it above. With
+  the pointer on the picture, every section marks the pixel's bar and
+  writes its value at that stage. On a short window the panel scrolls, and
+  only the Output section needs room for the histogram button to work.
 
 ## 0.11.0 - 2026-10-10
 

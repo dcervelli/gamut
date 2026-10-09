@@ -92,10 +92,13 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   side.rs        the side panel down the right of the picture: Side, which of the histogram
                  and the information it holds; WIDTH, which is the histogram's; and show(),
                  which hands it to the one it holds
-  histogram/     the histogram, at the head of the side panel: mod.rs its geometry, words,
-                 header and rows, plot.rs the
-                 plot, track.rs the band and its handles, controls.rs the buttons, slider.rs the
-                 exposure's slider, drawn by ui/slider.rs
+  histogram/     the histogram down the side panel, a section to a stage of the picture's way
+                 to the screen: mod.rs the column, its scroll, the strip of buttons and the
+                 pixel traced down it (marked()), section.rs Section — the stages in flow
+                 order, each one height — and its header, plot.rs the plot every section
+                 draws, output.rs / display.rs / gain_map.rs / file.rs the four stages,
+                 track.rs the band and its handles, slider.rs the exposure's slider, drawn
+                 by ui/slider.rs
   minimap.rs / grid.rs   one widget each, drawn with egui's painter
   loupe.rs       the loupe: place() puts its two circles beside the pointer inside the content
                  area, glass() is the magnified draw the image layer makes of it, show() the rings
@@ -373,7 +376,8 @@ still agrees with both, so renaming either is editing the constant —
 | What the surface can be, SDR or HDR | `render/output.rs` chooses it; `monitor/` says what the monitor is in; `App::surface_hdr` and `App::headroom` put the two together, `App::sync_output` acts on them, and `App::toggle_hdr` is what the bar's `HDR` button and `o` both call |
 | A new render pass | build it from `render/gpu.rs`; add its target to `Renderer::render` |
 | Something about the display window, exposure or false color | `image/display/` (state) and `shaders/image.wgsl` / `composite.wgsl` (effect) |
-| What the histogram panel's rows hold, what a drag on its band does, or what its corners say | `ui/histogram/mod.rs::Rows` for the three rows, which are every file's; `ui/histogram/track.rs` for the band and its handles, which ask through `Command::{BlackPoint, WhitePoint, Slide}` and land in `Display::put_black`, `Display::put_white` — each its own end of the window, the exposure left alone — and `Display::set_displayed_bounds`; the keys that step the handles are `Action::{StepBlack, StepWhite}`, landing in `Display::step_black`, `Display::step_white`, by `input::WINDOW_STEP`; `ui/histogram/slider.rs` for the exposure, which asks through `Command::Exposure` and lands in `Display::set_exposure`, `SLIDER_STOPS` being how far it runs; `Plot::clipped` for the shares in the plot's corners, and `Display::clips_white` for whether white counts. The marks `w` and the button beside the panel's band paint on the picture are `fs_marks` in `shaders/image.wgsl`, which judges each texel, `image_layer::Marks`, the coarse chain of those verdicts that a minified draw reads the share of a pixel from, `shader_codes::marks`, and `Panels::mark_clipped`, toggled in `App::press` by `Control::Marks` |
+| A stage of the histogram's column — what a section plots, its height, where it goes | `ui/histogram/section.rs::Section`: a variant where the stage stands in the flow, its `title`, `applies`, `height` and `plot`, and a file of its own beside `output.rs` with a `show`, a `bin_mark` and a `pixel_mark`, which `histogram::marked` and `histogram::show` call. What it plots is counted off the loop: `Stats` for the picture as the display starts from it, `Face::stored` (`Stats::scan_as_stored`) for the file as stored, `GainMap::lift_plot` for a lift; a plot that is a 1D function of another is `Fine::rebinned` from that one's fine bins, cached in egui's data as `output::binned` is |
+| What the histogram panel's rows hold, what a drag on its band does, or what its corners say | `ui/histogram/display.rs::Rows` for the three rows, which are every file's; `ui/histogram/track.rs` for the band and its handles, which ask through `Command::{BlackPoint, WhitePoint, Slide}` and land in `Display::put_black`, `Display::put_white` — each its own end of the window, the exposure left alone — and `Display::set_displayed_bounds`; the keys that step the handles are `Action::{StepBlack, StepWhite}`, landing in `Display::step_black`, `Display::step_white`, by `input::WINDOW_STEP`; `ui/histogram/slider.rs` for the exposure, which asks through `Command::Exposure` and lands in `Display::set_exposure`, `SLIDER_STOPS` being how far it runs; `Plot::clipped` on the Output section's rebinned plot for the shares in its corners (`ui/histogram/output.rs`), and `Display::clips_white` for whether white counts. The marks `w` and the button beside the Output band paint on the picture are `fs_marks` in `shaders/image.wgsl`, which judges each texel, `image_layer::Marks`, the coarse chain of those verdicts that a minified draw reads the share of a pixel from, `shader_codes::marks`, and `Panels::mark_clipped`, toggled in `App::press` by `Control::Marks` |
 
 ## Conventions
 

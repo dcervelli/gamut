@@ -50,8 +50,8 @@ the safe way: a little under 100% rather than overrunning.
 A window also opens no smaller than one the interface itself fits in.
 `ui::PANELS_ROOM` is the room between the strips and the bars the
 [side panel](#the-side-panel) needs for either of what it holds — its least
-width, and the histogram's height, which is taller than the least column of
-information — and `Chrome::panels_window` is that plus the chrome, both at
+width, and the height of the histogram's head section, which is taller than
+the least column of information — and `Chrome::panels_window` is that plus the chrome, both at
 the interface's scale, and a logical pixel of slack. A window opening below
 it would have both those toggles dead in it from the first frame, which is
 not something the viewer asked for; where the picture is smaller than the interface, the window is
@@ -454,14 +454,16 @@ the room would be the picture's.
 
 ### A window with no room for it
 
-The panel is one width and the histogram is one height, so in a window too small for it there is nothing to give: the
-button is dead rather than the panel shrunk below what it can be read at.
+The panel is one width, and the histogram's head section one height, so in
+a window too small for that there is nothing to give: the button is dead
+rather than the panel shrunk below what it can be read at. The rest of the
+histogram's column scrolls — see [the histogram](histogram.md#a-column-of-stages).
 `chrome::side_room` is the room the panel would have — between the left
 strip and the right one, or between the file list and the window's edge
 with the bars hidden, and the height between the bars — worked out with the
 panel itself left out, so that opening it cannot make the button that
-opened it dead. `ui::room` reads it: the histogram needs `histogram::SIZE`'s
-height and the information `info::INFO_MIN_HEIGHT`, both the panel's
+opened it dead. `ui::room` reads it: the histogram needs `histogram::MIN_HEIGHT`
+and the information `info::INFO_MIN_HEIGHT`, both the panel's
 width. `chrome::side_width` is the width it is given, the file list having
 had its share first. `App::side_showing` is the one reading of
 whether it is on screen — asked for, with room for what it holds, and with
