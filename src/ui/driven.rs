@@ -2701,7 +2701,10 @@ fn a_short_histogram_scrolls_to_the_sections_below() {
             modifiers: egui::Modifiers::NONE,
             phase: egui::TouchPhase::Move,
         });
-        harness.run();
+        // Steps rather than a run: the pointer rests on whatever the
+        // column has scrolled under it, which may be a control whose
+        // tooltip asks for pass after pass.
+        harness.run_steps(4);
     }
     let after = painted_in_side(&harness, "File").expect("still laid out");
     assert!(after.min.y < before.min.y, "{after:?} from {before:?}");

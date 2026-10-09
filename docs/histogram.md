@@ -51,10 +51,22 @@ for at least is the head section (`histogram::MIN_HEIGHT`), which is what
 alive wherever the question the panel is opened for can be answered; the
 rest is a scroll away. The width is the [side panel's](interface.md#the-side-panel).
 
-Each section opens with a header: its name, and on the right what the
-pointer is reading at its stage. The header keeps a square clear at its end
-(`section::readout_end`), the same in every section, for the switch that
-will pass a stage by; the readouts already stand where they will stand then.
+The panel is laid out as the [information panel](interface.md#the-side-panel)
+is, so that the two read as two tabs of one panel: a row of buttons at its
+head, as tall as the information's header (`info::CHIP_HEIGHT`), so the
+hairline under it (`info::HEADER_GAP`) stays put as the tabs are switched;
+then the column, in a scroll area with its bar down the inner edge and the
+gutter kept clear for it; and the sections parted by hairlines through the
+gap between them (`info::SECTION_GAP`). Each section opens with a header
+as the information's sections do: its mark and name in the accent
+(`Section::mark`) — a monitor for Output, sliders for Display, the sun for
+the gain map, as it wears everywhere else in the window, and a sheet with a
+picture for File — and on the right what the pointer is reading at its
+stage. The header's last square (`section::button`) is the section's own
+button where it has one: the Gain map section's eye, which shows the map
+in the picture's place, lit while it is. It is kept clear in every other
+section, so the readouts end on one line down the column, and it is where
+the switch that passes a stage by will go.
 A stage added later — the development stages a ProRAW file describes, a
 baseline exposure, a profile's tone curve, a gain table — is a `Section`
 variant placed between Display and File at a height of its own: a 1D stage
@@ -62,9 +74,14 @@ composes into the Display curve and takes a header of its own, and a stage
 that lifts each pixel by its own amount is shaped as the Gain map section
 is, a histogram of the lift and a band of how much of it is applied.
 
-The strip of buttons — the luminance and color planes, the logarithmic
-counts and the reset — stands beside the Output plot and acts on every plot
-in the column: it is where it is always in view.
+The row of buttons — the luminance and color planes and the logarithmic
+counts, then, set apart, the marks on the picture, and at the far end the
+reset (`histogram::toolbar`) — acts on every plot in the column, or on the
+picture, and on no one section, so it stands above all of them and stays
+in view however far the column is scrolled. With nothing beside them, the
+plots fill the column's width, which is a bin to the point:
+`histogram::COLUMN_WIDTH` is the plot and the inset its ground is drawn
+into, and the side panel's width is worked out from it.
 
 ## What each section plots
 
@@ -193,12 +210,10 @@ per file and restored when a file comes back, where the marks stay on across
 files and are left alone by every reset. The key and the button both go
 through `App::press(Control::Marks)`, so the two cannot drift.
 
-The button stands beside the Output band, centered on it
-(`output::marks_button`), and not in the stack of buttons above: those act
-on the plots, and this one paints the band's two ends — the pixels the
-screen has taken to black and to white — on the picture. On a color image
-the four buttons beside the plot end a gap above it, which is what
-`TOOLBAR_GAP` is tighter than the chrome's own gap for. The button wears
+The button is in the row at the panel's head, set apart from the three
+before it by `TOOLBAR_GROUP_GAP`: those choose what the plots draw, and
+this one paints the Output band's two ends — the pixels the screen has
+taken to black and to white — on the picture. The button wears
 Lucide's `triangle-alert` (`icon::TRIANGLE_ALERT`), the sign every editor's
 clipping warning wears.
 

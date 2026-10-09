@@ -7,8 +7,8 @@
 //! the pointer is traced down the column, a rule on each plot and its value
 //! at that stage in each header.
 //!
-//! This file is the column: the sections in their order, what the panel is
-//! laid out in, the strip of buttons beside the head plot, and the trace.
+//! This file is the panel: the row of buttons at its head that act on every
+//! plot, and under it the column of sections in their order, and the trace.
 //! `section` is a section's height and header, `plot` the plot every
 //! section draws, `output`, `display`, `gain_map` and `file` the four
 //! stages, the band and its handles `track` and the exposure's slider
@@ -33,29 +33,41 @@ use crate::render::Color;
 
 use super::Rect;
 
-use super::chrome::{BUTTON_SIZE, ICON_SIDE, Pass};
+use super::chrome::{ICON_SIDE, Pass};
 use super::icon;
-use super::style::TOGGLE_RADIUS;
+use super::info::{CHIP_HEIGHT, HEAD_GAP, HEADER_GAP, MARK_GAP, SECTION_GAP};
+use super::style::{SCROLLBAR_GUTTER, SCROLLBAR_WIDTH, TOGGLE_RADIUS};
 use super::tooltip::Tip;
 use super::{BECOMES, Control, Current, PANEL_INSET, PANEL_WIDTH, TEXT_SIZE};
+use super::{RULE_WIDTH, rule};
 
 pub use section::Section;
 
-/// The least room the panel is useful in: the head section, which is what
-/// goes out to the screen, and the panel's insets around it. What a window
-/// has to have room for before the toggle is alive — see
-/// [`super::PANELS_ROOM`]. The rest of the column scrolls under it.
-pub const MIN_HEIGHT: f32 = 2.0 * PANEL_INSET + Section::Output.height();
+/// How wide the column of sections is: the plot, a point to the bin, and
+/// the inset its ground is drawn out into either side. What the side panel's
+/// width is worked out from — see [`super::PANEL_WIDTH`] — so that a plot
+/// that fills the column keeps one point to the bin.
+pub(super) const COLUMN_WIDTH: f32 = BINS as f32 + 2.0 * PLOT_INSET;
 
-/// The room the strip of buttons down the left takes: a button's width and
-/// the gap between it and the plot. Read by [`super::PANEL_WIDTH`], which is
-/// this and the plot, so that a bin stays exactly one point wide.
-pub(super) const TOOLBAR_WIDTH: f32 = BUTTON_SIZE + PANEL_INSET;
-/// Between one button of that strip and the next. Tighter than the gap the
-/// chrome's own strips keep, so that on a color image the four buttons
-/// beside the head plot leave a gap between the last of them and the one
-/// beside its band — see [`output::marks_button`].
-const TOOLBAR_GAP: f32 = 6.0;
+/// The row of buttons at the head of the panel: as tall as the information
+/// panel's header, so that switching between the two leaves the hairline
+/// under it where it was.
+const TOOLBAR_HEIGHT: f32 = CHIP_HEIGHT;
+
+/// The least room the panel is useful in: the row of buttons, the hairline
+/// under it, and the head section, which is what goes out to the screen,
+/// with the panel's insets around them. What a window has to have room for
+/// before the toggle is alive — see [`super::PANELS_ROOM`]. The rest of the
+/// column scrolls under the row.
+pub const MIN_HEIGHT: f32 =
+    2.0 * PANEL_INSET + TOOLBAR_HEIGHT + HEADER_GAP + Section::Output.height();
+
+/// Between one button of the row and the next.
+const TOOLBAR_GAP: f32 = 4.0;
+/// And the wider gap that sets the toggle marking the clipped pixels apart
+/// from the three that choose what the plots draw: those are about the
+/// panel, and it is about the picture.
+const TOOLBAR_GROUP_GAP: f32 = 12.0;
 
 /// The middle of the grid a mark is described on, and the two measures the
 /// plane toggles are drawn from, in that grid's units: how far each color
@@ -66,17 +78,17 @@ const LUMA_DISC: f32 = 8.0;
 const PLANE_ORBIT: f32 = 5.5;
 const PLANE_DISC: f32 = 4.0;
 
-/// The line a section opens with: its name, and what the pointer is
-/// reading at its stage. A whole number of pixels, as everything a
+/// The line a section opens with: its mark and name, what the pointer is
+/// reading at its stage, and the section's own button where it has one. As
+/// tall as that button, and a whole number of pixels, as everything a
 /// section's height is summed from is, so that each section starts on one.
-const LABEL_HEIGHT: f32 = 18.0;
+const LABEL_HEIGHT: f32 = CHIP_HEIGHT;
 /// How tall the plot's ground stands in the two sections whose plots are
-/// read closely — what goes out, and what the display makes of it — on an
-/// image with a row of false colors under the band. The row takes its room
-/// off the plot rather than off the section — see [`display::plot_area`] —
-/// so a color image's plot is this and the row besides, and the head
-/// section's plot is that height for every file, which is what the strip
-/// of four buttons beside it needs.
+/// read closely — what goes out, and what the display makes of it. On an
+/// image with a row of false colors under the Display band, the row takes
+/// its room off that plot rather than off the section — see
+/// [`display::plot_area`] — so a color image's Display plot is this and the
+/// row besides.
 const PLOT_HEIGHT: f32 = 88.0;
 /// And in the two whose plots are context — the gain map's lift and the
 /// file as stored — which are read for their shape against the plots
@@ -89,8 +101,6 @@ const PLOT_RADIUS: f32 = 3.0;
 /// The room left around that ground, so the plot reads as set into the panel
 /// rather than as a hole cut in it.
 const PLOT_INSET: f32 = 4.0;
-/// Between one section and the next.
-const SECTION_GAP: f32 = 8.0;
 
 /// What the luminance plane drops to once color planes are drawn over it.
 const HISTOGRAM_LUMA_UNDER: u8 = 110;
@@ -212,30 +222,36 @@ pub fn panel(side: Rect) -> Rect {
     Rect::new(side.x, side.y, PANEL_WIDTH, side.height)
 }
 
-/// The buttons down the left that act on every plot, in the order they are
-/// stacked beside the head one. The one beside its band is not among them —
-/// see [`output::marks_button`].
+/// The buttons at the head of the panel, each with where it goes in the row
+/// `row`: what the plots draw — the luminance and the color planes, and the
+/// count axis — then, set apart, the marks on the picture, and at the far
+/// end the reset, which does something rather than being something.
+///
+/// They act on every plot down the column, or on the picture, and on no
+/// one section, so they stand above all of them, where they stay in view
+/// however far the column is scrolled.
 ///
 /// A control that could not act is left out rather than drawn dead: an image
-/// with one channel has no color planes to toggle, and the two that remain
-/// close the gap up. Hiding rather than dimming is the panel's rule for both
-/// of these — see [`display::swatch_button`] for the other one.
-fn toolbar(gray: bool) -> &'static [Control] {
-    const GRAY: [Control; 3] = [Control::Luma, Control::Log, Control::Reset];
-    const COLOR: [Control; 4] = [Control::Luma, Control::Planes, Control::Log, Control::Reset];
-    if gray { &GRAY } else { &COLOR }
-}
-
-/// One of the buttons down the left of a section whose plot is `bars`, by
-/// its place in the column: aligned with the top of the plot's ground
-/// rather than with the section, since what they act on is the plot.
-fn toolbar_button(bars: Rect, index: usize) -> Rect {
-    Rect::new(
-        bars.x - TOOLBAR_WIDTH,
-        bars.y - PLOT_INSET + index as f32 * (BUTTON_SIZE + TOOLBAR_GAP),
-        BUTTON_SIZE,
-        BUTTON_SIZE,
-    )
+/// with one channel has no color planes to toggle, and the rest close the
+/// gap up. Hiding rather than dimming is the panel's rule — see
+/// [`display::swatch_button`] for the other place it is kept.
+fn toolbar(row: Rect, gray: bool) -> Vec<(Control, Rect)> {
+    let square = |x: f32| Rect::new(x, row.y, TOOLBAR_HEIGHT, TOOLBAR_HEIGHT);
+    let planes: &[Control] = if gray {
+        &[Control::Luma, Control::Log]
+    } else {
+        &[Control::Luma, Control::Planes, Control::Log]
+    };
+    let mut x = row.x;
+    let mut buttons = Vec::new();
+    for control in planes {
+        buttons.push((*control, square(x)));
+        x += TOOLBAR_HEIGHT + TOOLBAR_GAP;
+    }
+    x += TOOLBAR_GROUP_GAP - TOOLBAR_GAP;
+    buttons.push((Control::Marks, square(x)));
+    buttons.push((Control::Reset, square(row.right() - TOOLBAR_HEIGHT)));
+    buttons
 }
 
 /// One of `count` cells dividing `row` between them, with [`CELL_GAP`]
@@ -460,15 +476,17 @@ fn share_words(share: f32) -> Option<String> {
     })
 }
 
-/// Draws the histogram down the side panel `side`: the sections in their
-/// order, in a column that scrolls where the side is shorter than they are.
+/// Draws the histogram down the side panel `side`: the row of buttons at
+/// its head, a hairline, and under that the sections in their order, in a
+/// column that scrolls where the side is shorter than they are. Laid out as
+/// the information panel is, so that the two read as two tabs of one panel.
 ///
 /// Every section is laid out at its own height whatever the room, so that
 /// nothing is shrunk or dropped on a short window; the head section is what
 /// the panel needs room for at least — see [`MIN_HEIGHT`] — and the rest is
-/// scrolled to. The scroll is egui's, and is the wheel's alone: a drag in
-/// the column is a drag of whatever is under it — a handle, the band, the
-/// exposure's slider — and never moves the column.
+/// scrolled to. The scroll is egui's, and is the wheel's and the bar's
+/// alone: a drag in the column is a drag of whatever is under it — a
+/// handle, the band, the exposure's slider — and never moves the column.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, side: Rect) {
     let panel = panel(side);
     let body = ui.interact(
@@ -477,50 +495,85 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, side: 
         Sense::CLICK | Sense::DRAG,
     );
     body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
+    let inside = egui::Rect::from(panel).shrink(PANEL_INSET);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(inside), |ui| {
+        ui.set_min_size(inside.size());
+        ui.set_max_size(inside.size());
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+
+        let (row, _) =
+            ui.allocate_exact_size(egui::vec2(inside.width(), TOOLBAR_HEIGHT), Sense::hover());
+        // As wide as the panel's inside, past the scrollbar's gutter, as the
+        // information panel's header is, so that the reset ends where its
+        // copy button does.
+        let row = Rect::new(row.min.x, row.min.y, row.width(), TOOLBAR_HEIGHT);
+        toolbar_buttons(pass, ui, current.image.is_gray(), row);
+        // The hairline under the row, as under the information panel's
+        // header: the column runs on under it rather than stopping short.
+        ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+        rule(pass, ui, COLUMN_WIDTH);
+        ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
+
+        ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
+        egui::ScrollArea::vertical()
+            .id_salt("histogram column")
+            .auto_shrink(false)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+            .scroll_source(egui::scroll_area::ScrollSource {
+                drag: egui::scroll_area::DragScroll::Never,
+                ..Default::default()
+            })
+            .show(ui, |ui| column(pass, ui, current));
+    });
+}
+
+/// The column of sections, inside the scroll area.
+fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     let height = section::height(current);
-    egui::ScrollArea::vertical()
-        .id_salt("histogram column")
-        .auto_shrink(false)
-        .scroll_source(egui::scroll_area::ScrollSource {
-            drag: egui::scroll_area::DragScroll::Never,
-            ..Default::default()
-        })
-        .show(ui, |ui| {
-            let (column, _) =
-                ui.allocate_exact_size(egui::vec2(PANEL_WIDTH, height), Sense::hover());
-            let column = Rect::new(column.min.x, column.min.y, PANEL_WIDTH, height);
-            let layout = section::layout(column, current);
-            // A pointer over a section scrolled out of the panel is not
-            // over it.
-            let visible = ui.clip_rect();
-            let cursor = pass
-                .input
-                .cursor
-                .filter(|&[x, y]| visible.contains(pos2(x, y)));
-            let binned = output::binned(ui, current, pass.input);
-            let lift = gain_map::lift_plot(ui, current);
-            let plots = Plots {
-                output: &binned,
-                lift: lift.as_deref(),
-            };
-            let traced = marked(
-                current,
-                &layout,
-                cursor,
-                pass.input.pointer,
-                pass.input.headroom,
-                &plots,
+    let (column, _) = ui.allocate_exact_size(egui::vec2(COLUMN_WIDTH, height), Sense::hover());
+    let column = Rect::new(column.min.x, column.min.y, COLUMN_WIDTH, height);
+    let layout = section::layout(column, current);
+    // A pointer over a section scrolled out of the panel is not over it.
+    let visible = ui.clip_rect();
+    let cursor = pass
+        .input
+        .cursor
+        .filter(|&[x, y]| visible.contains(pos2(x, y)));
+    let binned = output::binned(ui, current, pass.input);
+    let lift = gain_map::lift_plot(ui, current);
+    let plots = Plots {
+        output: &binned,
+        lift: lift.as_deref(),
+    };
+    let traced = marked(
+        current,
+        &layout,
+        cursor,
+        pass.input.pointer,
+        pass.input.headroom,
+        &plots,
+    );
+    for (place, (section, rect)) in layout.into_iter().enumerate() {
+        // Every section after the first is parted from the one above by a
+        // hairline through the middle of the gap, as the information
+        // panel's are.
+        if place > 0 {
+            let edge = pass.grid.line_width(RULE_WIDTH);
+            let y = pass.grid.snap(rect.y - (SECTION_GAP + edge) / 2.0);
+            ui.painter().rect_filled(
+                egui::Rect::from_min_size(pos2(rect.x, y), egui::vec2(rect.width, edge)),
+                0.0,
+                pass.theme.border,
             );
-            for (section, rect) in layout {
-                let mark = traced.of(section);
-                match section {
-                    Section::Output => output::show(pass, ui, current, rect, &binned, mark),
-                    Section::Display => display::show(pass, ui, current, rect, mark),
-                    Section::GainMap => gain_map::show(pass, ui, current, rect, &plots, mark),
-                    Section::File => file::show(pass, ui, current, rect, mark),
-                }
-            }
-        });
+        }
+        let mark = traced.of(section);
+        match section {
+            Section::Output => output::show(pass, ui, current, rect, &binned, mark),
+            Section::Display => display::show(pass, ui, current, rect, mark),
+            Section::GainMap => gain_map::show(pass, ui, current, rect, &plots, mark),
+            Section::File => file::show(pass, ui, current, rect, mark),
+        }
+    }
 }
 
 /// A button on the panel at `rect`: its ground and ink by whether it is
@@ -548,23 +601,20 @@ fn button(
     (response, background, ink)
 }
 
-/// The strip of buttons down the left of the plot `bars`: the luminance
-/// and the color planes, the logarithmic counts and the reset. Beside the
-/// head plot, since they act on every plot down the column and the head is
-/// where they are always in view.
+/// The row of buttons at the head of the panel, laid out along `row` — see
+/// [`toolbar`].
 ///
 /// Drawn here rather than with the chrome's toggles because these belong to
-/// the panel: they say what the plots beside them are showing, and two of
+/// the panel: they say what the plots under them are showing, and two of
 /// them are pictures of the very thing they switch.
-fn toolbar_buttons(pass: &mut Pass, ui: &mut egui::Ui, gray: bool, bars: Rect) {
+fn toolbar_buttons(pass: &mut Pass, ui: &mut egui::Ui, gray: bool, row: Rect) {
     let panels = pass.panels;
-    for (slot, widget) in toolbar(gray).iter().enumerate() {
-        let rect = toolbar_button(bars, slot);
-        // The reset is never lit, where the toggles above it are: it does
-        // something rather than being something, and a momentary button
-        // holding a state is a button that has to explain itself.
-        let active = panels.lit(*widget);
-        let (_, background, ink) = button(pass, ui, rect, *widget, active, true, TOGGLE_RADIUS);
+    for (widget, rect) in toolbar(row, gray) {
+        // The reset is never lit, where the toggles are: it does something
+        // rather than being something, and a momentary button holding a
+        // state is a button that has to explain itself.
+        let active = panels.lit(widget);
+        let (_, background, ink) = button(pass, ui, rect, widget, active, true, TOGGLE_RADIUS);
         let grid = pass.grid;
         let square = icon::square(grid, egui::Rect::from(rect), ICON_SIDE);
         let painter = ui.painter();
@@ -606,14 +656,16 @@ fn toolbar_buttons(pass: &mut Pass, ui: &mut egui::Ui, gray: bool, bars: Rect) {
             }
             // The count axis as a curve, which is what the switch puts it on.
             Control::Log => icon::paint(painter, icon::SPLINE, square, ink, background),
+            // The warning sign, for what the display has thrown away.
+            Control::Marks => icon::paint(painter, icon::TRIANGLE_ALERT, square, ink, background),
             // Back to the start.
             _ => icon::paint(painter, icon::ROTATE_CCW, square, ink, background),
         }
     }
 }
 
-/// A button with a mark from `ui::icon` on it, beside a section's plot or
-/// band.
+/// A button with a mark from `ui::icon` on it: a section's own, at the end
+/// of its header.
 fn icon_button(
     pass: &mut Pass,
     ui: &mut egui::Ui,

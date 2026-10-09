@@ -165,6 +165,29 @@ pub(super) const CHART_AREA: &[Mark] = &[
     },
 ];
 
+/// Lucide's `monitor`: a screen on its stand, for the histogram's section on
+/// what goes out to the screen.
+pub(super) const MONITOR: &[Mark] = &[
+    Mark::rect([2.0, 3.0], [20.0, 14.0], 2.0),
+    Mark::Line([8.0, 21.0], [16.0, 21.0]),
+    Mark::Line([12.0, 17.0], [12.0, 21.0]),
+];
+
+/// Lucide's `sliders-horizontal`: three tracks with a handle on each, for
+/// the histogram's section on the display, whose window, exposure and curve
+/// are set there.
+pub(super) const SLIDERS_HORIZONTAL: &[Mark] = &[
+    Mark::Line([21.0, 4.0], [14.0, 4.0]),
+    Mark::Line([10.0, 4.0], [3.0, 4.0]),
+    Mark::Line([21.0, 12.0], [12.0, 12.0]),
+    Mark::Line([8.0, 12.0], [3.0, 12.0]),
+    Mark::Line([21.0, 20.0], [16.0, 20.0]),
+    Mark::Line([12.0, 20.0], [3.0, 20.0]),
+    Mark::Line([14.0, 2.0], [14.0, 6.0]),
+    Mark::Line([8.0, 10.0], [8.0, 14.0]),
+    Mark::Line([16.0, 18.0], [16.0, 22.0]),
+];
+
 /// Lucide's `info`. The panel this opens is a column of words about the file
 /// rather than a picture of anything, so the mark for it is the one the rest
 /// of the world already uses for that.
@@ -1252,7 +1275,7 @@ mod tests {
 
     /// Every icon in the table, so that a new one is held to the same
     /// promises as the rest.
-    const ICONS: [&[Mark]; 44] = [
+    const ICONS: [&[Mark]; 46] = [
         CHART_AREA,
         INFO,
         CIRCLE_QUESTION_MARK,
@@ -1297,6 +1320,8 @@ mod tests {
         AXIS_3D,
         SUN,
         EYE,
+        MONITOR,
+        SLIDERS_HORIZONTAL,
     ];
 
     /// The scales a run of columns is cut at: the display's, and the

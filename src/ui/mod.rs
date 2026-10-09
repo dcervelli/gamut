@@ -53,7 +53,6 @@ use crate::image::exif::Exif;
 use crate::image::orient::Turn;
 use crate::image::region::{Grip, Region};
 use crate::image::sequence::Sequence;
-use crate::image::stats::BINS;
 use crate::image::{DecodedImage, Sample, Stats};
 use egui::Sense;
 pub use transport::Transport;
@@ -205,14 +204,15 @@ const MENU_OFFSET: f32 = PADDING / 2.0;
 /// The gap between a floating panel's edge and what is on it.
 const PANEL_INSET: f32 = 10.0;
 
-/// How wide the histogram is at its own size, which is the side panel at its
-/// narrowest: wide enough that a bin is exactly one point, so that the
-/// pointer reads one bin to the point across it. What is drawn there is one
+/// How wide the side panel is: the histogram's column, wide enough that a
+/// plot filling it has a bin to the point, so that the pointer reads one bin
+/// to the point across it, with the gutter kept for the column's scrollbar
+/// and the panel's inset either side. What is drawn there is one
 /// column to the device pixel — see `histogram::plot` — which keeps the bars
 /// even at any scale, where a column to the bin would land some of them
 /// astride a pixel boundary and come out fatter than their neighbors. The
 /// help popup opens no narrower.
-const PANEL_WIDTH: f32 = histogram::TOOLBAR_WIDTH + BINS as f32 + 2.0 * PANEL_INSET;
+const PANEL_WIDTH: f32 = histogram::COLUMN_WIDTH + style::SCROLLBAR_GUTTER + 2.0 * PANEL_INSET;
 
 use style::PANEL_RADIUS;
 

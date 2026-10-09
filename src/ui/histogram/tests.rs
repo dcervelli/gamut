@@ -1,5 +1,4 @@
 use super::display::{Rows, plot_area, row_buttons, swatch_button};
-use super::output::marks_button;
 use super::*;
 use crate::image::display::{Colormap, Headroom, ToneMap};
 use crate::image::gain_map::{GainMap, Lift};
@@ -42,9 +41,9 @@ fn gain_mapped() -> Current {
     shown(image)
 }
 
-/// The column laid out from the top of a side panel `height` tall.
+/// The column laid out from the top of a scroll area `height` tall.
 fn laid_out(current: &Current, height: f32) -> Vec<(Section, Rect)> {
-    section::layout(panel(Rect::new(0.0, 0.0, side::WIDTH, height)), current)
+    section::layout(Rect::new(0.0, 0.0, COLUMN_WIDTH, height), current)
 }
 
 /// Where `section` was laid out.
@@ -142,12 +141,17 @@ fn a_decimal_is_written_without_the_zeros_it_does_not_need() {
 }
 
 /// The panel is the whole of the side, and every section in it is laid out
-/// at its own height whatever the side's: on a side shorter than the column
-/// the column runs on past it, to be scrolled to, rather than any section
-/// being shrunk or left out.
+/// at its own height and the column's width, whatever the side's height: on
+/// a side shorter than the column the column runs on past it, to be
+/// scrolled to, rather than any section being shrunk or left out.
 #[test]
 fn every_section_is_laid_out_at_its_own_height_whatever_the_room() {
     assert_eq!(side::WIDTH, PANEL_WIDTH);
+    assert_eq!(
+        PANEL_WIDTH,
+        COLUMN_WIDTH + crate::ui::style::SCROLLBAR_GUTTER + 2.0 * PANEL_INSET,
+        "the column, its scrollbar's gutter and the panel's insets"
+    );
     let side = Rect::new(40.0, 30.0, side::WIDTH, 300.0);
     let whole = panel(side);
     assert_eq!(
@@ -156,12 +160,14 @@ fn every_section_is_laid_out_at_its_own_height_whatever_the_room() {
     );
 
     let current = gain_mapped();
-    let layout = section::layout(whole, &current);
+    let column = Rect::new(50.0, 70.0, COLUMN_WIDTH, 240.0);
+    let layout = section::layout(column, &current);
     let sections: Vec<Section> = layout.iter().map(|(section, _)| *section).collect();
     assert_eq!(sections, Section::ALL, "in the order the data flows");
+    assert_eq!(layout[0].1.y, column.y, "the first opens the column");
     for (section, rect) in &layout {
         assert_eq!(rect.height, section.height(), "{section:?}");
-        assert_eq!(rect.width, PANEL_WIDTH);
+        assert_eq!((rect.x, rect.width), (column.x, COLUMN_WIDTH));
     }
     for pair in layout.windows(2) {
         assert_eq!(
@@ -172,17 +178,17 @@ fn every_section_is_laid_out_at_its_own_height_whatever_the_room() {
             pair[0].0
         );
     }
-    let bottom = layout.last().expect("sections").1.bottom() + PANEL_INSET;
-    assert_eq!(bottom - side.y, section::height(&current));
+    let bottom = layout.last().expect("sections").1.bottom();
+    assert_eq!(bottom - column.y, section::height(&current));
     assert!(
-        bottom - side.y > 2.0 * side.height,
+        bottom - column.y > 2.0 * column.height,
         "the column runs on past a short side: {}",
-        bottom - side.y
+        bottom - column.y
     );
     assert_eq!(
         MIN_HEIGHT,
-        2.0 * PANEL_INSET + Section::Output.height(),
-        "the head section is the least the panel needs"
+        2.0 * PANEL_INSET + TOOLBAR_HEIGHT + HEADER_GAP + Section::Output.height(),
+        "the row of buttons and the head section are the least the panel needs"
     );
 }
 
@@ -269,51 +275,63 @@ fn the_pointer_marks_the_bar_it_is_over() {
     assert_eq!(bin_across(BINS - 1), 1.0);
 }
 
-/// The strip of buttons stands beside the head plot and clear of it, ends
-/// above the band of color, and the button that marks the clipped pixels
-/// stands beside that band, centered on it, clear of the stack above and
-/// of the section below.
+/// The row of buttons at the head of the panel: the plot toggles from the
+/// left, the clipped pixels' toggle set apart after them, and the reset at
+/// the far end, all inside the row and none on another. A control that
+/// could do nothing is not there at all, and the ones that remain close up.
 #[test]
-fn the_strip_and_the_marks_button_stand_beside_the_head_plot() {
+fn the_row_of_buttons_heads_the_panel() {
+    let row = Rect::new(10.0, 10.0, COLUMN_WIDTH, TOOLBAR_HEIGHT);
     for gray in [true, false] {
-        let layout = laid_out(&picture(gray), 600.0);
-        let rect = rect_of(&layout, Section::Output);
-        let bars = Section::Output.plot(rect, gray);
-        let last = toolbar_button(bars, toolbar(gray).len() - 1);
-        assert!(last.right() <= bars.x, "the strip clears the plot");
-        assert!(toolbar_button(bars, 0).y >= section::header_line(rect).bottom());
+        let buttons = toolbar(row, gray);
+        let controls: Vec<Control> = buttons.iter().map(|(control, _)| *control).collect();
+        let expected: &[Control] = if gray {
+            &[Control::Luma, Control::Log, Control::Marks, Control::Reset]
+        } else {
+            &[
+                Control::Luma,
+                Control::Planes,
+                Control::Log,
+                Control::Marks,
+                Control::Reset,
+            ]
+        };
+        assert_eq!(controls, expected, "gray {gray}");
+        for pair in buttons.windows(2) {
+            assert!(pair[0].1.right() < pair[1].1.x, "{pair:?}");
+        }
+        for (control, rect) in &buttons {
+            assert!(
+                rect.x >= row.x && rect.right() <= row.right(),
+                "{control:?}"
+            );
+            assert_eq!((rect.y, rect.height), (row.y, row.height), "{control:?}");
+        }
+        let [.., (_, log), (_, marks), (_, reset)] = buttons.as_slice() else {
+            panic!("{buttons:?}");
+        };
         assert!(
-            last.bottom() <= ramp(bars).y,
-            "gray {gray}: {last:?} against the band at {:?}",
-            ramp(bars)
+            marks.x - log.right() > TOOLBAR_GAP,
+            "the marks are set apart from the plot toggles"
         );
-
-        let marks = marks_button(bars);
-        let band = ramp(bars);
-        assert_eq!(marks.x, toolbar_button(bars, 0).x, "in the strip");
-        assert_eq!(
-            marks.y + marks.height / 2.0,
-            band.y + band.height / 2.0,
-            "centered on the band"
-        );
-        assert!(
-            marks.y >= last.bottom() + TOOLBAR_GAP,
-            "gray {gray}: {marks:?} against the stack ending at {last:?}"
-        );
-        assert!(marks.bottom() <= rect.bottom(), "{marks:?} in {rect:?}");
+        assert_eq!(reset.right(), row.right(), "the reset at the far end");
     }
 }
 
-/// A control that could do nothing is not on the panel at all, and the
-/// ones that remain close the gap up rather than leaving a hole where it
-/// would have been.
+/// A section's own button stands at the end of its header, and the
+/// readout ends short of it.
 #[test]
-fn a_control_that_could_do_nothing_is_not_there() {
-    assert_eq!(toolbar(true), [Control::Luma, Control::Log, Control::Reset]);
-    assert_eq!(
-        toolbar(false),
-        [Control::Luma, Control::Planes, Control::Log, Control::Reset],
-        "three channels have planes to toggle"
+fn a_sections_button_ends_its_header() {
+    let layout = laid_out(&gain_mapped(), 600.0);
+    let rect = rect_of(&layout, Section::GainMap);
+    let line = section::header_line(rect);
+    let button = section::button(rect);
+    assert_eq!(button.right(), line.right());
+    assert_eq!((button.y, button.height), (line.y, line.height));
+    assert!(section::readout_end(line) < button.x);
+    assert!(
+        line.bottom() <= Section::GainMap.plot(rect, false).y - PLOT_INSET,
+        "the header is clear of the plot's ground"
     );
 }
 
@@ -350,12 +368,12 @@ fn the_rows_sit_under_the_display_band() {
     let layout = laid_out(&picture(false), 600.0);
     let rect = rect_of(&layout, Section::Display);
     let rows = Rows::new(rect);
-    let inside = rect.inset(PANEL_INSET, 0.0);
+    let inside = rect;
     let band = ramp(plot_area(rect, false));
 
     for (widget, button) in row_buttons(rect) {
         assert!(button.y >= band.bottom(), "{widget:?} clears the band");
-        assert!(button.x >= inside.x + 58.0, "{widget:?} clears its word");
+        assert!(button.x >= inside.x + 56.0, "{widget:?} clears its word");
         assert!(
             button.right() <= inside.right() + 0.01,
             "{widget:?} {button:?}"

@@ -48,7 +48,7 @@ pub(super) const ROWS_HEIGHT: f32 = PLOT_INSET + 3.0 * (ROW_GAP + ROW_HEIGHT);
 /// Wide enough for the longest of the three at [`ROW_TEXT`] and no wider:
 /// what it does not take is what the buttons beside it have, and the row of
 /// three windows is the narrowest cell on the panel.
-const ROW_LABEL: f32 = 58.0;
+const ROW_LABEL: f32 = 56.0;
 const ROW_LABEL_GAP: f32 = 6.0;
 
 /// How much of the exposure's row is set aside at its end for the reading:
@@ -56,16 +56,15 @@ const ROW_LABEL_GAP: f32 = 6.0;
 /// rows below, where their last button ends. Wide enough for the stops the
 /// slider reaches and for the two-decimal reading a `--exposure` off the
 /// quarters falls back to.
-const STOPS_WIDTH: f32 = 40.0;
+const STOPS_WIDTH: f32 = 36.0;
 
 /// The plot and the row of false colors under its band, together: the room
 /// the section gives them, the same for every file.
 fn full_bars(rect: Rect) -> Rect {
-    let inside = rect.inset(PANEL_INSET, 0.0);
     Rect::new(
-        inside.x + TOOLBAR_WIDTH,
-        rect.y + LABEL_HEIGHT + PLOT_INSET,
-        inside.width - TOOLBAR_WIDTH,
+        rect.x + PLOT_INSET,
+        rect.y + LABEL_HEIGHT + HEAD_GAP + PLOT_INSET,
+        rect.width - 2.0 * PLOT_INSET,
         PLOT_HEIGHT + RAMP_GAP + SWATCH_HEIGHT,
     )
 }
@@ -131,7 +130,7 @@ pub(super) struct Rows {
 impl Rows {
     /// The rows of the section laid out at `rect`.
     pub fn new(rect: Rect) -> Self {
-        let inside = rect.inset(PANEL_INSET, 0.0);
+        let inside = rect;
         let left = inside.x + ROW_LABEL + ROW_LABEL_GAP;
         let line = |y: f32| {
             (

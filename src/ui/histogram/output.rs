@@ -3,8 +3,7 @@
 //! response and binned again on the curve the screen is driven with — sRGB's
 //! — from black to as far above white as the surface goes, so that what the
 //! surface clips piles into the end it is clipped at. The shares clipped at
-//! either end are written in its corners, and the button that marks those
-//! pixels on the picture stands beside its band.
+//! either end are written in its corners.
 
 use std::sync::Arc;
 
@@ -199,25 +198,9 @@ pub(super) fn pixel_mark(
     })
 }
 
-/// The button that marks the clipped pixels on the picture: in the strip's
-/// column, beside the band and centered on it. Beside the band rather than
-/// in the stack above, because what it paints is the band's two ends — the
-/// pixels the screen has taken to black and to white — and not anything
-/// about the plot; the stack is the plot's.
-pub(super) fn marks_button(bars: Rect) -> Rect {
-    let band = ramp(bars);
-    Rect::new(
-        bars.x - TOOLBAR_WIDTH,
-        band.y + (band.height - BUTTON_SIZE) / 2.0,
-        BUTTON_SIZE,
-        BUTTON_SIZE,
-    )
-}
-
-/// The Output section, laid out at `rect`: the strip of buttons beside its
-/// plot, the plot of what goes out with white marked where white is not its
-/// top, the shares clipped at either end in its corners, the band of what
-/// each output is, and the button that marks the clipped pixels.
+/// The Output section, laid out at `rect`: the plot of what goes out with
+/// white marked where white is not its top, the shares clipped at either
+/// end in its corners, and the band of what each output is.
 pub(super) fn show(
     pass: &mut Pass,
     ui: &mut egui::Ui,
@@ -229,7 +212,6 @@ pub(super) fn show(
     let theme = pass.theme;
     let gray = current.image.is_gray();
     let plot_rect = Section::Output.plot(rect, gray);
-    toolbar_buttons(pass, ui, gray, plot_rect);
     bars(
         pass,
         ui,
@@ -291,18 +273,6 @@ pub(super) fn show(
         };
         (Color::from_linear(color), out > ABOVE_WHITE)
     });
-
-    // The marks on the picture, beside the band whose ends they are: lit
-    // while they are on, a state to be left in as the plane toggles are.
-    // The warning sign, for what the display has thrown away.
-    icon_button(
-        pass,
-        ui,
-        marks_button(plot_rect),
-        Control::Marks,
-        pass.panels.lit(Control::Marks),
-        icon::TRIANGLE_ALERT,
-    );
 
     section::header(
         pass,

@@ -445,8 +445,9 @@ not for what was opened. `~` takes it down with the rest.
 ### Its width
 
 The panel is one width, `side::WIDTH`, which is `PANEL_WIDTH`: the
-histogram at its own size, a bin to the point with the buttons beside the
-plot. That is the one thing on either tab that cannot give — a plot
+histogram's column (`histogram::COLUMN_WIDTH`), whose plots fill it at a bin
+to the point, the gutter kept for the scrollbar, and the panel's inset.
+That is the one thing on either tab that cannot give — a plot
 narrower than its bins would draw some of them a pixel and some none — and
 the information's column reads at it comfortably. It is not dragged wider:
 nothing on either tab would use the room but a longer line of facts, and

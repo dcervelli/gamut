@@ -640,7 +640,8 @@ the pointer at that stage; pointing at the picture marks the pixel on every
 plot and writes its value at each stage, from the file at the foot of the
 panel to what the screen shows at the top.
 
-`w`, or the button beside the band under the plot, paints the clipped
+`w`, or the warning sign in the row of buttons at the top of the panel,
+paints the clipped
 pixels on the picture itself: red where any channel has reached white,
 blue where any has reached black. One channel is enough, because one is
 enough to lose the color: a sun whose red has burned out is painted red
@@ -763,7 +764,7 @@ The histogram plots each bar as its share of the fullest one, which is the
 plot a photograph wants. It is the wrong plot for measurement data, where one
 value often covers most of the image — a masked sea, the black surround of a
 scan — and that one bar flattens everything the rest of the range is doing
-into the axis. `y`, or the button for it down the left of the plot, counts the
+into the axis. `y`, or the button for it at the top of the panel, counts the
 logarithm instead: the tall bar stays at the top and the short ones rise to
 where they can be read beside it. Heights can no longer be compared with each
 other once it is on, which is the point of it being a switch. It applies to

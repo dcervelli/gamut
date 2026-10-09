@@ -93,9 +93,10 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  and the information it holds; WIDTH, which is the histogram's; and show(),
                  which hands it to the one it holds
   histogram/     the histogram down the side panel, a section to a stage of the picture's way
-                 to the screen: mod.rs the column, its scroll, the strip of buttons and the
-                 pixel traced down it (marked()), section.rs Section — the stages in flow
-                 order, each one height — and its header, plot.rs the plot every section
+                 to the screen, laid out as info.rs is: mod.rs the row of buttons at its head,
+                 the scrolling column under it and the pixel traced down it (marked()),
+                 section.rs Section — the stages in flow order, each one height — and its
+                 header with its mark and its own button, plot.rs the plot every section
                  draws, output.rs / display.rs / gain_map.rs / file.rs the four stages,
                  track.rs the band and its handles, slider.rs the exposure's slider, drawn
                  by ui/slider.rs

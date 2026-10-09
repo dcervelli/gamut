@@ -27,7 +27,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   gamut color sits inside the file's range there and past it above. With
   the pointer on the picture, every section marks the pixel's bar and
   writes its value at that stage. On a short window the panel scrolls, and
-  only the Output section needs room for the histogram button to work.
+  only the Output section needs room for the histogram button to work. The
+  buttons that act on every plot, and the one that marks the clipped
+  pixels, are in a row at the top of the panel, as the information's tabs
+  are; the gain map's section has the button that shows the map in its
+  heading; and the plots run the panel's whole width.
 
 ## 0.11.0 - 2026-10-10
 

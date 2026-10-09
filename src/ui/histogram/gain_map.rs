@@ -1,7 +1,7 @@
 //! The Gain map section, for a picture that carries one: how far the map
 //! lifts the picture, as a histogram in stops at the whole of the lift, and
 //! along its foot how much of that lift the display's room is showing. The
-//! button that shows the map in the picture's place stands beside it.
+//! button that shows the map in the picture's place is in its header.
 
 use std::sync::Arc;
 
@@ -134,13 +134,16 @@ pub(super) fn show(
         return;
     };
     let plot_rect = Section::GainMap.plot(rect, current.image.is_gray());
+    // The switch that shows the map in the picture's place, at the end of
+    // the header: an eye, since what it changes is what is on screen, and
+    // lit while the map is.
     icon_button(
         pass,
         ui,
-        toolbar_button(plot_rect, 0),
+        section::button(rect),
         Control::ShowGainMap,
         current.showing == Showing::Auxiliary(Auxiliary::GainMap),
-        icon::SUN,
+        icon::EYE,
     );
 
     let readout = mark

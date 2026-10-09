@@ -48,6 +48,19 @@ impl Section {
         }
     }
 
+    /// The mark beside its name, in the accent, as the information panel's
+    /// sections wear theirs: a screen for what goes out, the sliders the
+    /// display is set by, the sun the gain map is known by elsewhere in the
+    /// window, and a sheet with a picture on it for the file.
+    pub(in crate::ui) fn mark(self) -> &'static [icon::Mark] {
+        match self {
+            Section::Output => icon::MONITOR,
+            Section::Display => icon::SLIDERS_HORIZONTAL,
+            Section::GainMap => icon::SUN,
+            Section::File => icon::FILE_IMAGE,
+        }
+    }
+
     /// Whether `current` passes through this stage.
     pub fn applies(self, current: &Current) -> bool {
         match self {
@@ -61,21 +74,13 @@ impl Section {
     /// laid out where the last one's was, and a section is never shrunk to
     /// fit a short window — the column scrolls instead.
     pub const fn height(self) -> f32 {
-        let head = LABEL_HEIGHT + PLOT_INSET;
+        let head = LABEL_HEIGHT + HEAD_GAP + PLOT_INSET;
         let band = PLOT_INSET + RAMP_GAP + RAMP_HEIGHT;
         match self {
-            // The plot at the height the strip of four buttons beside it
-            // needs, the band, and the half of the clipped pixels' button
-            // that stands below the band it is centered on.
-            Section::Output => {
-                head + PLOT_HEIGHT
-                    + RAMP_GAP
-                    + display::SWATCH_HEIGHT
-                    + band
-                    + (BUTTON_SIZE - RAMP_HEIGHT) / 2.0
-            }
-            // The plot, the band, and the three rows of settings under it.
-            // The rows take the inset under the plot as their own: see
+            // The plot and the band of what each output comes out as.
+            Section::Output => head + PLOT_HEIGHT + band,
+            // The plot, the band, and the three rows of settings under it,
+            // which take the inset under the plot as their own: see
             // `display::ROWS_HEIGHT`.
             Section::Display => {
                 head + PLOT_HEIGHT
@@ -93,18 +98,15 @@ impl Section {
         }
     }
 
-    /// The ground the bins stand on in the section laid out at `rect`. The
-    /// bins are one point each, so this is the full width of the plot and
-    /// the room around it is drawn outside it.
+    /// The ground the bins stand on in the section laid out at `rect`: the
+    /// whole width of the column, less the inset the ground is drawn out
+    /// into, which leaves the bins a point each.
     pub fn plot(self, rect: Rect, gray: bool) -> Rect {
-        let inside = rect.inset(PANEL_INSET, 0.0);
-        let x = inside.x + TOOLBAR_WIDTH;
-        let y = rect.y + LABEL_HEIGHT + PLOT_INSET;
-        let width = inside.width - TOOLBAR_WIDTH;
+        let x = rect.x + PLOT_INSET;
+        let y = rect.y + LABEL_HEIGHT + HEAD_GAP + PLOT_INSET;
+        let width = rect.width - 2.0 * PLOT_INSET;
         match self {
-            Section::Output => {
-                Rect::new(x, y, width, PLOT_HEIGHT + RAMP_GAP + display::SWATCH_HEIGHT)
-            }
+            Section::Output => Rect::new(x, y, width, PLOT_HEIGHT),
             Section::Display => display::plot_area(rect, gray),
             Section::GainMap | Section::File => Rect::new(x, y, width, SHORT_PLOT_HEIGHT),
         }
@@ -112,27 +114,26 @@ impl Section {
 }
 
 /// How tall the column is for `current`: every section it passes through,
-/// the gaps between them, and the panel's inset at either end.
+/// and the gaps between them.
 pub fn height(current: &Current) -> f32 {
     let sections: Vec<Section> = Section::ALL
         .into_iter()
         .filter(|section| section.applies(current))
         .collect();
-    2.0 * PANEL_INSET
-        + sections.iter().map(|section| section.height()).sum::<f32>()
+    sections.iter().map(|section| section.height()).sum::<f32>()
         + (sections.len().saturating_sub(1)) as f32 * SECTION_GAP
 }
 
 /// Where each section `current` passes through goes in the column laid out
-/// from the top of `column`: one under the other, each at its own height,
-/// whatever height `column` has.
+/// from the top of `column`: one under the other, each at its own height and
+/// the column's width, whatever height `column` has.
 pub fn layout(column: Rect, current: &Current) -> Vec<(Section, Rect)> {
-    let mut y = column.y + PANEL_INSET;
+    let mut y = column.y;
     Section::ALL
         .into_iter()
         .filter(|section| section.applies(current))
         .map(|section| {
-            let rect = Rect::new(column.x, y, PANEL_WIDTH, section.height());
+            let rect = Rect::new(column.x, y, column.width, section.height());
             y += section.height() + SECTION_GAP;
             (section, rect)
         })
@@ -141,41 +142,61 @@ pub fn layout(column: Rect, current: &Current) -> Vec<(Section, Rect)> {
 
 /// The section's header line, in the section laid out at `rect`.
 pub fn header_line(rect: Rect) -> Rect {
-    let inside = rect.inset(PANEL_INSET, 0.0);
-    Rect::new(inside.x, rect.y, inside.width, LABEL_HEIGHT)
+    Rect::new(rect.x, rect.y, rect.width, LABEL_HEIGHT)
 }
 
-/// The line a section opens with: its name on the left, and on the right
-/// what the pointer is reading at its stage — `readout` — set short of the
-/// square the header keeps clear at its end. That square is where the
-/// switch that passes the stage by will go, the same place in every
-/// section, so that the readouts already stand where they will stand then.
+/// The square at the end of a section's header that its own button takes,
+/// where it has one: the gain map's, which shows the map. Kept clear in
+/// every section, so that the readouts end on one line down the column.
+pub fn button(rect: Rect) -> Rect {
+    let line = header_line(rect);
+    Rect::new(
+        line.right() - LABEL_HEIGHT,
+        line.y,
+        LABEL_HEIGHT,
+        LABEL_HEIGHT,
+    )
+}
+
+/// The line a section opens with, as the information panel's sections
+/// open: the section's mark and name in the accent, the one thing on the
+/// panel picked out in it; and on the right what the pointer is reading at
+/// its stage — `readout` — set short of the square the section's own button
+/// takes, [`button`].
 pub fn header(pass: &Pass, ui: &egui::Ui, section: Section, rect: Rect, readout: Option<&str>) {
     let theme = pass.theme;
+    let grid = pass.grid;
     let painter = ui.painter();
     let line = header_line(rect);
-    let font = FontId::proportional(ROW_TEXT);
     let middle = line.y + line.height / 2.0;
+    let mark = egui::Rect::from_min_size(pos2(line.x, line.y), egui::vec2(ICON_SIDE, line.height));
+    icon::paint(
+        painter,
+        section.mark(),
+        icon::square(grid, mark, ICON_SIDE),
+        theme.accent.into(),
+        theme.bar_background.into(),
+    );
     painter.text(
-        pos2(pass.grid.snap(line.x), middle),
+        pos2(grid.snap(line.x + ICON_SIDE + MARK_GAP), middle),
         Align2::LEFT_CENTER,
         section.title(),
-        font.clone(),
-        theme.text_dim.into(),
+        FontId::proportional(TEXT_SIZE),
+        theme.accent.into(),
     );
     if let Some(readout) = readout {
         painter.text(
-            pos2(pass.grid.snap(readout_end(line)), middle),
+            pos2(grid.snap(readout_end(line)), middle),
             Align2::RIGHT_CENTER,
             readout,
-            font,
+            FontId::proportional(ROW_TEXT),
             theme.text_primary.into(),
         );
     }
 }
 
-/// Where a header's readout ends: short of the square kept clear at the end
-/// of the line.
+/// Where a header's readout ends: short of the square at the end of the
+/// line that a section's own button takes.
 pub fn readout_end(line: Rect) -> f32 {
-    line.right() - BUTTON_SIZE - CELL_GAP
+    line.right() - LABEL_HEIGHT - CELL_GAP
 }

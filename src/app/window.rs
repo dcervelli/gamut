@@ -609,7 +609,7 @@ mod tests {
     /// fit the screen is the thing the rest of this is here to prevent.
     #[test]
     fn a_monitor_too_small_for_the_panels_keeps_the_smallest_window() {
-        let cramped = [monitor(360, 300, 1.0)];
+        let cramped = [monitor(340, 300, 1.0)];
         let size = window_size(&cramped, Some([32.0, 24.0]), None, Chrome::default());
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }

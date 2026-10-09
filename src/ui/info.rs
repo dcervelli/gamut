@@ -67,15 +67,15 @@ pub(super) const LABEL_SIZE: f32 = TEXT_SIZE * 0.85;
 
 /// The space above a section's name, with a hairline drawn through the
 /// middle of it doing part of the parting.
-const SECTION_GAP: f32 = 11.0;
+pub(super) const SECTION_GAP: f32 = 11.0;
 /// The space between two lines of a section written as prose rather than as
 /// fields, which are one account of one thing and are set as a paragraph is.
 const LINE_GAP: f32 = 1.0;
 /// The space between a heading's mark and its name.
-const MARK_GAP: f32 = 6.0;
+pub(super) const MARK_GAP: f32 = 6.0;
 /// The space under the head of a section drawn with a mark: small, the mark
 /// already making the head's line taller than the words in it.
-const HEAD_GAP: f32 = 3.0;
+pub(super) const HEAD_GAP: f32 = 3.0;
 /// The space between a table's two columns.
 const COLUMN_GAP: f32 = 8.0;
 /// The most of the column's width a table's names are given, so that a long
@@ -101,7 +101,7 @@ pub(super) const HEADER_GAP: f32 = 11.0;
 
 /// A copy button: how tall it is, what is kept clear inside it at either end,
 /// and the space between its label and its mark.
-const CHIP_HEIGHT: f32 = 20.0;
+pub(super) const CHIP_HEIGHT: f32 = 20.0;
 const CHIP_PADDING: f32 = 7.0;
 const CHIP_GAP: f32 = 5.0;
 /// The room set aside for the mark on a copy button, in the button's width
