@@ -2,12 +2,22 @@
 //! numbers do not conveniently fill 0..1 — 12-bit sensor data stored in
 //! 16-bit containers, or HDR frames with a few very bright highlights.
 
+use std::sync::Arc;
+
 use super::gain_map::Table;
 use super::{Channels, DecodedImage, Reader, Sample, Transfer};
 
 /// Bins are plenty for percentile work and cheap to keep around; the UI draws
 /// this directly as a histogram.
 pub const BINS: usize = 256;
+
+/// The finer bins the same pixels are counted in beside [`BINS`], on the
+/// same axis: what a plot of the picture as some later stage makes of it is
+/// rebinned from — see [`Fine::rebinned`] — so that a change to that stage
+/// costs a walk over these rather than over the picture. Sixteen to a
+/// coarse bin, so that an 8-bit file's codes still land one to a bin once
+/// they are pushed back through a stage that does nothing.
+pub const FINE_BINS: usize = 4096;
 
 /// At most this many pixels are examined; larger images are sampled on a
 /// stride. Enough for stable percentiles, fast enough to run on every load.
@@ -106,7 +116,7 @@ impl Plot {
         if !value.is_finite() || image.nodata.is_some_and(|sentinel| value == sentinel) {
             return None;
         }
-        self.bin(encode(transfer, value))
+        self.bin_at(encode(transfer, value))
     }
 
     /// Which bin a value already on the plot's own axis falls in: the same
@@ -117,7 +127,7 @@ impl Plot {
     /// from and a clamp there is only guarding the arithmetic; a marker asked
     /// about a value off the axis has genuinely nowhere to stand, and one
     /// held at the edge would claim a bar that is not the pixel's.
-    fn bin(&self, stored: f32) -> Option<usize> {
+    pub fn bin_at(&self, stored: f32) -> Option<usize> {
         // Written so that a non-finite axis fails the test as well: every
         // comparison against a NaN is false, and the positive form would let
         // one through to divide by it.
@@ -189,6 +199,112 @@ impl Plot {
     }
 }
 
+/// The pixels [`Plot`] counts, counted again in [`FINE_BINS`] over the same
+/// axis, in the same pass and with the same rounding.
+///
+/// Kept for what a stage downstream of the file makes of the plot: the
+/// panel's plot of what the screen shows is these pushed through the
+/// display's response and binned again, which is a walk over four thousand
+/// bins rather than over two million pixels, and so cheap enough to do on
+/// every frame a handle is dragged.
+#[derive(Clone, Debug)]
+pub struct Fine {
+    /// What the bins span: [`Plot`]'s own axis.
+    pub min: f32,
+    pub max: f32,
+    pub luma: Vec<u32>,
+    /// Red, green and blue, for an image that carries color.
+    pub color: Option<[Vec<u32>; COLOR]>,
+}
+
+impl Fine {
+    fn empty(min: f32, max: f32, color: bool) -> Self {
+        Self {
+            min,
+            max,
+            luma: vec![0; FINE_BINS],
+            color: color.then(|| std::array::from_fn(|_| vec![0; FINE_BINS])),
+        }
+    }
+
+    fn merge(mut self, other: &Self) -> Self {
+        fn add(into: &mut [u32], from: &[u32]) {
+            for (sum, count) in into.iter_mut().zip(from) {
+                *sum += count;
+            }
+        }
+        add(&mut self.luma, &other.luma);
+        if let (Some(planes), Some(others)) = (self.color.as_mut(), &other.color) {
+            for (plane, other) in planes.iter_mut().zip(others) {
+                add(plane, other);
+            }
+        }
+        self
+    }
+
+    /// The plot of what `through` makes of every value on this axis, binned
+    /// in [`BINS`] over `out`: each fine bin's own value pushed through it
+    /// and its count added to the coarse bin the result lands in. What lands
+    /// off either end of `out` piles into the end bin it went out of, which
+    /// is the clip a stage that stops there makes; a value `through` makes
+    /// no number of is left out.
+    ///
+    /// The color planes go through the same scalar function as the
+    /// luminance, each channel on its own. That is exact where the stage
+    /// acts on each channel alike — a window, an exposure, a clip, a curve
+    /// that maps each channel through the same shape — and an approximation
+    /// under a curve that moves a channel by what the others are, as the
+    /// neutral curve's desaturation does: a plane is then plotted where the
+    /// channel would go were it gray. Only the luminance plane is what the
+    /// panel reads the clip from at that point, and the planes are for
+    /// their shape.
+    pub fn rebinned(&self, out: [f32; 2], through: impl Fn(f32) -> f32) -> Plot {
+        let [low, high] = out;
+        let mut plot = Plot {
+            min: low,
+            max: high,
+            luma: [0; BINS],
+            color: self.color.as_ref().map(|_| [[0; BINS]; COLOR]),
+        };
+        let span = self.max - self.min;
+        let out_span = high - low;
+        if !(span.is_finite() && span > f32::MIN_POSITIVE)
+            || !(out_span.is_finite() && out_span > f32::MIN_POSITIVE)
+        {
+            return plot;
+        }
+        // Where each fine bin goes, worked out once for every plane.
+        let scale = (BINS - 1) as f32 / out_span;
+        let lands: Vec<Option<usize>> = (0..FINE_BINS)
+            .map(|index| {
+                let value = self.min + index as f32 / (FINE_BINS - 1) as f32 * span;
+                let out = through(value);
+                // A NaN fails the test and is left out; an infinity piles
+                // into the end it went out of.
+                if out.is_nan() {
+                    return None;
+                }
+                let bin = ((out - low) * scale + 0.5).clamp(0.0, (BINS - 1) as f32);
+                Some(bin as usize)
+            })
+            .collect();
+        let pour = |into: &mut [u32; BINS], from: &[u32]| {
+            for (count, land) in from.iter().zip(&lands) {
+                if let Some(bin) = land {
+                    into[*bin] += count;
+                }
+            }
+        };
+        pour(&mut plot.luma, &self.luma);
+        if let (Some(planes), Some(fine)) = (plot.color.as_mut(), &self.color) {
+            for (plane, fine) in planes.iter_mut().zip(fine) {
+                pour(plane, fine);
+            }
+        }
+        plot
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Stats {
     /// Smallest and largest linear value seen, in working-space units.
@@ -217,6 +333,11 @@ pub struct Stats {
     /// The same pixels binned for drawing. See [`Plot`] for why it is a
     /// second scan rather than the same one.
     pub plot: Plot,
+    /// The same pixels on the same axis in finer bins, for what a stage
+    /// after the file makes of them. Shared, since a clone of the stats is
+    /// made at every arrival and is otherwise a copy of 64 KiB; what is
+    /// rebinned from it is cached by the address of this.
+    pub fine: Arc<Fine>,
 }
 
 impl Stats {
@@ -315,6 +436,7 @@ impl Stats {
                 counted: 0,
                 key: None,
                 plot: Plot::empty(),
+                fine: Arc::new(Fine::empty(0.0, 1.0, color)),
             };
         }
 
@@ -330,11 +452,12 @@ impl Stats {
         // zero draws an empty panel rather than one misleading spike.
         let axis_scale = (axis_span > f32::MIN_POSITIVE).then(|| (BINS - 1) as f32 / axis_span);
 
-        let mut counts = Counts::new(color);
+        let fine_scale = (FINE_BINS - 1) as f32 / axis_span;
+        let mut counts = Counts::new(color, axis_min, axis_max);
         if scale.is_some() || axis_scale.is_some() {
             counts = values
                 .bands(bands, |band| {
-                    let mut counts = Counts::new(color);
+                    let mut counts = Counts::new(color, axis_min, axis_max);
                     band.for_each(|encoded, linear| {
                         let value = luminance(linear, channels);
                         let is_data_value = is_data(value);
@@ -351,22 +474,32 @@ impl Stats {
                             counts.counted += 1;
                         }
                         if let Some(axis_scale) = axis_scale {
-                            let bin = |counts: &mut [u32; BINS], stored: f32| {
+                            // The coarse bin and the fine one together, the
+                            // same rounding on each.
+                            let bin = |coarse: &mut [u32; BINS], fine: &mut [u32], stored: f32| {
                                 let index = ((stored - axis_min) * axis_scale + 0.5) as usize;
-                                counts[index.min(BINS - 1)] += 1;
+                                coarse[index.min(BINS - 1)] += 1;
+                                let index = ((stored - axis_min) * fine_scale + 0.5) as usize;
+                                fine[index.min(FINE_BINS - 1)] += 1;
                             };
                             if is_data_value {
                                 // Luminance is a linear quantity; it goes
                                 // onto the axis the same way the samples
                                 // themselves did.
-                                bin(&mut counts.luma, encode(transfer, value));
+                                bin(
+                                    &mut counts.luma,
+                                    &mut counts.fine.luma,
+                                    encode(transfer, value),
+                                );
                             }
-                            if let Some(planes) = counts.color.as_mut() {
+                            if let (Some(planes), Some(fine)) =
+                                (counts.color.as_mut(), counts.fine.color.as_mut())
+                            {
                                 for (plane, (stored, decoded)) in
                                     encoded[..COLOR].iter().zip(linear).enumerate()
                                 {
                                     if is_data(*decoded) {
-                                        bin(&mut planes[plane], *stored);
+                                        bin(&mut planes[plane], &mut fine[plane], *stored);
                                     }
                                 }
                             }
@@ -393,6 +526,7 @@ impl Stats {
                 luma: counts.luma,
                 color: counts.color,
             },
+            fine: Arc::new(counts.fine),
         }
     }
 
@@ -534,21 +668,24 @@ fn trimmed_log_mean(counts: &[u32], sums: &[f64]) -> Option<f64> {
     Some(kept_sum / kept_count)
 }
 
-/// What the second pass counts: the bins of [`Stats`] and of its [`Plot`].
+/// What the second pass counts: the bins of [`Stats`], of its [`Plot`] and
+/// of its [`Fine`].
 struct Counts {
     histogram: [u32; BINS],
     counted: u32,
     luma: [u32; BINS],
     color: Option<[[u32; BINS]; COLOR]>,
+    fine: Fine,
 }
 
 impl Counts {
-    fn new(color: bool) -> Self {
+    fn new(color: bool, axis_min: f32, axis_max: f32) -> Self {
         Self {
             histogram: [0; BINS],
             counted: 0,
             luma: [0; BINS],
             color: color.then_some([[0; BINS]; COLOR]),
+            fine: Fine::empty(axis_min, axis_max, color),
         }
     }
 
@@ -566,6 +703,7 @@ impl Counts {
                 add(plane, other);
             }
         }
+        self.fine = self.fine.merge(&other.fine);
         self
     }
 }
@@ -923,6 +1061,8 @@ mod tests {
                 assert_eq!(divided.histogram, plain.histogram, "{bands} bands");
                 assert_eq!(divided.plot.luma, plain.plot.luma, "{bands} bands");
                 assert_eq!(divided.plot.color, plain.plot.color, "{bands} bands");
+                assert_eq!(divided.fine.luma, plain.fine.luma, "{bands} bands");
+                assert_eq!(divided.fine.color, plain.fine.color, "{bands} bands");
             }
         }
     }
@@ -1023,14 +1163,14 @@ mod tests {
     #[test]
     fn a_value_off_the_axis_gets_no_bin() {
         let plot = Stats::scan(&linear_gray(vec![1000, 2000])).plot;
-        assert_eq!(plot.bin(plot.min), Some(0));
-        assert_eq!(plot.bin(plot.max), Some(BINS - 1));
-        assert_eq!(plot.bin(plot.min - (plot.max - plot.min)), None);
-        assert_eq!(plot.bin(plot.max + (plot.max - plot.min)), None);
-        assert_eq!(plot.bin(f32::NAN), None);
+        assert_eq!(plot.bin_at(plot.min), Some(0));
+        assert_eq!(plot.bin_at(plot.max), Some(BINS - 1));
+        assert_eq!(plot.bin_at(plot.min - (plot.max - plot.min)), None);
+        assert_eq!(plot.bin_at(plot.max + (plot.max - plot.min)), None);
+        assert_eq!(plot.bin_at(f32::NAN), None);
 
         let flat = Stats::scan(&linear_gray(vec![500; 4])).plot;
-        assert_eq!(flat.bin(500.0 / 65535.0), None, "no span, no bars");
+        assert_eq!(flat.bin_at(500.0 / 65535.0), None, "no span, no bars");
     }
 
     #[test]
@@ -1249,6 +1389,61 @@ mod tests {
         // No span, no shares: a flat image is not clipped, it is flat.
         plot.max = plot.min;
         assert_eq!(plot.clipped(0.0, 1.0), [0.0, 0.0]);
+    }
+
+    /// The fine bins pushed back through a stage that does nothing are the
+    /// plot again, exactly: every code of an 8-bit file lands on its own
+    /// coarse bin from its fine one, which is what keeps a plot rebinned
+    /// from them free of the comb the coarse bins were laid out to avoid.
+    #[test]
+    fn the_fine_bins_through_nothing_are_the_plot() {
+        let codes: Vec<u8> = (0..=255).chain([0, 17, 255, 255]).collect();
+        let stats = Stats::scan(&srgb_gray_u8(codes));
+        let again = stats
+            .fine
+            .rebinned([stats.plot.min, stats.plot.max], |value| value);
+        assert_eq!(again.luma, stats.plot.luma);
+
+        let rgb = Stats::scan(&rgb_f32(vec![0.25, 0.5, 0.75, 0.0, 0.5, 1.0]));
+        let again = rgb
+            .fine
+            .rebinned([rgb.plot.min, rgb.plot.max], |value| value);
+        assert_eq!(again.color, rgb.plot.color);
+    }
+
+    /// A stop up doubles every value: a sample at a quarter lands in a
+    /// half's bin, and one already past the top of the axis it is binned
+    /// over piles into the last bin, which is the clip.
+    #[test]
+    fn a_stage_moves_the_bins_and_piles_what_it_pushes_off_the_end() {
+        let stats = Stats::scan(&linear_gray_f32(vec![0.0, 0.25, 0.75, 1.0]));
+        let doubled = stats.fine.rebinned([0.0, 1.0], |value| value * 2.0);
+        let half = (0.5 * (BINS - 1) as f32).round() as usize;
+        assert_eq!(doubled.luma[half], 1, "a quarter went to a half");
+        assert_eq!(doubled.luma[BINS - 1], 2, "both past white piled at it");
+        assert_eq!(doubled.luma[0], 1);
+        assert_eq!(doubled.luma.iter().sum::<u32>(), 4);
+
+        let none = stats.fine.rebinned([0.0, 1.0], |_| f32::NAN);
+        assert_eq!(none.luma.iter().sum::<u32>(), 0, "no number, no count");
+    }
+
+    /// The shares a rebinned plot clips at black and white are the shares
+    /// the plot itself clips at the window those come from, on a quantized
+    /// file: the corner of the plot of what is shown says what the corner
+    /// of the file's plot said.
+    #[test]
+    fn a_rebinned_plot_clips_what_the_window_clips() {
+        let codes: Vec<u8> = (0..=255).collect();
+        let stats = Stats::scan(&srgb_gray_u8(codes));
+        let (black, white) = (40.0 / 255.0, 200.0 / 255.0);
+        let windowed = stats.fine.rebinned([0.0, 1.0], |value| {
+            Transfer::Srgb.to_encoded(
+                (Transfer::Srgb.to_linear(value) - Transfer::Srgb.to_linear(black))
+                    / (Transfer::Srgb.to_linear(white) - Transfer::Srgb.to_linear(black)),
+            )
+        });
+        assert_eq!(windowed.clipped(0.0, 1.0), stats.plot.clipped(black, white));
     }
 
     #[test]
