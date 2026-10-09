@@ -22,7 +22,7 @@ Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 | `+`, `=`, `⌘+`, `⌘=` | Zoom in one step | `zoom.in` |
 | `-`, `_`, `⌘-` | Zoom out one step | `zoom.out` |
 | `⌘`-Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
-| `⇧⌘`-Arrows | With a region selected, shrink it that way one pixel | `region.shrink.left` … `region.shrink.down` |
+| `⇧⌘`-Arrows | Pan by one pixel; with a region selected, shrink it that way one pixel | `pan.pixel.left` … `pan.pixel.down`; `region.shrink.left` … `region.shrink.down` |
 | `⌥⌘=`, `⌥⌘+` | Increase interface scale | `interface.scale.up` |
 | `⌥⌘-`, `⌥⌘_` | Decrease interface scale | `interface.scale.down` |
 | `⌥⌘0` | Reset interface scale to the monitor's own | `interface.scale.reset` |
@@ -78,10 +78,9 @@ configuration file in the application that opens plain text — see
 | `Space` | Cycle through the whole image, the window filled, and actual size. With a region selected, fit the region, fill the window with it, then the image's three, in turn | `zoom.fit` |
 | `Space`+Drag | Zoom to the box you drag out | `zoom.fit`, held |
 | `p` | Cycle the filter used above 100%: nearest → bicubic | `zoom.filter` |
-| Arrows | Pan by 64 pixels; with a region selected, move it — or its current handle — one pixel | `pan.left` … `pan.down`; `region.move.left` … `region.move.down` |
-| `Shift`+Arrows | Pan by one pixel | `pan.pixel.left` … `pan.pixel.down` |
+| `Shift`+Arrows | Pan by 64 pixels | `pan.left` … `pan.down` |
+| `Ctrl`+`Shift`+Arrows | Pan by one pixel; with a region selected, shrink it that way one pixel, pulling its far side in | `pan.pixel.left` … `pan.pixel.down`; `region.shrink.left` … `region.shrink.down` |
 | `Ctrl`+Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
-| `Ctrl`+`Shift`+Arrows | With a region selected, shrink it that way one pixel, pulling its far side in | `region.shrink.left` … `region.shrink.down` |
 
 Zoom runs from 2% to 6400%. The zooms below 100% are the ones above it with
 `Shift` held, so each zoom is under the number it hangs off. The number row is
@@ -105,7 +104,7 @@ double-click at actual size shows the whole image again, so a double-click
 in and a double-click out is a quick look at the pixels. `zoom.100.toggle`
 has no key by default; bind one to it to do the same from the keyboard.
 
-Zooming leaves fit mode; panning does not, so `Space` and then Down scrolls
+Zooming leaves fit mode; panning does not, so `Space` and then `Shift`+Down scrolls
 through a tall image filling the window.
 
 To zoom to a part of the picture, hold `Space` and drag a box around it: the
@@ -114,21 +113,24 @@ rather than when it goes down, so a tap still cycles the fit, and holding
 it while you drag does not move the picture first. `Esc` during the drag
 drops the box.
 
-`Shift` with an arrow places the view to the pixel, which is what lining two
-images up on the same detail takes; `Ctrl` with one runs to that side of the
-image in a single press. Neither does anything when the whole image is already
+The arrows on their own step through the files; held with a modifier they
+pan. `Ctrl`+`Shift` with an arrow places the view to the pixel, which is what
+lining two images up on the same detail takes; `Ctrl` with one runs to that
+side of the image in a single press. None of them does anything when the whole image is already
 on screen, since there is then nowhere to pan to.
 
 ## Moving through the files
 
 | Key | What it does | Name |
 | --- | --- | --- |
-| `]`, `Page Down` | Next file | `files.next` |
-| `[`, `Page Up` | Previous file | `files.previous` |
+| Right, Down, `]`, `Page Down` | Next file | `files.next` |
+| Left, Up, `[`, `Page Up` | Previous file | `files.previous` |
+| `Home` | First file | `files.first` |
+| `End` | Last file | `files.last` |
 | `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close | `files.chooser` |
 | `Tab` | Show or hide the file list down the left of the picture | `files.list` |
-| `Alt+[`, `Alt+Page Up` | Back in image history | `files.back` |
-| `Alt+]`, `Alt+Page Down` | Forward in image history | `files.forward` |
+| `Alt+Left`, `Alt+[`, `Alt+Page Up` | Back in image history | `files.back` |
+| `Alt+Right`, `Alt+]`, `Alt+Page Down` | Forward in image history | `files.forward` |
 | `Ctrl+O` | Open image files chosen in the desktop's file dialog | `files.open` |
 | `Ctrl+Shift+O` | Open a folder chosen in the desktop's file dialog | `files.open-folder` |
 | `F2` | Rename the file on screen | `files.rename` |
@@ -205,8 +207,8 @@ as files arrive in a directory or leave it. Whatever the order does, the file on
 screen stays the file on screen.
 
 Beside the menus are two buttons that go back to the file shown before
-this one and forward again, which `Alt+[` and `Alt+]`, or `Alt+Page Up`
-and `Alt+Page Down`, do from the keyboard: the files you have looked at,
+this one and forward again, which `Alt+Left` and `Alt+Right`, `Alt+[` and
+`Alt+]`, or `Alt+Page Up` and `Alt+Page Down` do from the keyboard: the files you have looked at,
 in the order you looked at them, as a browser keeps the pages. Going back
 and then somewhere new — a step, a pick from the chooser, a paste — cuts
 off what lay ahead, so forward always leads to something reached from
@@ -844,7 +846,7 @@ picture under it; the wheel zooms as before.
 
 For the last pixel, use the keys. One handle is always the current one,
 drawn in a brighter color than the others, and the arrows move it one pixel
-rather than panning the view. A region just drawn has its center handle
+rather than stepping to another file. A region just drawn has its center handle
 current, so the arrows move the whole of it; click or drag any other handle
 and it becomes current instead, and the arrows move that: click the right
 edge's handle and press Right to make the region one pixel wider, or Left to
@@ -854,8 +856,9 @@ back to moving the whole. `Ctrl` with an arrow grows the region on that
 side, whichever handle is current, and `Ctrl`+`Shift` with an arrow shrinks
 it that way, pulling the far side in: `Ctrl`+`Shift`+Left moves the right
 edge one pixel to the left. A region never shrinks past one pixel. `Shift`
-with an arrow is not the region's: it pans the picture a pixel under it, as
-it does with no region up.
+with an arrow is not the region's: it pans the picture under it, as it does
+with no region up. To step to another file while a region is up, use `[`,
+`]`, `Page Up` or `Page Down`.
 
 Point at the region and it says what it is: its size under the handle at
 its center, `640 × 480`, and the coordinate of each edge written just inside

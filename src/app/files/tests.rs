@@ -102,6 +102,44 @@ fn a_walk_carries_on_past_a_failure_and_gives_up_after_the_last() {
     assert!(files.failed(0, None).is_none(), "a reload is not a walk");
 }
 
+/// `Home` and `End` ask for the ends of the list, walk inward past a
+/// file that fails, and stop short of the one on screen; an end already
+/// on screen is no step at all.
+#[test]
+fn the_ends_walk_inward_and_stop_short_of_the_file_on_screen() {
+    let mut files = list(5);
+    files.shown(2);
+    let last = files.end(true).expect("the last file is not on screen");
+    assert_eq!(last.index, 4);
+    let pending = files.accept(last.generation).expect("the read in flight");
+    let again = files.failed(4, pending.step).expect("3.png is left");
+    assert_eq!(again.index, 3);
+    let pending = files.accept(again.generation).expect("the read in flight");
+    assert!(
+        files.failed(3, pending.step).is_none(),
+        "the walk stops before the file on screen"
+    );
+
+    let first = files.end(false).expect("the first file is not on screen");
+    assert_eq!(first.index, 0);
+    assert!(files.end(false).is_none(), "already asked for");
+    let pending = files.accept(first.generation).expect("the read in flight");
+    let again = files.failed(0, pending.step).expect("1.png is left");
+    assert_eq!(again.index, 1);
+    let pending = files.accept(again.generation).expect("the read in flight");
+    assert!(files.failed(1, pending.step).is_none());
+
+    files.shown(4);
+    assert!(files.end(true).is_none(), "the last file is on screen");
+    assert!(list(1).end(false).is_none());
+    // Back to the end on screen calls off the read asked for elsewhere.
+    let _ = files.step(false);
+    let back = files.end(true).expect("the read elsewhere is called off");
+    assert_eq!(back.index, 4);
+    let pending = files.accept(back.generation).expect("the read in flight");
+    assert!(files.failed(4, pending.step).is_none(), "not a walk");
+}
+
 fn named(names: &[&str]) -> Vec<PathBuf> {
     names.iter().map(PathBuf::from).collect()
 }

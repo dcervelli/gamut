@@ -2619,6 +2619,21 @@ impl App {
         }
     }
 
+    /// Steps to the first file on the list, or with `last` the last.
+    pub(super) fn step_to_end(&mut self, last: bool) -> Effect {
+        if self.files.len() < 2 {
+            if self.files.len() == 0 || self.folder_first(Then::End(last)) {
+                return Effect::Nothing;
+            }
+            self.toast("No other files to step to", Level::Message);
+            return Effect::Redraw;
+        }
+        match self.files.end(last) {
+            Some(request) => self.send(request),
+            None => Effect::Nothing,
+        }
+    }
+
     /// Puts a finished read on screen. Returns `false` if the upload failed,
     /// which leaves the current image where it is.
     fn apply(&mut self, file: Opened, ready: Ready) -> bool {

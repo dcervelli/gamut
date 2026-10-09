@@ -95,6 +95,8 @@ pub enum Action {
     CycleUpscale,
     NextFile,
     PreviousFile,
+    FirstFile,
+    LastFile,
     /// Open the file chooser: a popup that lists the session's files, with
     /// a field that narrows them as it is typed in. While it is up its own
     /// keys are read by the popup — see `ui::chooser` — and the same
@@ -875,15 +877,16 @@ pub static ROWS: &[Row] = &[
         section: Section::Zoom,
         when: None,
         help: "Pan by 64 pixels",
-        keys: Keys::Bound(arrows!("pan", PLAIN, Pan, Coarse)),
+        keys: Keys::Bound(arrows!("pan", SHIFT, Pan, Coarse)),
     },
     // Shift belongs to the chord here, where it does not for a character:
-    // an arrow is the same key whichever way it is held.
+    // an arrow is the same key whichever way it is held. The arrows alone
+    // step through the files.
     Row {
         section: Section::Zoom,
         when: None,
         help: "Pan by one pixel",
-        keys: Keys::Bound(arrows!("pan.pixel", SHIFT, Pan, Fine)),
+        keys: Keys::Bound(arrows!("pan.pixel", CTRL_SHIFT, Pan, Fine)),
     },
     Row {
         section: Section::Zoom,
@@ -1067,7 +1070,12 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.next",
             NextFile,
-            [key(']'), named(PLAIN, NamedKey::PageDown)]
+            [
+                named(PLAIN, NamedKey::ArrowRight),
+                named(PLAIN, NamedKey::ArrowDown),
+                key(']'),
+                named(PLAIN, NamedKey::PageDown)
+            ]
         ),
     },
     Row {
@@ -1077,8 +1085,25 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.previous",
             PreviousFile,
-            [key('['), named(PLAIN, NamedKey::PageUp)]
+            [
+                named(PLAIN, NamedKey::ArrowLeft),
+                named(PLAIN, NamedKey::ArrowUp),
+                key('['),
+                named(PLAIN, NamedKey::PageUp)
+            ]
         ),
+    },
+    Row {
+        section: Section::Files,
+        when: None,
+        help: "First file",
+        keys: one!("files.first", FirstFile, [named(PLAIN, NamedKey::Home)]),
+    },
+    Row {
+        section: Section::Files,
+        when: None,
+        help: "Last file",
+        keys: one!("files.last", LastFile, [named(PLAIN, NamedKey::End)]),
     },
     Row {
         section: Section::Files,
@@ -1093,7 +1118,8 @@ pub static ROWS: &[Row] = &[
         keys: one!("files.list", ToggleFilmstrip, [named(PLAIN, NamedKey::Tab)]),
     },
     // The keys that step through the list, held with Alt, step through
-    // the files that have been on screen instead.
+    // the files that have been on screen instead: Alt with the arrows
+    // across is a browser's back and forward.
     Row {
         section: Section::Files,
         when: Some(When::VisitedBefore),
@@ -1101,7 +1127,11 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.back",
             Back,
-            [typed(ALT, '['), named(ALT, NamedKey::PageUp)]
+            [
+                named(ALT, NamedKey::ArrowLeft),
+                typed(ALT, '['),
+                named(ALT, NamedKey::PageUp)
+            ]
         ),
     },
     Row {
@@ -1111,7 +1141,11 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.forward",
             Forward,
-            [typed(ALT, ']'), named(ALT, NamedKey::PageDown)]
+            [
+                named(ALT, NamedKey::ArrowRight),
+                typed(ALT, ']'),
+                named(ALT, NamedKey::PageDown)
+            ]
         ),
     },
     // The desktop's own dialog, for files and for a folder: the capital
@@ -1428,6 +1462,10 @@ pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
         &[key('+'), key('='), typed(CMD, '+'), typed(CMD, '=')],
     ),
     ("zoom.out", &[key('-'), key('_'), typed(CMD, '-')]),
+    ("pan.pixel.left", &[named(CMD_SHIFT, NamedKey::ArrowLeft)]),
+    ("pan.pixel.right", &[named(CMD_SHIFT, NamedKey::ArrowRight)]),
+    ("pan.pixel.up", &[named(CMD_SHIFT, NamedKey::ArrowUp)]),
+    ("pan.pixel.down", &[named(CMD_SHIFT, NamedKey::ArrowDown)]),
     ("pan.edge.left", &[named(CMD, NamedKey::ArrowLeft)]),
     ("pan.edge.right", &[named(CMD, NamedKey::ArrowRight)]),
     ("pan.edge.up", &[named(CMD, NamedKey::ArrowUp)]),
@@ -2094,6 +2132,8 @@ impl App {
             // is on screen stays until it arrives.
             NextFile => return self.step(true),
             PreviousFile => return self.step(false),
+            FirstFile => return self.step_to_end(false),
+            LastFile => return self.step_to_end(true),
             // The count's own press, so that the key and the press cannot
             // come to mean different things — except that the key only
             // opens: `Esc` closes the chooser, as a file finder's does.
