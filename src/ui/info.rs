@@ -27,7 +27,7 @@ use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::Rendering;
 use crate::image::depth::{Accuracy, Quantity};
 use crate::image::exif::{self, Group, ShownRegion};
-use crate::image::gain_map::Lift;
+use crate::image::gain_map::{GainMap, Lift};
 use crate::image::metadata_region::Placed;
 use crate::image::orient;
 use crate::image::sequence::{Loops, Sequence};
@@ -1675,7 +1675,7 @@ fn gain_map_facts(current: &Current) -> Vec<(&'static str, String)> {
         ("Lift", map.lift_range().map(lift).unwrap_or_default()),
         (
             "Applied",
-            applied(face.lift.as_ref().map_or(0.0, |lift| lift.weight()), stops),
+            applied(face.lift.as_ref().map_or(0.0, |lift| lift.weight()), map),
         ),
     ]
 }
@@ -1768,10 +1768,12 @@ fn precision(face: &crate::ui::Face) -> String {
         .unwrap_or_default()
 }
 
-/// How much of a gain map's lift of `stops` is on screen, at `weight`, in
-/// stops: all of it, a share, or none — which is what a display with no
-/// room above white gets.
-fn applied(weight: f32, stops: f32) -> String {
+/// How much of `map`'s lift is on screen, at `weight`, in stops: all of
+/// it, a share, or none — which is what a display with no room above white
+/// gets. The share is [`GainMap::applied_stops`], which the histogram's
+/// section on the map says as well.
+fn applied(weight: f32, map: &GainMap) -> String {
+    let stops = map.stops();
     if weight >= 1.0 {
         format!("all {stops:.1} stops")
     } else if weight <= 0.0 {
@@ -1779,7 +1781,7 @@ fn applied(weight: f32, stops: f32) -> String {
     } else {
         format!(
             "{:.1} of {stops:.1} stops, as much as the display has room for",
-            weight * stops
+            map.applied_stops(weight)
         )
     }
 }
