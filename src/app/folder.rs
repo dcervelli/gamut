@@ -31,6 +31,8 @@ use crate::watch::Watch;
 pub(super) enum Then {
     /// A step, forward or back.
     Step(bool),
+    /// To the first file, or with `true` the last.
+    End(bool),
     /// The chooser, opened over the list.
     Chooser,
     /// The file list, put up.
@@ -364,6 +366,7 @@ impl App {
     fn after_folder(&mut self, then: Then) -> Effect {
         match then {
             Then::Step(forward) => self.step(forward),
+            Then::End(last) => self.step_to_end(last),
             Then::Chooser => self.press(Control::Chooser),
             Then::Filmstrip => {
                 self.panels.show_filmstrip = true;

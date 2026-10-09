@@ -8,6 +8,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- `Home` and `End` go to the first and last file in the list.
 - A **Gain map** button at the bottom right, and `G`, for a picture carrying
   a gain map: shows the map in the picture's place, in stops, so the pixel
   readout says how far each pixel is brightened, and the picture again.
@@ -20,6 +21,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The arrow keys step through the files: Right and Down to the next, Left
+  and Up to the previous, beside `]`, `[`, `Page Down` and `Page Up`. With a
+  region selected they still move the region. Panning moves onto the arrows
+  held with a modifier: `Shift` pans by 64 pixels, `Ctrl+Shift` by one pixel
+  (`⇧⌘` on a Mac), and `Ctrl` still runs to the far side. `Alt+Left` and
+  `Alt+Right` go back and forward in the image history. To pan with the
+  plain arrows again, put `keys.pan.left = left`, and the same for `right`,
+  `up` and `down`, in the configuration file. Closes #6.
 - The information panel describes a picture's gain map in a *Gain map*
   section of its own after *Image*, which wears the *Showing* pill while the
   map is shown: its size and samples, whose description it is, the HDR

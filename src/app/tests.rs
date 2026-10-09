@@ -1288,7 +1288,7 @@ fn a_region_takes_the_keys_that_move_the_picture() {
     let _ = app.perform(Action::Pan(Direction::Right, PanStep::Coarse));
     assert!(app.motion.is_some(), "a pan of the view is a move");
     // Without a region the region's own keys do nothing, and the arrow
-    // is the view's again.
+    // held with Shift is the view's again.
     app.motion = None;
     assert_eq!(
         app.perform(Action::MoveRegion(Direction::Right)),
@@ -1296,8 +1296,10 @@ fn a_region_takes_the_keys_that_move_the_picture() {
     );
     let left = Key::Named(NamedKey::ArrowLeft);
     let back = PhysicalKey::Code(KeyCode::ArrowLeft);
+    app.pointer.modifiers = winit::keyboard::ModifiersState::SHIFT;
     assert_eq!(app.handle_key(&left, back, Pressed), Effect::Redraw);
     assert!(app.motion.is_some(), "the arrow pans");
+    app.pointer.modifiers = winit::keyboard::ModifiersState::empty();
 
     // And a region is of the picture it was drawn on: stepping to
     // another file leaves it behind.
