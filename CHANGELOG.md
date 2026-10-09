@@ -32,11 +32,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - The histogram's bars are even at a fractional monitor scale such as 1.25,
   where every other bin came out a device pixel wider than its neighbors;
   the band under the plot and the false-color swatches likewise.
-- On Linux with two GPUs, the window is drawn on the one a monitor is
-  connected to. It used to be drawn on the integrated GPU, which on a desktop
-  whose monitor is plugged into a discrete card showed a black window. Where
-  both drive a monitor the integrated GPU is still preferred.
-  `WGPU_ADAPTER_NAME` and `WGPU_POWER_PREF` override the choice.
+- On Linux with two GPUs, the window is drawn on the one the Wayland
+  compositor renders on, where it says which (version 4 of
+  `zwp_linux_dmabuf_v1`), and otherwise on the one a monitor is connected
+  to, the integrated GPU first where both have one. It used to be drawn on
+  the integrated GPU, which on a desktop whose monitor is plugged into a
+  discrete card — or whose compositor renders on the discrete card with a
+  second monitor on the integrated one — showed a black window.
+  `WGPU_ADAPTER_NAME` and `WGPU_POWER_PREF` override the choice. Closes #5.
 
 ## 0.10.0 - 2026-10-01
 

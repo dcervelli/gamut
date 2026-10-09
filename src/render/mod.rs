@@ -172,7 +172,9 @@ fn clamp_to_device(device: &wgpu::Device, width: u32, height: u32) -> (u32, u32)
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>, hdr: HdrPreference) -> Result<Self> {
+    /// `main_device` is the GPU the compositor renders on, as
+    /// [`crate::monitor::Monitors::main_device`] reports it, where known.
+    pub fn new(window: Arc<Window>, hdr: HdrPreference, main_device: Option<u64>) -> Result<Self> {
         let size = window.inner_size();
         let (width, height) = (size.width.max(1), size.height.max(1));
 
@@ -187,7 +189,7 @@ impl Renderer {
             .create_surface(window.clone())
             .context("creating a drawing surface for the window")?;
 
-        let adapter = adapter::choose(&instance, &surface)?;
+        let adapter = adapter::choose(&instance, &surface, main_device)?;
 
         let capabilities = Capabilities::from_adapter(&adapter);
         let adapter_name = adapter.get_info().name;

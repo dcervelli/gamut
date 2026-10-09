@@ -8,9 +8,12 @@
 //! asking for the low-power adapter picks that idle integrated GPU, and asking
 //! for the high-performance one would wake a laptop's discrete GPU for a
 //! window its integrated one is already showing. So on Linux the adapter is
+//! the GPU the compositor says it renders on — the main device of its
+//! `zwp_linux_dmabuf_v1` feedback, which `monitor/wayland.rs` reads and the
+//! kernel's `/sys/dev/char` resolves to a card — and, where the compositor
+//! does not say (X11, or a compositor without version 4 of the protocol),
 //! the one whose card has a monitor connected, read from the kernel's DRM
-//! directory, and the power preference only breaks a tie between two such
-//! cards.
+//! directory, the integrated GPU first where there are several.
 //!
 //! `WGPU_ADAPTER_NAME` (a case-insensitive part of the adapter's name) and
 //! `WGPU_POWER_PREF` (`low`, `high` or `none`) override the choice.
@@ -19,9 +22,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-/// A GPU the kernel has a monitor connected to: where it sits on the PCI bus,
-/// and its vendor and device IDs, which an adapter that does not say where it
-/// sits is matched by instead.
+/// A GPU as the kernel knows it: where it sits on the PCI bus, and its
+/// vendor and device IDs, which an adapter that does not say where it sits
+/// is matched by instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Card {
     pub bus: Option<String>,
@@ -29,8 +32,14 @@ pub(crate) struct Card {
     pub device: u32,
 }
 
-/// The adapter to draw `surface` with.
-pub(crate) fn choose(instance: &wgpu::Instance, surface: &wgpu::Surface) -> Result<wgpu::Adapter> {
+/// The adapter to draw `surface` with. `main_device` is the device node the
+/// compositor renders on, as the kernel numbers it, where the compositor
+/// has said.
+pub(crate) fn choose(
+    instance: &wgpu::Instance,
+    surface: &wgpu::Surface,
+    main_device: Option<u64>,
+) -> Result<wgpu::Adapter> {
     if let Ok(name) = std::env::var("WGPU_ADAPTER_NAME") {
         let name = name.to_lowercase();
         return supporting(instance, surface)
@@ -43,15 +52,18 @@ pub(crate) fn choose(instance: &wgpu::Instance, surface: &wgpu::Surface) -> Resu
     }
     // Only Linux has the kernel's DRM directory; elsewhere the power
     // preference alone chooses.
-    let cards = if cfg!(target_os = "linux") {
-        displaying(Path::new("/sys/class/drm"))
+    let (main, cards) = if cfg!(target_os = "linux") {
+        (
+            main_device.and_then(|device| rendering(Path::new("/sys/dev/char"), device)),
+            displaying(Path::new("/sys/class/drm")),
+        )
     } else {
-        Vec::new()
+        (None, Vec::new())
     };
-    if !cards.is_empty() {
+    if main.is_some() || !cards.is_empty() {
         let mut adapters = supporting(instance, surface);
         let infos: Vec<_> = adapters.iter().map(wgpu::Adapter::get_info).collect();
-        if let Some(index) = pick(&infos, &cards) {
+        if let Some(index) = pick(&infos, main.as_ref(), &cards) {
             return Ok(adapters.swap_remove(index));
         }
     }
@@ -78,15 +90,34 @@ fn supporting(instance: &wgpu::Instance, surface: &wgpu::Surface) -> Vec<wgpu::A
         .collect()
 }
 
-/// Which of `adapters` to draw with, given the `cards` driving a monitor: one
-/// on such a card, the integrated GPU first where there are several and
-/// Vulkan before any other backend for the same GPU. `None` where no adapter
-/// is on such a card.
-pub(crate) fn pick(adapters: &[wgpu::AdapterInfo], cards: &[Card]) -> Option<usize> {
+/// Which of `adapters` to draw with, given `main`, the card the compositor
+/// renders on where it has said, and the `cards` driving a monitor: one on
+/// the compositor's card, else one on a card with a monitor, the integrated
+/// GPU first where there are several; and Vulkan before any other backend
+/// for the same GPU. `None` where no adapter is on any of them.
+pub(crate) fn pick(
+    adapters: &[wgpu::AdapterInfo],
+    main: Option<&Card>,
+    cards: &[Card],
+) -> Option<usize> {
+    if let Some(main) = main
+        && let Some(index) = among(adapters, |info| on(info, main))
+    {
+        return Some(index);
+    }
+    among(adapters, |info| cards.iter().any(|card| on(info, card)))
+}
+
+/// The adapter among `adapters` that `wanted` says yes to, the integrated
+/// GPU first and Vulkan before any other backend for the same GPU.
+fn among(
+    adapters: &[wgpu::AdapterInfo],
+    wanted: impl Fn(&wgpu::AdapterInfo) -> bool,
+) -> Option<usize> {
     adapters
         .iter()
         .enumerate()
-        .filter(|(_, info)| cards.iter().any(|card| on(info, card)))
+        .filter(|(_, info)| wanted(info))
         .min_by_key(|(_, info)| {
             let kind = match info.device_type {
                 wgpu::DeviceType::IntegratedGpu => 0,
@@ -107,6 +138,25 @@ fn on(info: &wgpu::AdapterInfo, card: &Card) -> bool {
         (Some(bus), false) => bus.eq_ignore_ascii_case(&info.device_pci_bus_id),
         _ => info.vendor != 0 && info.vendor == card.vendor && info.device == card.device,
     }
+}
+
+/// The card the device node numbered `device` belongs to, through `root` —
+/// the kernel's `/sys/dev/char`, where every character device is listed by
+/// its major and minor number. `None` where the node is not listed, or is
+/// not a DRM node with a card behind it.
+pub(crate) fn rendering(root: &Path, device: u64) -> Option<Card> {
+    let (major, minor) = numbers(device);
+    let card = card_at(&root.join(format!("{major}:{minor}")))?;
+    (card.bus.is_some() || card.vendor != 0).then_some(card)
+}
+
+/// The major and minor number a `dev_t` packs, as the kernel's interface
+/// to user space lays them out: twelve bits of major and twenty of minor,
+/// the low byte of each where the old sixteen-bit numbers kept them.
+fn numbers(device: u64) -> (u32, u32) {
+    let major = ((device >> 8) & 0xfff) | ((device >> 32) & !0xfff);
+    let minor = (device & 0xff) | ((device >> 12) & !0xff);
+    (major as u32, minor as u32)
 }
 
 /// The cards under `root` — the kernel's `/sys/class/drm` — with a monitor
@@ -131,18 +181,29 @@ pub(crate) fn displaying(root: &Path) -> Vec<Card> {
         if !connected {
             continue;
         }
-        let device = root.join(card).join("device");
-        let bus = std::fs::canonicalize(&device)
-            .ok()
-            .and_then(|path| path.file_name()?.to_str().map(str::to_owned))
-            .filter(|name| name.contains(':'));
-        cards.push(Card {
-            bus,
-            vendor: hex(&device.join("vendor")),
-            device: hex(&device.join("device")),
-        });
+        if let Some(card) = card_at(&root.join(card)) {
+            cards.push(card);
+        }
     }
     cards
+}
+
+/// The card whose DRM node's directory `dir` is — `/sys/class/drm/card1`,
+/// or what `/sys/dev/char/226:1` links to — read through the `device` link
+/// to the PCI device behind it. `None` where there is no such link.
+fn card_at(dir: &Path) -> Option<Card> {
+    let device = dir.join("device");
+    let path = std::fs::canonicalize(&device).ok()?;
+    let bus = path
+        .file_name()?
+        .to_str()
+        .map(str::to_owned)
+        .filter(|name| name.contains(':'));
+    Some(Card {
+        bus,
+        vendor: hex(&device.join("vendor")),
+        device: hex(&device.join("device")),
+    })
 }
 
 /// `card0`, `card1`, …, and not one of their outputs (`card1-HDMI-A-1`).
@@ -202,7 +263,7 @@ mod tests {
     fn the_card_with_the_monitor_wins_over_an_idle_integrated_gpu() {
         let adapters = [radeon(), geforce()];
         let cards = [card("0000:01:00.0", 0x10de, 0x1b80)];
-        assert_eq!(pick(&adapters, &cards), Some(1));
+        assert_eq!(pick(&adapters, None, &cards), Some(1));
     }
 
     #[test]
@@ -212,7 +273,40 @@ mod tests {
             card("0000:01:00.0", 0x10de, 0x1b80),
             card("0000:74:00.0", 0x1002, 0x13c0),
         ];
-        assert_eq!(pick(&adapters, &cards), Some(1));
+        assert_eq!(pick(&adapters, None, &cards), Some(1));
+    }
+
+    /// A compositor rendering on the discrete card, with a second monitor
+    /// on the integrated one, draws every window on the discrete card; a
+    /// window drawn on the integrated one would have to be imported across,
+    /// and shown black where that cannot be done.
+    #[test]
+    fn the_compositors_card_wins_over_the_integrated_gpu_where_both_drive_a_monitor() {
+        let adapters = [geforce(), radeon()];
+        let cards = [
+            card("0000:01:00.0", 0x10de, 0x1b80),
+            card("0000:74:00.0", 0x1002, 0x13c0),
+        ];
+        let main = card("0000:01:00.0", 0x10de, 0x1b80);
+        assert_eq!(pick(&adapters, Some(&main), &cards), Some(0));
+    }
+
+    /// The compositor's word is taken over the monitors', even for a card
+    /// no monitor is connected to.
+    #[test]
+    fn the_compositors_card_wins_without_a_monitor_of_its_own() {
+        let adapters = [radeon(), geforce()];
+        let cards = [card("0000:74:00.0", 0x1002, 0x13c0)];
+        let main = card("0000:01:00.0", 0x10de, 0x1b80);
+        assert_eq!(pick(&adapters, Some(&main), &cards), Some(1));
+    }
+
+    #[test]
+    fn a_compositors_card_no_adapter_is_on_falls_back_to_the_monitors() {
+        let adapters = [radeon(), geforce()];
+        let cards = [card("0000:01:00.0", 0x10de, 0x1b80)];
+        let main = card("0000:03:00.0", 0x8086, 0x56a0);
+        assert_eq!(pick(&adapters, Some(&main), &cards), Some(1));
     }
 
     #[test]
@@ -221,7 +315,9 @@ mod tests {
         gl.backend = wgpu::Backend::Gl;
         let adapters = [gl, geforce()];
         let cards = [card("0000:01:00.0", 0x10de, 0x1b80)];
-        assert_eq!(pick(&adapters, &cards), Some(1));
+        assert_eq!(pick(&adapters, None, &cards), Some(1));
+        let main = card("0000:01:00.0", 0x10de, 0x1b80);
+        assert_eq!(pick(&adapters, Some(&main), &[]), Some(1));
     }
 
     #[test]
@@ -230,14 +326,27 @@ mod tests {
         quiet.device_pci_bus_id.clear();
         let adapters = [radeon(), quiet];
         let cards = [card("0000:01:00.0", 0x10de, 0x1b80)];
-        assert_eq!(pick(&adapters, &cards), Some(1));
+        assert_eq!(pick(&adapters, None, &cards), Some(1));
     }
 
     #[test]
     fn no_match_leaves_the_choice_to_the_power_preference() {
         let adapters = [radeon()];
         let cards = [card("0000:01:00.0", 0x10de, 0x1b80)];
-        assert_eq!(pick(&adapters, &cards), None);
+        assert_eq!(pick(&adapters, None, &cards), None);
+        let main = card("0000:01:00.0", 0x10de, 0x1b80);
+        assert_eq!(pick(&adapters, Some(&main), &[]), None);
+    }
+
+    /// `226:0` is the first card's node and `226:128` its render node; a
+    /// minor past 255 and a major past 255 are each carried in the high
+    /// bits, as glibc's `makedev` packs them.
+    #[test]
+    fn a_device_number_unpacks_to_its_major_and_minor() {
+        assert_eq!(numbers(0xe200), (226, 0));
+        assert_eq!(numbers(0xe280), (226, 128));
+        assert_eq!(numbers(0x0010_e200), (226, 256));
+        assert_eq!(numbers(0x1000_0000_0005), (4096, 5));
     }
 
     #[test]
@@ -279,5 +388,30 @@ mod tests {
     #[test]
     fn a_missing_directory_reads_as_no_cards() {
         assert!(displaying(Path::new("/nonexistent/drm")).is_empty());
+        assert_eq!(rendering(Path::new("/nonexistent/char"), 0xe200), None);
+    }
+
+    /// The compositor's main device is a node under `/sys/dev/char` — the
+    /// card's own or its render node — whose `device` is the PCI device
+    /// behind it, as under `/sys/class/drm`.
+    #[test]
+    fn the_main_device_is_resolved_through_the_character_devices() {
+        let root = std::env::temp_dir().join(format!("gamut-char-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let pci = root.join("devices").join("0000:01:00.0");
+        std::fs::create_dir_all(&pci).unwrap();
+        std::fs::write(pci.join("vendor"), "0x10de\n").unwrap();
+        std::fs::write(pci.join("device"), "0x1b80\n").unwrap();
+        for node in ["226:1", "226:128"] {
+            let dir = root.join("devices").join("drm").join(node);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::os::unix::fs::symlink(&pci, dir.join("device")).unwrap();
+            std::os::unix::fs::symlink(&dir, root.join(node)).unwrap();
+        }
+        let card = card("0000:01:00.0", 0x10de, 0x1b80);
+        assert_eq!(rendering(&root, 0xe201), Some(card.clone()));
+        assert_eq!(rendering(&root, 0xe280), Some(card));
+        assert_eq!(rendering(&root, 0xe202), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
