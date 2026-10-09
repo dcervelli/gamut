@@ -169,6 +169,7 @@ pub(super) fn bin_mark(binned: &Binned, bin: usize) -> Mark {
     Mark {
         bin: Some(bin),
         words: output_words(output_at(binned, bin)),
+        ..Mark::default()
     }
 }
 
@@ -195,6 +196,7 @@ pub(super) fn pixel_mark(
     Some(Mark {
         bin: binned.plot.bin_at(ENCODING.to_encoded(out)),
         words: output_words(out),
+        ..Mark::default()
     })
 }
 
@@ -218,7 +220,7 @@ pub(super) fn show(
         &binned.plot,
         plot_rect,
         false,
-        mark.and_then(|mark| mark.bin),
+        &accent_rule(pass, mark),
     );
 
     let top = ENCODING.to_encoded(binned.room);

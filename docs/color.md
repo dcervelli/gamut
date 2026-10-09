@@ -222,7 +222,7 @@ count the share; and `judge` marks the pixels after the same matrix.
 `DecodedImage::sample` carries the matrix in `Sample::linear` for the same
 reason, so that the histogram's marker lands in the bar the scan counted the
 pixel in. The file as it stores the color is measured too, with no matrix
-and no lift (`Stats::scan_as_stored`), for the histogram's File section, so
+and no lift (`Stats::scan_as_stored`), for the histogram's Image section, so
 that the panel shows the P3 red at the top of the file's own range there
 and past it only above, where the working space has taken it. On an HDR surface nothing is lost, so `tone_map`'s headroom arm in
 `shaders/composite.wgsl` passes the color through untouched, the negatives

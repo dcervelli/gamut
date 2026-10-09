@@ -23,10 +23,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   always drawn over it and the band, handles and settings under it; **Gain
   map**, for a picture with one, how far the map lifts the picture in
   stops and how much of that the screen is showing, with a button that
-  shows the map; and **File**, the picture as the file stores it, so a wide
+  shows the map; and **Image**, the picture as the file stores it, so a wide
   gamut color sits inside the file's range there and past it above. With
   the pointer on the picture, every section marks the pixel's bar and
-  writes its value at that stage. On a short window the panel scrolls, and
+  writes its value at that stage; the Image section marks red, green, blue
+  and luminance each with a line of its own color, and writes the four
+  values as the bottom bar's decimal readout does — whole numbers for 8-
+  and 16-bit files, decimals for floating-point ones. On a short window the panel scrolls, and
   only the Output section needs room for the histogram button to work. The
   buttons that act on every plot, and the one that marks the clipped
   pixels, are in a row at the top of the panel, as the information's tabs

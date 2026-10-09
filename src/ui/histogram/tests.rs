@@ -199,7 +199,7 @@ fn the_gain_maps_section_is_there_only_with_a_map() {
         .into_iter()
         .map(|(section, _)| section)
         .collect();
-    assert_eq!(plain, [Section::Output, Section::Display, Section::File]);
+    assert_eq!(plain, [Section::Output, Section::Display, Section::Image]);
     let mapped = laid_out(&gain_mapped(), 600.0);
     assert!(
         mapped
@@ -253,7 +253,7 @@ fn only_the_plot_itself_answers_the_pointer() {
 #[test]
 fn the_pointer_marks_the_bar_it_is_over() {
     let layout = laid_out(&picture(false), 600.0);
-    let bars = Section::File.plot(rect_of(&layout, Section::File), false);
+    let bars = Section::Image.plot(rect_of(&layout, Section::Image), false);
     let at = |x: f32| hovered_bin(bars, Some([bars.x + x, bars.y + 1.0]));
 
     assert_eq!(at(0.0), Some(0), "the first pixel of the plot is bin zero");
@@ -447,22 +447,31 @@ fn a_pixel_is_traced_down_every_section() {
         Headroom::None,
         &plots,
     );
-    for section in Section::ALL {
+    for section in [Section::Output, Section::Display, Section::GainMap] {
         let mark = traced
             .of(section)
             .unwrap_or_else(|| panic!("{section:?} marks the pixel"));
         assert!(mark.bin.is_some(), "{section:?}: {mark:?}");
         assert!(!mark.words.is_empty(), "{section:?}");
     }
+    // The Image section marks it a channel at a time.
+    let image = traced.image.as_ref().expect("the Image section marks it");
+    let planes: Vec<Plane> = image.channels.iter().map(|channel| channel.plane).collect();
+    assert_eq!(
+        planes,
+        [Plane::Red, Plane::Green, Plane::Blue, Plane::Luma],
+        "red, green, blue, then the luminance"
+    );
+    assert!(image.channels.iter().all(|channel| channel.bin.is_some()));
     assert_eq!(
         traced.gain_map.as_ref().unwrap().words,
         "+2.0 stops",
         "the right half is lifted the whole of the lift"
     );
 
-    // On the File section's plot, only it marks anything, and what it
+    // On the Image section's plot, only it marks anything, and what it
     // says is its bin's value.
-    let bars = Section::File.plot(rect_of(&layout, Section::File), false);
+    let bars = Section::Image.plot(rect_of(&layout, Section::Image), false);
     let traced = marked(
         &current,
         &layout,
@@ -473,7 +482,7 @@ fn a_pixel_is_traced_down_every_section() {
     );
     assert!(
         traced
-            .file
+            .image
             .as_ref()
             .is_some_and(|mark| mark.bin == Some(BINS / 2))
     );
@@ -495,6 +504,50 @@ fn a_pixel_is_traced_down_every_section() {
             .iter()
             .all(|section| traced.of(*section).is_none())
     );
+}
+
+/// The Image section writes each channel in the units the file keeps it
+/// in, as the bottom bar's Decimal readout does: counts for 8- and 16-bit
+/// samples, the number for floats. Each channel's rule stands on its own
+/// plane's bar, and a gray file has the one channel.
+#[test]
+fn the_image_section_writes_each_channel_as_the_file_keeps_it() {
+    let words = |mark: &Mark| -> Vec<String> {
+        mark.channels
+            .iter()
+            .map(|channel| channel.words.clone())
+            .collect()
+    };
+
+    // The ramp's 61st pixel is code 240 in every channel.
+    let color = picture(false);
+    let mark = stored::pixel_mark(&color, 60, 0).expect("on the picture");
+    assert_eq!(words(&mark), ["240", "240", "240", "240"]);
+    let planes = color.stored.plot.color.expect("three planes");
+    for (index, channel) in mark.channels.iter().take(3).enumerate() {
+        assert!(
+            planes[index][channel.bin.expect("on the axis")] > 0,
+            "{channel:?}"
+        );
+    }
+
+    let gray = picture(true);
+    let mark = stored::pixel_mark(&gray, 60, 0).expect("on the picture");
+    assert_eq!(words(&mark), ["240"]);
+    assert_eq!(mark.channels[0].plane, Plane::Luma);
+
+    let float = shown(DecodedImage::new(
+        2,
+        1,
+        Samples::F32 {
+            channels: Channels::Rgb,
+            data: vec![0.25, 0.5, 1.0, 0.0, 0.0, 0.0],
+        },
+        ColorSpace::LINEAR_BT709,
+        AlphaMode::Opaque,
+    ));
+    let mark = stored::pixel_mark(&float, 0, 0).expect("on the picture");
+    assert_eq!(words(&mark), ["0.2500", "0.5000", "1.0000", "0.4830"]);
 }
 
 /// On an SDR screen the output stops at white: a stop of exposure piles

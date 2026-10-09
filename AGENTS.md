@@ -97,7 +97,7 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  the scrolling column under it and the pixel traced down it (marked()),
                  section.rs Section — the stages in flow order, each one height — and its
                  header with its mark and its own button, plot.rs the plot every section
-                 draws, output.rs / display.rs / gain_map.rs / file.rs the four stages,
+                 draws, output.rs / display.rs / gain_map.rs / stored.rs (Image) the four stages,
                  track.rs the band and its handles, slider.rs the exposure's slider, drawn
                  by ui/slider.rs
   minimap.rs / grid.rs   one widget each, drawn with egui's painter

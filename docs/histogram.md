@@ -25,8 +25,9 @@ menu. The panel is an instrument, not `Display`'s fields laid out as rows.
 The panel is the picture's way from the file to the screen, a section to a
 stage, read from the screen back: **Output**, what goes out; **Display**,
 what the display starts from and what it does to it; **Gain map**, how far
-the map lifts the picture, for a picture that carries one; **File**, the
-picture as the file stores it. `histogram::Section` is that list, in that
+the map lifts the picture, for a picture that carries one; **Image**, the
+picture as the file stores it — named for the picture rather than the file,
+since the gain map is the file's too. `histogram::Section` is that list, in that
 order, and `section::layout` lays out the ones the picture passes through
 (`Section::applies`).
 
@@ -35,7 +36,7 @@ opened to ask about — is anything clipped, and how much — and the head of
 the column is the part that is always in view. Below it the order is the
 data's, so the column reads as one path rather than as four histograms that
 happen to share a panel: a picture's red that is past white on the Display
-plot is at the top of the File plot under it, and the matrix that moved it
+plot is at the top of the Image plot under it, and the matrix that moved it
 is the gap between the two. A layout that kept every section in one place
 for every file would have to leave a hole where a picture has no gain map;
 the column closes up instead, and the sections above the gap do not move.
@@ -60,8 +61,8 @@ gutter kept clear for it; and the sections parted by hairlines through the
 gap between them (`info::SECTION_GAP`). Each section opens with a header
 as the information's sections do: its mark and name in the accent
 (`Section::mark`) — a monitor for Output, sliders for Display, the sun for
-the gain map, as it wears everywhere else in the window, and a sheet with a
-picture for File — and on the right what the pointer is reading at its
+the gain map, as it wears everywhere else in the window, and a picture for
+Image, as the information's Image section wears — and on the right what the pointer is reading at its
 stage. The header's last square (`section::button`) is the section's own
 button where it has one: the Gain map section's eye, which shows the map
 in the picture's place, lit while it is. It is kept clear in every other
@@ -69,7 +70,7 @@ section, so the readouts end on one line down the column, and it is where
 the switch that passes a stage by will go.
 A stage added later — the development stages a ProRAW file describes, a
 baseline exposure, a profile's tone curve, a gain table — is a `Section`
-variant placed between Display and File at a height of its own: a 1D stage
+variant placed between Display and Image at a height of its own: a 1D stage
 composes into the Display curve and takes a header of its own, and a stage
 that lifts each pixel by its own amount is shaped as the Gain map section
 is, a histogram of the lift and a band of how much of it is applied.
@@ -85,7 +86,7 @@ into, and the side panel's width is worked out from it.
 
 ## What each section plots
 
-**File** is `Face::stored`: `Stats::scan_as_stored`, the picture read with
+**Image** is `Face::stored`: `Stats::scan_as_stored`, the picture read with
 the curve resolved and nothing else — no lift, and the file's own primaries
 (`Reader::as_stored`). It is measured once, when the image arrives, on the
 loader's or the player's thread beside the scan the display starts from; a
@@ -143,12 +144,27 @@ key carries what it was resolved to.
 `histogram::marked` hands every section its `Mark`: the bin its rule stands
 on and the words its header writes. A pointer on a pixel of the picture
 marks every section at once, each with the pixel as its own stage has it —
-the File section reads `Current::sample_as_stored` and writes the stored
-value in the file's units, the Gain map section reads `GainMap::stops_at`,
+the Image section reads `Current::sample_as_stored`, the Gain map section
+reads `GainMap::stops_at`,
 the Display section reads `Current::sample` and writes the value and what
 the display makes of it, and the Output section writes that response held
-to the surface's room. The four rules down the column are one pixel's path
-from the file to the screen.
+to the surface's room. The rules down the column are one pixel's path from
+the file to the screen.
+
+The Image section marks the pixel a channel at a time (`Mark::channels`):
+red, green and blue as the file holds them, and the luminance worked out
+from them as the plot's luminance plane is, each with a rule on its own
+plane in that plane's ink (`Plane::ink`) — only for the planes the panel has
+on screen — and its number on a line of its own under the header, after a
+dot in the same ink, a cell to a channel so the numbers stay put as the
+pointer moves. Four numbers do not fit beside a heading at a float's
+decimals, which is why the line is its own. They are written as the bottom
+bar's Decimal format writes a pixel (`pixel::component`): counts for 8- and
+16-bit samples, the number for floats, and the luminance put back on the
+file's curve and scale so that it reads in the same units as the channels
+beside it; the ends of the axis in the corners are written the same way.
+A file's channels land on its plot as its codes do, so each rule stands on
+the bar its channel was counted in.
 
 A pointer on one section's plot is reading that plot's axis and is on no
 pixel besides, so only that section marks anything, with the value its bin

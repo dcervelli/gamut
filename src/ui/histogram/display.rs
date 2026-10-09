@@ -264,6 +264,7 @@ pub(super) fn bin_mark(current: &Current, headroom: Headroom, bin: usize) -> Mar
     Mark {
         bin: Some(bin),
         words: words(current, headroom, bin_value(&current.stats.plot, bin)),
+        ..Mark::default()
     }
 }
 
@@ -276,6 +277,7 @@ pub(super) fn pixel_mark(current: &Current, headroom: Headroom, x: u32, y: u32) 
     Some(Mark {
         bin: current.stats.plot.bin_of(&current.image, &sample),
         words: words(current, headroom, encoded),
+        ..Mark::default()
     })
 }
 
@@ -293,14 +295,7 @@ pub(super) fn show(
     let gray = current.image.is_gray();
     let plot_rect = plot_area(rect, gray);
     let plotted = &current.stats.plot;
-    bars(
-        pass,
-        ui,
-        plotted,
-        plot_rect,
-        true,
-        mark.and_then(|mark| mark.bin),
-    );
+    bars(pass, ui, plotted, plot_rect, true, &accent_rule(pass, mark));
     let dim = Color32::from(pass.theme.text_dim);
     if let Some([low, high]) = axis_ends(current, plotted) {
         corners(ui, plot_rect, Some((low, dim)), Some((high, dim)));

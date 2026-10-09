@@ -173,7 +173,7 @@ pub(super) fn bar_fraction(count: u32, peak: u32, log: bool) -> f32 {
 const BACKDROP: f32 = 0.55;
 
 /// The bins of `plotted` across `bars`, standing on the plot's ground, with
-/// the rule on `rule` over them: the luminance plane under the color ones,
+/// `rules` over them, each a bin and its ink: the luminance plane under the color ones,
 /// each where the panel's toggles have it, at one column to a device pixel.
 /// `backdrop` fades them toward the ground, for a plot whose bins are what
 /// something drawn over them is read against.
@@ -183,9 +183,8 @@ pub(super) fn bars(
     plotted: &Plot,
     bars: Rect,
     backdrop: bool,
-    rule: Option<usize>,
+    rules: &[(usize, Color32)],
 ) {
-    let theme = pass.theme;
     let panels = pass.panels;
     let painter = ui.painter();
     painter.rect_filled(
@@ -279,7 +278,8 @@ pub(super) fn bars(
     // rule standing through the plot is what a pointer wants and what a
     // permanent annotation does not: this one is only there while it is
     // being aimed, and it has to be followed up from the axis to the curve.
-    if let Some(across) = rule.map(bin_across) {
+    for &(bin, ink) in rules {
+        let across = bin_across(bin);
         painter.rect_filled(
             egui::Rect::from(grid.rect(Rect::new(
                 bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
@@ -288,7 +288,7 @@ pub(super) fn bars(
                 bars.height,
             ))),
             0.0,
-            theme.accent.with_alpha(CURSOR_ALPHA),
+            ink,
         );
     }
 }

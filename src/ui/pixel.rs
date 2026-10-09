@@ -559,7 +559,7 @@ fn hex(image: &DecodedImage, sample: &Sample) -> String {
 /// are counts and print as counts; float ones keep four decimals, and fall
 /// back to an exponent at the magnitudes where that would be a row of zeroes
 /// or a wall of digits.
-fn component(value: f32, float: bool) -> String {
+pub(super) fn component(value: f32, float: bool) -> String {
     if !float {
         return format!("{value:.0}");
     }

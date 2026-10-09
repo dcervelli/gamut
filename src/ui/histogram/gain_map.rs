@@ -64,6 +64,7 @@ pub(super) fn bin_mark(lift: Option<&Plot>, bin: usize) -> Mark {
     Mark {
         bin: Some(bin),
         words: format!("{} stops", lift_words(bin_value(lift, bin))),
+        ..Mark::default()
     }
 }
 
@@ -90,6 +91,7 @@ pub(super) fn pixel_mark(current: &Current, lift: Option<&Plot>, x: u32, y: u32)
     Some(Mark {
         bin: lift.and_then(|lift| lift.bin_at(mean)),
         words,
+        ..Mark::default()
     })
 }
 
@@ -159,14 +161,7 @@ pub(super) fn show(
         );
         return;
     };
-    bars(
-        pass,
-        ui,
-        lift,
-        plot_rect,
-        false,
-        mark.and_then(|mark| mark.bin),
-    );
+    bars(pass, ui, lift, plot_rect, false, &accent_rule(pass, mark));
     let dim = Color32::from(pass.theme.text_dim);
     corners(
         ui,

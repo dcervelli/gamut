@@ -26,7 +26,7 @@ pub enum Section {
     /// How far the gain map lifts the picture, where it has one.
     GainMap,
     /// The picture as the file stores it.
-    File,
+    Image,
 }
 
 impl Section {
@@ -35,7 +35,7 @@ impl Section {
         Section::Output,
         Section::Display,
         Section::GainMap,
-        Section::File,
+        Section::Image,
     ];
 
     /// What the section's header calls it.
@@ -44,20 +44,21 @@ impl Section {
             Section::Output => "Output",
             Section::Display => "Display",
             Section::GainMap => "Gain map",
-            Section::File => "File",
+            Section::Image => "Image",
         }
     }
 
     /// The mark beside its name, in the accent, as the information panel's
     /// sections wear theirs: a screen for what goes out, the sliders the
     /// display is set by, the sun the gain map is known by elsewhere in the
-    /// window, and a sheet with a picture on it for the file.
+    /// window, and a picture for the image, as the information panel's
+    /// Image section wears.
     pub(in crate::ui) fn mark(self) -> &'static [icon::Mark] {
         match self {
             Section::Output => icon::MONITOR,
             Section::Display => icon::SLIDERS_HORIZONTAL,
             Section::GainMap => icon::SUN,
-            Section::File => icon::FILE_IMAGE,
+            Section::Image => icon::IMAGE,
         }
     }
 
@@ -65,7 +66,7 @@ impl Section {
     pub fn applies(self, current: &Current) -> bool {
         match self {
             Section::GainMap => current.picture_face().image.gain_map.is_some(),
-            Section::Output | Section::Display | Section::File => true,
+            Section::Output | Section::Display | Section::Image => true,
         }
     }
 
@@ -93,8 +94,11 @@ impl Section {
             // A shorter plot, and the band of how much of the lift is
             // applied.
             Section::GainMap => head + SHORT_PLOT_HEIGHT + band,
-            // A shorter plot, and nothing under it.
-            Section::File => head + SHORT_PLOT_HEIGHT + PLOT_INSET,
+            // The line of the pixel's values, a shorter plot, and nothing
+            // under it.
+            Section::Image => {
+                head + stored::VALUES_HEIGHT + HEAD_GAP + SHORT_PLOT_HEIGHT + PLOT_INSET
+            }
         }
     }
 
@@ -108,7 +112,13 @@ impl Section {
         match self {
             Section::Output => Rect::new(x, y, width, PLOT_HEIGHT),
             Section::Display => display::plot_area(rect, gray),
-            Section::GainMap | Section::File => Rect::new(x, y, width, SHORT_PLOT_HEIGHT),
+            Section::GainMap => Rect::new(x, y, width, SHORT_PLOT_HEIGHT),
+            Section::Image => Rect::new(
+                x,
+                y + stored::VALUES_HEIGHT + HEAD_GAP,
+                width,
+                SHORT_PLOT_HEIGHT,
+            ),
         }
     }
 }

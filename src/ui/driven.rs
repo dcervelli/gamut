@@ -2646,7 +2646,7 @@ fn the_histogram_has_a_section_for_each_stage_the_picture_passes_through() {
     let mut with_histogram = panels();
     with_histogram.side = Some(super::side::Side::Histogram);
     let mut harness = open(WINDOW, 1, with_histogram);
-    for title in ["Output", "Display", "File"] {
+    for title in ["Output", "Display", "Image"] {
         assert!(painted_in_side(&harness, title).is_some(), "{title}");
     }
     assert!(painted_in_side(&harness, "Gain map").is_none());
@@ -2666,7 +2666,7 @@ fn the_histogram_has_a_section_for_each_stage_the_picture_passes_through() {
     let output = painted_in_side(&harness, "Output").expect("Output");
     let display = painted_in_side(&harness, "Display").expect("Display");
     let gain_map = painted_in_side(&harness, "Gain map").expect("Gain map");
-    let file = painted_in_side(&harness, "File").expect("File");
+    let file = painted_in_side(&harness, "Image").expect("Image");
     assert!(
         output.min.y < display.min.y
             && display.min.y < gain_map.min.y
@@ -2690,7 +2690,7 @@ fn a_short_histogram_scrolls_to_the_sections_below() {
         .expect("the side panel is up")
         .outer_rect;
     assert!(side.height() < 320.0, "{side:?}");
-    let before = painted_in_side(&harness, "File").expect("laid out below");
+    let before = painted_in_side(&harness, "Image").expect("laid out below");
     assert!(before.min.y > side.max.y, "{before:?} below {side:?}");
 
     harness.event(egui::Event::PointerMoved(side.center()));
@@ -2706,7 +2706,7 @@ fn a_short_histogram_scrolls_to_the_sections_below() {
         // tooltip asks for pass after pass.
         harness.run_steps(4);
     }
-    let after = painted_in_side(&harness, "File").expect("still laid out");
+    let after = painted_in_side(&harness, "Image").expect("still laid out");
     assert!(after.min.y < before.min.y, "{after:?} from {before:?}");
     assert!(side.contains(after.center()), "{after:?} in {side:?}");
 }

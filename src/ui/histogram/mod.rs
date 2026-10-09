@@ -15,12 +15,12 @@
 //! `slider`, each a file beside this one.
 
 mod display;
-mod file;
 mod gain_map;
 mod output;
 mod plot;
 mod section;
 mod slider;
+mod stored;
 mod track;
 
 use plot::{HISTOGRAM_LUMA, HISTOGRAM_PLANES, bin_across};
@@ -311,6 +311,64 @@ fn bin_value(plot: &Plot, bin: usize) -> f32 {
 struct Mark {
     pub bin: Option<usize>,
     pub words: String,
+    /// The pixel a channel at a time, where the section says it so: each
+    /// channel's bin and value, its rule and its number in the plane's own
+    /// color. Empty where the section marks one value — `bin` and `words`.
+    pub channels: Vec<Channel>,
+}
+
+/// One of a pixel's channels as a section marks it: which plane it is, the
+/// bin of that plane its value is in, and the value written out.
+#[derive(Clone, Debug, PartialEq)]
+struct Channel {
+    pub plane: Plane,
+    pub bin: Option<usize>,
+    pub words: String,
+}
+
+/// A plane of the plot, and so the ink a channel of the pixel is marked in:
+/// the color planes in theirs, and the luminance in its neutral.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Plane {
+    Red,
+    Green,
+    Blue,
+    Luma,
+}
+
+impl Plane {
+    /// The color planes in the order a pixel's channels come.
+    const COLOR: [Plane; 3] = [Plane::Red, Plane::Green, Plane::Blue];
+
+    /// The plane's own ink, opaque: what its bars are drawn in, so that a
+    /// rule and a dot in it read as belonging to those bars.
+    fn ink(self) -> Color32 {
+        let color = match self {
+            Plane::Red => HISTOGRAM_PLANES[0],
+            Plane::Green => HISTOGRAM_PLANES[1],
+            Plane::Blue => HISTOGRAM_PLANES[2],
+            Plane::Luma => HISTOGRAM_LUMA,
+        };
+        Color32::from(color.with_alpha(255))
+    }
+
+    /// Whether the panel has the plane on screen.
+    fn shown(self, panels: &crate::ui::Panels) -> bool {
+        match self {
+            Plane::Luma => panels.show_luma,
+            _ => panels.show_planes,
+        }
+    }
+}
+
+/// The rule a section marks its one value with: the accent, held back to
+/// translucent, on the bin `mark` names.
+fn accent_rule(pass: &Pass, mark: Option<&Mark>) -> Vec<(usize, Color32)> {
+    let ink = Color32::from(pass.theme.accent.with_alpha(CURSOR_ALPHA));
+    mark.and_then(|mark| mark.bin)
+        .map(|bin| (bin, ink))
+        .into_iter()
+        .collect()
 }
 
 /// What every section marks, one for each stage: the pixel under the
@@ -321,7 +379,7 @@ struct Traced {
     pub output: Option<Mark>,
     pub display: Option<Mark>,
     pub gain_map: Option<Mark>,
-    pub file: Option<Mark>,
+    pub image: Option<Mark>,
 }
 
 impl Traced {
@@ -331,7 +389,7 @@ impl Traced {
             Section::Output => self.output.as_ref(),
             Section::Display => self.display.as_ref(),
             Section::GainMap => self.gain_map.as_ref(),
-            Section::File => self.file.as_ref(),
+            Section::Image => self.image.as_ref(),
         }
     }
 
@@ -340,7 +398,7 @@ impl Traced {
             Section::Output => &mut self.output,
             Section::Display => &mut self.display,
             Section::GainMap => &mut self.gain_map,
-            Section::File => &mut self.file,
+            Section::Image => &mut self.image,
         }
     }
 }
@@ -382,7 +440,7 @@ fn marked(
                 Section::Output => output::bin_mark(plots.output, bin),
                 Section::Display => display::bin_mark(current, headroom, bin),
                 Section::GainMap => gain_map::bin_mark(plots.lift, bin),
-                Section::File => file::bin_mark(current, bin),
+                Section::Image => stored::bin_mark(current, bin),
             });
             return traced;
         }
@@ -395,7 +453,7 @@ fn marked(
             Section::Output => output::pixel_mark(current, headroom, plots.output, x, y),
             Section::Display => display::pixel_mark(current, headroom, x, y),
             Section::GainMap => gain_map::pixel_mark(current, plots.lift, x, y),
-            Section::File => file::pixel_mark(current, x, y),
+            Section::Image => stored::pixel_mark(current, x, y),
         };
     }
     traced
@@ -571,7 +629,7 @@ fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
             Section::Output => output::show(pass, ui, current, rect, &binned, mark),
             Section::Display => display::show(pass, ui, current, rect, mark),
             Section::GainMap => gain_map::show(pass, ui, current, rect, &plots, mark),
-            Section::File => file::show(pass, ui, current, rect, mark),
+            Section::Image => stored::show(pass, ui, current, rect, mark),
         }
     }
 }
