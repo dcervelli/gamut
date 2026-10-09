@@ -3763,11 +3763,10 @@ fn a_press_says_what_it_owes() {
 
 /// The histogram's and the information's buttons are tabs of the side panel:
 /// it holds one of the two at a time, the button of the one it holds takes it
-/// down, and the picture is fitted into what it leaves at the width its edge
-/// was dragged to — held between the least and the most the panel is.
+/// down, and the picture is fitted into what it leaves.
 #[test]
 fn the_side_panel_holds_one_of_the_two_at_its_own_width() {
-    use ui::side::{Side, WIDTH_MAX, WIDTH_MIN};
+    use ui::side::{Side, WIDTH};
 
     let (mut app, dir) = app_over("side-panel", &[("a.png", 8, 8)]);
     app.headless = Some(WINDOW);
@@ -3779,18 +3778,12 @@ fn the_side_panel_holds_one_of_the_two_at_its_own_width() {
     assert_eq!(app.side_showing(), Some(Side::Histogram));
     assert!(app.panels.lit(ui::Control::Histogram));
     assert!(!app.panels.lit(ui::Control::Info));
-    assert_eq!(content(&app).width, bare.width - app.side_width);
+    assert_eq!(content(&app).width, bare.width - WIDTH);
 
     let _ = app.press(ui::Control::Info);
     assert_eq!(app.side_showing(), Some(Side::Info));
     assert!(!app.panels.lit(ui::Control::Histogram));
-    assert_eq!(content(&app).width, bare.width - app.side_width);
-
-    let _ = app.act(ui::Command::SideWidth(WIDTH_MAX + 100.0));
-    assert_eq!(app.side_width, WIDTH_MAX);
-    assert_eq!(content(&app).width, bare.width - WIDTH_MAX);
-    let _ = app.act(ui::Command::SideWidth(0.0));
-    assert_eq!(app.side_width, WIDTH_MIN);
+    assert_eq!(content(&app).width, bare.width - WIDTH);
 
     let _ = app.press(ui::Control::Info);
     assert_eq!(app.side_showing(), None);
@@ -3801,7 +3794,7 @@ fn the_side_panel_holds_one_of_the_two_at_its_own_width() {
     let _ = app.press(ui::Control::Histogram);
     let _ = app.perform(input::Action::ToggleInterface);
     assert_eq!(app.side_showing(), Some(Side::Histogram));
-    assert_eq!(content(&app).right(), WINDOW[0] - app.side_width);
+    assert_eq!(content(&app).right(), WINDOW[0] - WIDTH);
     let _ = app.perform(input::Action::ToggleInterface);
     let _ = app.perform(input::Action::ToggleInterfaceAndPanels);
     assert_eq!(app.panels.side, None);

@@ -44,12 +44,11 @@ use super::{BECOMES, Command, Control, Current, PANEL_INSET, PANEL_WIDTH, TEXT_S
 /// file, so the panel never jumps from one file to the next.
 const ROWS_HEIGHT: f32 = PLOT_INSET + 3.0 * (ROW_GAP + ROW_HEIGHT);
 
-/// The histogram at its own size: the side panel at its narrowest, and tall
+/// The histogram at its own size: as wide as the side panel, and tall
 /// enough for the line the readout is set on, a plot, the band of what the
 /// display makes of its axis, the row of false colors a gray image has
 /// under that, and the three rows of settings. What a window has to have
-/// room for before the toggle is alive — see [`super::PANELS_ROOM`]. A
-/// wider side panel widens it, by whole steps — see [`panel`].
+/// room for before the toggle is alive — see [`super::PANELS_ROOM`].
 pub const SIZE: [f32; 2] = [
     PANEL_WIDTH,
     2.0 * PANEL_INSET
@@ -263,31 +262,13 @@ fn readout_placement(bars: Rect, width: f32, ends: [f32; 2]) -> (f32, bool) {
     (x, fits)
 }
 
-/// The histogram's own rectangle at the head of the side panel `side`, on a
-/// display of `scale` device pixels to the logical one.
-///
-/// [`SIZE`]'s height, and as wide as the plot comes out with the buttons
-/// beside it: the widest plot that gives every bin the same whole number of
-/// device pixels, and never narrower than a logical pixel to each. Stepped
-/// rather than stretched to the panel: a plot whose bins came out of
-/// different widths would be drawing a comb that is not in the picture. So
-/// it grows in jumps as the panel widens, and stands in the middle of the
-/// panel between them.
+/// The histogram's own rectangle at the head of the side panel `side`: its
+/// top, at [`SIZE`].
 ///
 /// Public because the pointer is tested against it from outside the frame
 /// as well: see [`marked`].
-pub fn panel(side: Rect, scale: f32) -> Rect {
-    let bins = BINS as f32;
-    let room = side.width - TOOLBAR_WIDTH - 2.0 * PANEL_INSET;
-    let steps = (room * scale / bins).floor();
-    let plot = (steps * bins / scale).max(bins);
-    let width = TOOLBAR_WIDTH + plot + 2.0 * PANEL_INSET;
-    Rect::new(
-        side.x + ((side.width - width) / 2.0).max(0.0).round(),
-        side.y,
-        width,
-        SIZE[1],
-    )
+pub fn panel(side: Rect) -> Rect {
+    Rect::new(side.x, side.y, SIZE[0], SIZE[1])
 }
 
 /// The ground the bins stand on inside that panel, with the label line
@@ -660,7 +641,7 @@ fn share_words(share: f32) -> Option<String> {
 /// range their color channels span; gray images keep the single luminance
 /// plane over theirs.
 pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, side: Rect) {
-    let panel = panel(side, pass.input.scale);
+    let panel = panel(side);
     let body = ui.allocate_rect(egui::Rect::from(panel), Sense::CLICK | Sense::DRAG);
     body.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Histogram panel"));
     plot(pass, ui, current, panel);

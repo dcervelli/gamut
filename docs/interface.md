@@ -444,50 +444,26 @@ not for what was opened. `~` takes it down with the rest.
 
 ### Its width
 
-The width is dragged from the panel's left edge (`side::grip`, a few pixels
-either side of it, laid out after the picture so that the edge is the
-grip's and not the picture's drag), handed back as `Command::SideWidth`, held
-in `App::side_width` and kept between runs in the state file as
-`side_width`. The application holds it rather than egui's own resizable
-panel, for the reason the file list's width is held: a width egui settled
-during the pass would leave the picture's fit a frame behind it.
-
-`side::WIDTH_MIN` is `PANEL_WIDTH`, the histogram at its own size: a bin to
-the point with the buttons beside the plot. That is the one thing on
-either tab that cannot give — a plot narrower than its bins would draw
-some of them a pixel and some none — and the information's column is a few
-words a line much below it. It is also the width the panel opens at,
-`WIDTH_DEFAULT`, since the narrowest panel is the most it leaves the
-picture. `side::WIDTH_MAX` is that and `BINS` again: room for the plot at
-two points to a bin, the widest it is drawn at, and about as long a line as
-the column of facts reads at comfortably.
-Wider than that, the panel would take the picture's room to give the words
-more of a line than they use.
-
-The histogram does not stretch to the width it is given. `histogram::panel`
-takes the widest plot that gives every bin the same whole number of device
-pixels — two at twice the point's width, three, four, at whatever scale
-the display and the interface come to — and no narrower than a point to the
-bin, and stands the histogram in the middle of the panel between those
-steps. A plot stretched to any width would give some bins a device pixel
-more than their neighbors and draw a comb that is not in the picture, which
-is what a column to the device pixel was chosen to prevent. The information
-takes the whole of the panel at any width.
+The panel is one width, `side::WIDTH`, which is `PANEL_WIDTH`: the
+histogram at its own size, a bin to the point with the buttons beside the
+plot. That is the one thing on either tab that cannot give — a plot
+narrower than its bins would draw some of them a pixel and some none — and
+the information's column reads at it comfortably. It is not dragged wider:
+nothing on either tab would use the room but a longer line of facts, and
+the room would be the picture's.
 
 ### A window with no room for it
 
-The panel is never narrower than its least width and the histogram is one
-height, so in a window too small for it there is nothing to give: the
+The panel is one width and the histogram is one height, so in a window too small for it there is nothing to give: the
 button is dead rather than the panel shrunk below what it can be read at.
 `chrome::side_room` is the room the panel would have — between the left
 strip and the right one, or between the file list and the window's edge
 with the bars hidden, and the height between the bars — worked out with the
 panel itself left out, so that opening it cannot make the button that
 opened it dead. `ui::room` reads it: the histogram needs `histogram::SIZE`'s
-height and the information `info::INFO_MIN_HEIGHT`, both the least width.
-The panel takes the width it is asked for where the window leaves that much
-and what is left where it does not (`chrome::side_width`), the file list
-having had its share first. `App::side_showing` is the one reading of
+height and the information `info::INFO_MIN_HEIGHT`, both the panel's
+width. `chrome::side_width` is the width it is given, the file list having
+had its share first. `App::side_showing` is the one reading of
 whether it is on screen — asked for, with room for what it holds, and with
 something open — which `App::parts` and `FrameInput::side` both come from.
 

@@ -2683,10 +2683,6 @@ impl App {
             ui::Command::FilmstripSlot(slot) => {
                 self.filmstrip.set_slot(slot);
             }
-            // The side panel's edge was dragged, the same way.
-            ui::Command::SideWidth(width) => {
-                self.side_width = width.clamp(ui::side::WIDTH_MIN, ui::side::WIDTH_MAX);
-            }
         }
         Effect::Redraw
     }

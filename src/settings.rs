@@ -34,7 +34,7 @@ use anyhow::{Context, Result};
 use crate::app::keymap::{Chord, Keymap};
 use crate::gestures::{Behavior, Gestures, Slot};
 use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
-use crate::ui::{filmstrip, loupe, scale, side};
+use crate::ui::{filmstrip, loupe, scale};
 use crate::{PROGRAM, shown_path, xdg};
 
 /// The configuration: which panels the window opens with, and what the keys
@@ -365,8 +365,6 @@ pub struct State {
     /// The width each of the file list's thumbnails is fitted into, in
     /// logical pixels, which the panel's own width is made from.
     pub filmstrip_width: f32,
-    /// How wide the side panel is, in logical pixels.
-    pub side_width: f32,
     /// One of [`loupe::MAGNIFICATIONS`].
     pub loupe_magnification: f32,
     /// How large the interface is drawn, on top of the monitor's own scale.
@@ -388,7 +386,6 @@ impl Default for State {
     fn default() -> Self {
         Self {
             filmstrip_width: filmstrip::SLOT_DEFAULT,
-            side_width: side::WIDTH_DEFAULT,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             ui_scale: scale::DEFAULT,
             order: filmstrip::Order::default(),
@@ -412,7 +409,7 @@ struct Kept {
 }
 
 /// Every line of the state file, in the order it is written.
-const KEPT: [Kept; 10] = [
+const KEPT: [Kept; 9] = [
     Kept {
         name: "filmstrip_width",
         get: |state| state.filmstrip_width.to_string(),
@@ -421,17 +418,6 @@ const KEPT: [Kept; 10] = [
                 && (filmstrip::SLOT_MIN..=filmstrip::SLOT_MAX).contains(&number)
             {
                 state.filmstrip_width = number;
-            }
-        },
-    },
-    Kept {
-        name: "side_width",
-        get: |state| state.side_width.to_string(),
-        set: |state, value| {
-            if let Ok(number) = value.parse::<f32>()
-                && (side::WIDTH_MIN..=side::WIDTH_MAX).contains(&number)
-            {
-                state.side_width = number;
             }
         },
     },
@@ -945,7 +931,6 @@ mod tests {
     fn the_state_reads_back_what_it_writes() {
         let state = State {
             filmstrip_width: 212.0,
-            side_width: side::WIDTH_MIN + 40.0,
             loupe_magnification: 8.0,
             ui_scale: 1.5,
             order: filmstrip::Order {
@@ -998,7 +983,6 @@ mod tests {
     fn a_state_out_of_range_is_the_default() {
         let state = State::parse(
             "filmstrip_width = 100000\n\
-             side_width = 1\n\
              loupe_magnification = 3\n\
              ui_scale = 9\n\
              sort = shoe size\n\

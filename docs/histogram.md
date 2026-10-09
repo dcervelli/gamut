@@ -66,9 +66,7 @@ rather than a thing to see. There is one curve to roll off with —
 `histogram::SIZE` is what `ui::PANELS_ROOM` — the least window the
 interface fits in — is measured against, and what `ui::room` works from, so
 that the toggle agrees with the panel about how tall it is. Its width is the
-[side panel's](interface.md#the-side-panel) least; a wider side panel
-widens the plot only in whole device pixels to the bin, as that section
-says.
+[side panel's](interface.md#the-side-panel).
 
 The three windows are named for what they do — *As stored*, *Full range*,
 *Trimmed* — rather than for the rule that does it, which the tooltip says,
@@ -306,10 +304,8 @@ is looked at for; the full primaries, at a pixel to the bin, come out as a
 hedge of pure red, green and blue spikes that the eye cannot leave alone.
 The ground is the same in every theme and so are the inks, so the reading is
 the same everywhere — see [theme](theme.md) for the two things that resist
-being themed. A bin is at least a point, which fixes the panel's least
-width and is what the pointer reads the plot by; a wider panel widens the
-plot in steps that give every bin the same whole number of device pixels.
-What is drawn is one column to the device pixel (`icon::Grid::columns`),
+being themed. A bin is a point, which fixes the panel's width and is what
+the pointer reads the plot by. What is drawn is one column to the device pixel (`icon::Grid::columns`),
 each as tall as the fullest bin under it (`plot::bins_under`,
 `plot::tallest`): a column to the bin lands half its edges mid-pixel at a
 fractional scale, and the feathering shows as a comb, where a column to the

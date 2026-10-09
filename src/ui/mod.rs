@@ -677,7 +677,7 @@ pub struct FrameInput {
     pub filmstrip: Option<filmstrip::Input>,
     /// The side panel, on every frame it is up, and `None` while it is not:
     /// asked for, with room for what it holds, and something open.
-    pub side: Option<side::Shown>,
+    pub side: Option<side::Side>,
     /// The file chooser, on every frame it is open, and `None` while it is
     /// not. Whether it is open is egui's to say — see
     /// [`chooser::id`] — and this has to be handed over on every frame it
@@ -738,7 +738,7 @@ pub fn show(
     let parts = chrome::Parts {
         transport: input.transport.is_some(),
         filmstrip: input.filmstrip.as_ref().map(|strip| strip.slot),
-        side: input.side.map(|shown| shown.width),
+        side: input.side.is_some(),
     };
     let content = chrome::content_area(input.logical, panels.show_ui, parts);
     let mut pass = Pass {
@@ -752,7 +752,6 @@ pub fn show(
         content,
         room: room(input.logical, panels.show_ui, parts),
         file_list: None,
-        side_panel: None,
         parts,
         commands: Vec::new(),
     };
@@ -764,13 +763,10 @@ pub fn show(
         pass.side_panel(ui);
     }
     pass.picture(ui);
-    // After the picture, which they overhang while the panels are hidden,
-    // so that the edges are the grips' and not the picture's drag.
+    // After the picture, which it overhangs while the panels are hidden,
+    // so that the edge is the grip's and not the picture's drag.
     if let Some(strip) = &input.filmstrip {
         filmstrip::grip(&mut pass, ui, strip.slot);
-    }
-    if let Some(shown) = input.side {
-        side::grip(&mut pass, ui, shown.width);
     }
     match current {
         Some(current) => pass.overlays(ui, current),
@@ -1156,7 +1152,7 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
 /// Derived rather than written down, and `the_panels_room_is_room_for_both`
 /// holds it to what [`room`] actually answers.
 pub const PANELS_ROOM: [f32; 2] = [
-    side::WIDTH_MIN,
+    side::WIDTH,
     if histogram::SIZE[1] > info::INFO_MIN_HEIGHT {
         histogram::SIZE[1]
     } else {
@@ -1167,11 +1163,11 @@ pub const PANELS_ROOM: [f32; 2] = [
 /// Whether the window has room for each of what the side panel holds, and
 /// for the help popup.
 ///
-/// The side panel is never narrower than [`side::WIDTH_MIN`] — the histogram
-/// is a bin to a logical pixel, so there is nothing for it to give — and the
-/// histogram is one height as well, so in a small enough window there is
-/// nothing to give and the button is dead rather than the panel shrunk
-/// below what it can be read at.
+/// The side panel is [`side::WIDTH`] wide — the histogram is a bin to a
+/// point, so there is nothing for it to give — and the histogram is one
+/// height as well, so in a small enough window there is nothing to give
+/// and the button is dead rather than the panel shrunk below what it can
+/// be read at.
 ///
 /// Asked by the frame builder and by the application, which have to agree
 /// about what is on screen: a toggle that quietly set something no one could
@@ -1201,7 +1197,7 @@ impl Room {
 /// height for every file, so the file has no say.
 pub fn room(logical: [f32; 2], show_ui: bool, parts: chrome::Parts) -> Room {
     let [across, down] = chrome::side_room(logical, show_ui, parts);
-    let wide = across >= side::WIDTH_MIN;
+    let wide = across >= side::WIDTH;
     Room {
         histogram: wide && down >= histogram::SIZE[1],
         info: wide && down >= info::INFO_MIN_HEIGHT,
@@ -1345,10 +1341,7 @@ mod tests {
     fn opening_the_side_panel_leaves_its_room_alone() {
         let window = [900.0, 600.0];
         let shut = chrome::Parts::default();
-        let open = chrome::Parts {
-            side: Some(side::WIDTH_MAX),
-            ..shut
-        };
+        let open = chrome::Parts { side: true, ..shut };
         for show_ui in [true, false] {
             let (a, b) = (room(window, show_ui, shut), room(window, show_ui, open));
             assert_eq!((a.histogram, a.info), (b.histogram, b.info));

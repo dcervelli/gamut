@@ -213,20 +213,16 @@ fn build_at(
     let mut input = input(logical, count);
     input.scale = scale;
     // The side panel up where it is asked for and the window has room for
-    // it, as `App::side_showing` decides, at the width it opens at.
+    // it, as `App::side_showing` decides.
     input.side = panels
         .side
-        .filter(|side| super::room(logical, panels.show_ui, chrome::Parts::NONE).holds(*side))
-        .map(|side| super::side::Shown {
-            side,
-            width: super::side::WIDTH_DEFAULT,
-        });
+        .filter(|side| super::room(logical, panels.show_ui, chrome::Parts::NONE).holds(*side));
     input.viewport = chrome::image_viewport(
         [logical[0] * scale, logical[1] * scale],
         scale,
         panels.show_ui,
         chrome::Parts {
-            side: input.side.map(|shown| shown.width),
+            side: input.side.is_some(),
             ..chrome::Parts::NONE
         },
     );
@@ -727,7 +723,7 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
 /// draws without falling over.
 #[test]
 fn a_scaled_interface_lays_out_where_the_application_says() {
-    use super::side::{Side, WIDTH_DEFAULT};
+    use super::side::Side;
 
     let scale = 1.5;
     let logical = [1200.0, 800.0];
@@ -738,7 +734,7 @@ fn a_scaled_interface_lays_out_where_the_application_says() {
     assert_eq!(harness.ctx.pixels_per_point(), scale);
 
     let parts = chrome::Parts {
-        side: Some(WIDTH_DEFAULT),
+        side: true,
         ..chrome::Parts::NONE
     };
     // Everything is where the application puts it in the room the harness
@@ -749,7 +745,7 @@ fn a_scaled_interface_lays_out_where_the_application_says() {
     let side = chrome::Chrome::new(room, parts)
         .side
         .expect("the side panel is up");
-    let placed = super::histogram::panel(side, scale);
+    let placed = super::histogram::panel(side);
     assert_eq!(
         harness.get_by_label("Histogram panel").rect(),
         egui::Rect::from_min_size(
@@ -783,7 +779,7 @@ fn a_scaled_interface_lays_out_where_the_application_says() {
 /// information to copy.
 #[test]
 fn the_side_panel_waits_for_the_file_coming_in() {
-    use super::side::{Side, WIDTH_DEFAULT};
+    use super::side::{Side, WIDTH};
 
     let mut with_histogram = panels();
     with_histogram.side = Some(Side::Histogram);
@@ -793,8 +789,8 @@ fn the_side_panel_waits_for_the_file_coming_in() {
     let toggle = harness.get_by_label("Histogram").rect();
     let strip = toggle.center().x - SIDE_WIDTH / 2.0;
     let top = toggle.top() - super::chrome::BAR_PADDING;
-    let side = super::Rect::new(strip - WIDTH_DEFAULT, top, WIDTH_DEFAULT, 400.0);
-    let placed = super::histogram::panel(side, 1.0);
+    let side = super::Rect::new(strip - WIDTH, top, WIDTH, 400.0);
+    let placed = super::histogram::panel(side);
     let full = harness.get_by_label("Histogram panel").rect();
     assert_eq!(
         full,
@@ -828,34 +824,6 @@ fn the_side_panel_waits_for_the_file_coming_in() {
     harness.state_mut().input.waiting = true;
     harness.run_steps(3);
     assert!(harness.query_by_label("Copy All").is_none());
-}
-
-/// A drag of the side panel's edge asks for the width that puts the edge
-/// under the hand, held between the least and the most the panel is.
-#[test]
-fn the_side_panels_edge_is_dragged_to_a_width() {
-    use super::side::{Side, WIDTH_DEFAULT, WIDTH_MAX, WIDTH_MIN};
-
-    let mut with_info = panels();
-    with_info.side = Some(Side::Info);
-    let toggle = open(WINDOW, 1, with_info).get_by_label("Histogram").rect();
-    let edge = toggle.center().x - SIDE_WIDTH / 2.0 - WIDTH_DEFAULT;
-    let y = WINDOW[1] / 2.0;
-    let asked = |to: f32| {
-        let mut harness = open(WINDOW, 1, with_info);
-        drag(&mut harness, [edge, y], [to, y])
-            .into_iter()
-            .filter_map(|command| match command {
-                Command::SideWidth(width) => Some(width),
-                _ => None,
-            })
-            .next_back()
-    };
-    assert_eq!(asked(edge - 60.0), Some(WIDTH_DEFAULT + 60.0));
-    assert_eq!(asked(0.0), Some(WIDTH_MAX));
-    // It opens at its narrowest, so a drag narrower asks for nothing new.
-    assert_eq!(WIDTH_DEFAULT, WIDTH_MIN);
-    assert_eq!(asked(WINDOW[0]), None);
 }
 
 #[test]

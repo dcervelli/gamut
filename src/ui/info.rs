@@ -57,7 +57,7 @@ const SHOWING: &str = "Showing";
 
 /// Below this the panel would show its header, two facts and a scrollbar, so
 /// it stays off instead. The least width is the side panel's own — see
-/// [`super::side::WIDTH_MIN`].
+/// [`super::side::WIDTH`].
 pub(super) const INFO_MIN_HEIGHT: f32 = 160.0;
 
 /// The size a field's name is written at, against [`TEXT_SIZE`] for what it

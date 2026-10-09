@@ -2,9 +2,9 @@ use super::*;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 use crate::ui::side;
 
-/// The histogram in the side panel at its narrowest, on a display of one.
+/// The histogram in the side panel.
 fn full_panel() -> Rect {
-    panel(Rect::new(0.0, 0.0, side::WIDTH_MIN, 600.0), 1.0)
+    panel(Rect::new(0.0, 0.0, side::WIDTH, 600.0))
 }
 
 /// `image`, on screen.
@@ -136,52 +136,16 @@ fn the_pointer_marks_the_bar_it_is_over() {
     assert_eq!(bin_across(BINS - 1), 1.0);
 }
 
-/// The narrowest side panel holds the histogram exactly, at a logical
-/// pixel to the bin.
+/// The histogram fills the side panel across, at its own size.
 #[test]
-fn the_narrowest_side_panel_is_the_histogram_at_its_own_size() {
-    let side = Rect::new(40.0, 30.0, side::WIDTH_MIN, 600.0);
-    for scale in [1.0, 1.25, 1.5, 2.0] {
-        let panel = panel(side, scale);
-        assert_eq!(
-            (panel.x, panel.y, panel.width, panel.height),
-            (side.x, side.y, SIZE[0], SIZE[1]),
-            "at {scale}"
-        );
-    }
-}
-
-/// A wider side panel widens the plot only by whole device pixels to every
-/// bin, so that no bar comes out fatter than its neighbors; between those
-/// steps it stands in the middle of the panel, which it never overhangs.
-#[test]
-fn the_plot_widens_by_whole_device_pixels_to_the_bin() {
-    let bins = BINS as f32;
-    let at = |width: f32, scale: f32| {
-        let side = Rect::new(100.0, 0.0, width, 600.0);
-        let panel = panel(side, scale);
-        (side, panel, panel.width - TOOLBAR_WIDTH - 2.0 * PANEL_INSET)
-    };
-    assert_eq!(at(side::WIDTH_MAX, 1.0).2, 2.0 * bins);
-    assert_eq!(at(side::WIDTH_MAX - 1.0, 1.0).2, bins);
-    assert_eq!(at(side::WIDTH_MIN + bins / 2.0, 2.0).2, 1.5 * bins);
-    let (side, panel, _) = at(side::WIDTH_MIN + 100.0, 1.0);
-    assert_eq!(panel.x, side.x + 50.0, "in the middle between the steps");
-
-    for scale in [1.0, 1.25, 1.5, 1.75, 2.0, 3.0] {
-        let mut width = side::WIDTH_MIN;
-        while width <= side::WIDTH_MAX {
-            let (side, panel, plot) = at(width, scale);
-            let per_bin = plot * scale / bins;
-            assert!(
-                plot == bins || (per_bin - per_bin.round()).abs() < 1e-3,
-                "{plot} at {scale} in {width}"
-            );
-            assert!(plot >= bins);
-            assert!(panel.x >= side.x && panel.right() <= side.right() + 1e-3);
-            width += 7.0;
-        }
-    }
+fn the_side_panel_is_the_histogram_at_its_own_size() {
+    assert_eq!(side::WIDTH, SIZE[0]);
+    let side = Rect::new(40.0, 30.0, side::WIDTH, 600.0);
+    let panel = panel(side);
+    assert_eq!(
+        (panel.x, panel.y, panel.width, panel.height),
+        (side.x, side.y, SIZE[0], SIZE[1])
+    );
 }
 
 /// A bin is one point, which is what the pointer reads the plot by,

@@ -146,12 +146,12 @@ pub struct Chrome {
 /// derived from besides the window size: whether the file on screen brings
 /// the transport bar with it, whether the file list is up and the width its
 /// thumbnails are fitted into, which the panel's width is made from, and
-/// whether the side panel is up and how wide it is asked to be.
+/// whether the side panel is up.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct Parts {
     pub transport: bool,
     pub filmstrip: Option<f32>,
-    pub side: Option<f32>,
+    pub side: bool,
 }
 
 impl Parts {
@@ -160,7 +160,7 @@ impl Parts {
     pub const NONE: Parts = Parts {
         transport: false,
         filmstrip: None,
-        side: None,
+        side: false,
     };
 }
 
@@ -186,9 +186,11 @@ impl Chrome {
         let inner = strip + side;
         // The side panel has its own width unless what the file list and
         // the strips leave is less, and then it has that.
-        let panel = parts
-            .side
-            .map_or(0.0, |width| width.min((size[0] - inner - side).max(0.0)));
+        let panel = if parts.side {
+            side::WIDTH.min((size[0] - inner - side).max(0.0))
+        } else {
+            0.0
+        };
         // Where the picture ends: short of the side panel and the right
         // strip.
         let outer = (size[0] - side - panel).max(inner);
@@ -200,7 +202,7 @@ impl Chrome {
             filmstrip: parts
                 .filmstrip
                 .map(|_| Rect::new(0.0, bar, strip, (size[1] - bar).max(0.0))),
-            side: parts.side.map(|_| Rect::new(outer, bar, panel, middle)),
+            side: parts.side.then(|| Rect::new(outer, bar, panel, middle)),
             transport: parts
                 .transport
                 .then(|| Rect::new(inner, size[1] - 2.0 * bar, (outer - inner).max(0.0), bar)),
@@ -248,7 +250,11 @@ pub fn content_area(logical: [f32; 2], show_ui: bool, parts: Parts) -> Rect {
 /// what the file list leaves of the window, `rest`, where that is less, and
 /// nothing while it is not up. Down the whole right edge of the window.
 fn bare_side(rest: f32, parts: Parts) -> f32 {
-    parts.side.map_or(0.0, |width| width.min(rest.max(0.0)))
+    if parts.side {
+        side::WIDTH.min(rest.max(0.0))
+    } else {
+        0.0
+    }
 }
 
 /// The room the side panel would have, across and down, with the rest of
@@ -260,7 +266,7 @@ fn bare_side(rest: f32, parts: Parts) -> f32 {
 /// by.
 pub fn side_room(logical: [f32; 2], show_ui: bool, parts: Parts) -> [f32; 2] {
     let parts = Parts {
-        side: None,
+        side: false,
         ..parts
     };
     if show_ui {
@@ -275,11 +281,12 @@ pub fn side_room(logical: [f32; 2], show_ui: bool, parts: Parts) -> [f32; 2] {
     }
 }
 
-/// How wide the side panel comes out, where it is up: what it is asked for,
-/// or the room there is where that is less.
+/// How wide the side panel comes out, where it is up: its own width, or
+/// the room there is where that is less.
 pub fn side_width(logical: [f32; 2], show_ui: bool, parts: Parts) -> Option<f32> {
-    let width = parts.side?;
-    Some(width.min(side_room(logical, show_ui, parts)[0]))
+    parts
+        .side
+        .then(|| side::WIDTH.min(side_room(logical, show_ui, parts)[0]))
 }
 
 /// How wide the file list is with the panels hidden: its own width, or the
@@ -299,7 +306,7 @@ pub fn bare_strip(width: f32, parts: Parts) -> f32 {
 /// this, which is why toggling the interface re-fits a fitted image on the
 /// very next frame.
 pub fn image_viewport(size: [f32; 2], scale: f32, show_ui: bool, parts: Parts) -> Viewport {
-    if !show_ui && parts.filmstrip.is_none() && parts.side.is_none() {
+    if !show_ui && parts.filmstrip.is_none() && !parts.side {
         return Viewport::whole(size);
     }
     let content = content_area([size[0] / scale, size[1] / scale], show_ui, parts);
@@ -332,8 +339,6 @@ pub(super) struct Pass<'a> {
     /// Where the file list was laid out this pass, if it is up: what its
     /// grip is put along the edge of, once the picture is laid out under it.
     pub file_list: Option<Area>,
-    /// The same for the side panel: what its grip is put along the edge of.
-    pub side_panel: Option<Area>,
     /// The parts of the chrome that are up this pass.
     pub parts: Parts,
     pub commands: Vec<Command>,
@@ -400,11 +405,10 @@ impl Pass<'_> {
 
     /// The side panel, where it is up: inside the right strip while the
     /// panels are up, and down the whole right edge of the window on its
-    /// own while they are hidden, as the file list is down the left. Given
-    /// its width by the application, as the file list is: `side::grip`
-    /// asks for a new one, and the next frame is laid out at it.
+    /// own while they are hidden, as the file list is down the left, at
+    /// the width `Chrome` works out for it.
     pub fn side_panel(&mut self, ui: &mut Ui) {
-        let Some(shown) = self.input.side else {
+        let Some(holds) = self.input.side else {
             return;
         };
         let Some(width) = side_width(self.input.logical, self.panels.show_ui, self.parts) else {
@@ -419,10 +423,9 @@ impl Pass<'_> {
             .show(ui, |ui| {
                 let area = ui.max_rect();
                 let rect = Rect::new(area.min.x, area.min.y, area.width(), area.height());
-                side::show(self, ui, shown.side, rect);
+                side::show(self, ui, holds, rect);
             });
         self.hairline(ui, panel.response.rect, Edge::Left);
-        self.side_panel = Some(panel.response.rect);
     }
 
     /// The four panels, and everything on them; the side panel where it is
@@ -1295,7 +1298,7 @@ mod tests {
             Parts {
                 transport: true,
                 filmstrip: None,
-                side: None,
+                side: false,
             },
         );
         let transport = chrome.transport.expect("asked for");
@@ -1330,7 +1333,7 @@ mod tests {
                 Parts {
                     transport: true,
                     filmstrip: None,
-                    side: None,
+                    side: false,
                 }
             )
             .height,
@@ -1346,7 +1349,7 @@ mod tests {
         let parts = Parts {
             transport: true,
             filmstrip: Some(filmstrip::SLOT_MIN),
-            side: None,
+            side: false,
         };
         let chrome = Chrome::new(WINDOW, parts);
         let strip = chrome.filmstrip.expect("asked for");
@@ -1398,7 +1401,7 @@ mod tests {
         let parts = |slot| Parts {
             transport: false,
             filmstrip: Some(slot),
-            side: None,
+            side: false,
         };
         let narrow = Chrome::new(WINDOW, parts(filmstrip::SLOT_MIN));
         let wide = Chrome::new(WINDOW, parts(filmstrip::SLOT_MAX));
@@ -1422,7 +1425,7 @@ mod tests {
                 Parts {
                     transport: true,
                     filmstrip: Some(filmstrip::SLOT_MIN),
-                    side: None,
+                    side: false,
                 },
             );
             let transport = chrome.transport.expect("asked for");

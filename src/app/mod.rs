@@ -499,10 +499,6 @@ pub struct App {
     /// the strip was last drawn from. Whether the strip is up is
     /// [`Panels::show_filmstrip`].
     filmstrip: Filmstrip,
-    /// How wide the side panel is asked to be, held between
-    /// [`ui::side::WIDTH_MIN`] and [`ui::side::WIDTH_MAX`]. What it holds,
-    /// if it is up, is [`Panels::side`].
-    side_width: f32,
     /// Where what is kept from one run to the next is written back to when
     /// the window closes: the file list's and the side panel's widths and
     /// the loupe's magnification.
@@ -743,9 +739,6 @@ impl App {
             chooser: Chooser::default(),
             thumbs: Thumbs::default(),
             filmstrip: Filmstrip::default(),
-            side_width: kept_state
-                .side_width
-                .clamp(ui::side::WIDTH_MIN, ui::side::WIDTH_MAX),
             state,
             visited: Visited::default(),
             read_rates: HashMap::new(),
@@ -1656,7 +1649,6 @@ impl App {
     pub(super) fn kept_state(&self) -> State {
         State {
             filmstrip_width: self.filmstrip.slot(),
-            side_width: self.side_width,
             loupe_magnification: self.panels.loupe_magnification,
             ui_scale: self.ui_scale,
             order: self.filmstrip.order(),
@@ -1704,7 +1696,7 @@ impl App {
     /// geometry is derived from besides the window size.
     fn parts(&self) -> Parts {
         Parts {
-            side: self.side_showing().map(|_| self.side_width),
+            side: self.side_showing().is_some(),
             ..self.parts_but_side()
         }
     }
@@ -1715,7 +1707,7 @@ impl App {
         Parts {
             transport: self.has_transport(),
             filmstrip: self.filmstrip_showing().then(|| self.filmstrip.slot()),
-            side: None,
+            side: false,
         }
     }
 
@@ -2093,10 +2085,7 @@ impl App {
             zoom_box: self.marking.zoom_box(),
             transport: self.transport(),
             filmstrip,
-            side: self.side_showing().map(|side| ui::side::Shown {
-                side,
-                width: self.side_width,
-            }),
+            side: self.side_showing(),
             chooser,
             tags,
             rename,
