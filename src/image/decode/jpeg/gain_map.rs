@@ -328,6 +328,12 @@ mod tests {
         assert_eq!((display.window_low(), display.window_high()), (0.0, 1.0));
         assert_eq!(display.tone_map(), ToneMap::None);
         assert!(display.exceeds_white(&lifted));
+
+        // As the file stores it, the picture is the base, whatever the room:
+        // what the histogram plots the file as.
+        assert!(lifted.plot.max > 1.0);
+        let stored = Stats::scan_as_stored(&image).expect("a gain map moves color");
+        assert_eq!(stored.plot.max, 1.0);
     }
 
     /// The crate's own `apply_gainmap` over the same base and map, as the

@@ -366,16 +366,43 @@ impl Stats {
     /// or no map, the base is what is measured.
     pub fn scan_with(image: &DecodedImage, lift: Option<&Table>) -> Self {
         let stride = Self::stride(image);
-        Self::scan_in(image, lift, stride, Values::bands_for(image, stride))
+        let reader = Reader::tabulated(image, lift);
+        Self::scan_in(image, &reader, stride, Values::bands_for(image, stride))
     }
 
-    /// [`Stats::scan`] over a given number of bands, so that a test can hold
-    /// a divided scan against the same one undivided.
-    fn scan_in(image: &DecodedImage, lift: Option<&Table>, stride: usize, bands: usize) -> Self {
+    /// The picture as the file stores it, rather than as the display starts
+    /// from it: no lift, and a wide-gamut file's color in its own primaries
+    /// rather than carried into the working space's. What the histogram's
+    /// plot of the file is, so that a P3 red is at the top of the file's
+    /// range there and past it only further up the panel, where the working
+    /// space has taken it.
+    ///
+    /// `None` where the reader would move no color — a gray file, or a
+    /// BT.709 one with no gain map — since the picture as stored is then
+    /// what [`Stats::scan`] measured, and is not worth a second walk.
+    ///
+    /// A second walk over the picture for every other file, and for every
+    /// frame of a wide-gamut animation as it is decoded; on a thread of its
+    /// own either way, beside the scan it doubles.
+    pub fn scan_as_stored(image: &DecodedImage) -> Option<Self> {
+        if !image.color_moves() {
+            return None;
+        }
+        let stride = Self::stride(image);
+        let reader = Reader::as_stored(image);
+        Some(Self::scan_in(
+            image,
+            &reader,
+            stride,
+            Values::bands_for(image, stride),
+        ))
+    }
+
+    /// [`Stats::scan`] through `reader` over a given number of bands, so
+    /// that a test can hold a divided scan against the same one undivided.
+    fn scan_in(image: &DecodedImage, reader: &Reader, stride: usize, bands: usize) -> Self {
         let channels = image.samples.channels();
-        // Set up once and read through by every band.
-        let reader = Reader::tabulated(image, lift);
-        let values = Values::new(image, &reader, stride);
+        let values = Values::new(image, reader, stride);
         let transfer = image.color.transfer;
         let nodata = image.nodata;
         let is_data =
@@ -1049,10 +1076,11 @@ mod tests {
         };
 
         for stride in [1, 5] {
-            let plain = Stats::scan_in(&image, None, stride, 1);
+            let reader = Reader::tabulated(&image, None);
+            let plain = Stats::scan_in(&image, &reader, stride, 1);
             assert!(plain.counted > 0);
             for bands in [2, 7, 60, 200] {
-                let divided = Stats::scan_in(&image, None, stride, bands);
+                let divided = Stats::scan_in(&image, &reader, stride, bands);
                 assert_eq!(divided.min, plain.min, "stride {stride}, {bands} bands");
                 assert_eq!(divided.max, plain.max, "stride {stride}, {bands} bands");
                 assert_eq!(divided.plot.min, plain.plot.min);
@@ -1112,6 +1140,18 @@ mod tests {
         assert_eq!(srgb.peak, 1.0);
         assert_eq!((srgb.plot.min, srgb.plot.max), (0.0, 1.0));
         assert!((srgb.max - 0.2126).abs() < 1e-4, "{}", srgb.max);
+
+        // As the file stores it, the P3 red is at the top of the file's own
+        // range and its green at the bottom, and nothing is past either.
+        let stored = Stats::scan_as_stored(&red(Primaries::DisplayP3)).expect("P3 moves color");
+        assert_eq!((stored.plot.min, stored.plot.max), (0.0, 1.0));
+        let planes = stored.plot.color.expect("three planes");
+        assert_eq!(planes[0][BINS - 1], 1, "red at the top");
+        assert_eq!(planes[1][0], 1, "green at the bottom");
+        // And a BT.709 file is stored as it is shown, so is not scanned
+        // again.
+        assert!(Stats::scan_as_stored(&red(Primaries::Bt709)).is_none());
+        assert!(Stats::scan_as_stored(&srgb_gray_u8(vec![0, 255])).is_none());
     }
 
     /// Every pixel's marker lands on a bar that actually has the pixel in it.

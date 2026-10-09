@@ -404,6 +404,23 @@ impl DecodedImage {
         Reader::new(self, lift).read(x, y)
     }
 
+    /// The pixel at `(x, y)` as the file stores it: the curve resolved and
+    /// nothing else — no lift, and the file's own primaries rather than the
+    /// working space's. What the histogram's plot of the file reads a pixel
+    /// as, to mark the bar the scan of the file as stored counted it in.
+    pub fn sample_as_stored(&self, x: u32, y: u32) -> Option<Sample> {
+        Reader::new(self, None).as_stored_only().read(x, y)
+    }
+
+    /// Whether reading the picture to show it moves a color off where the
+    /// file's own curve puts it: a gain map lifts it, and a color file whose
+    /// primaries are not the working space's is carried into them. Where
+    /// neither does, the picture as stored and the picture as the display
+    /// starts from are one and the same, and are measured once.
+    pub fn color_moves(&self) -> bool {
+        self.gain_map.is_some() || (!self.is_gray() && self.color.primaries != Primaries::Bt709)
+    }
+
     /// Sanity check used by the loader, so a broken decoder fails loudly
     /// rather than reading past the end of a buffer on the upload path.
     pub fn validate(&self) -> Result<(), String> {
@@ -542,6 +559,23 @@ impl<'a> Reader<'a> {
             Samples::F32 { .. } => Curve::Direct(transfer),
         };
         Self::with_curve(image, lift, curve)
+    }
+
+    /// A reader for a walk over the picture as the file stores it: the
+    /// curve tabulated as [`Reader::tabulated`] has it, and nothing else —
+    /// no lift and no matrix, so that a wide-gamut color is read in the
+    /// file's own primaries and a gain-mapped picture as its base.
+    pub fn as_stored(image: &'a DecodedImage) -> Self {
+        Self::tabulated(image, None).as_stored_only()
+    }
+
+    /// This reader with whatever it would have moved a color by left out.
+    fn as_stored_only(self) -> Self {
+        Self {
+            lift: None,
+            matrix: None,
+            ..self
+        }
     }
 
     fn with_curve(
