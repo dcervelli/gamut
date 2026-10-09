@@ -11,7 +11,7 @@ Rendering is three separable layers:
    whatever the surface turned out to be.
 
 Keeping the interface off the image's target is what lets UI code stay in
-plain sRGB and logical pixels while the image beside it is extended-range
+plain sRGB and points while the image beside it is extended-range
 linear — and it is what makes a third-party toolkit usable at all, since egui
 has no idea what an HDR surface is. Given the target's sRGB format its
 renderer converts its colors to linear in its own shader and lets the
@@ -19,6 +19,15 @@ attachment encode on write, and its blend state is premultiplied source-over,
 which is exactly what `composite.wgsl` reads the target as; pointed at an
 HDR surface directly, it would put sRGB-authored colors into a linear or PQ
 signal with no conversion.
+
+The interface is laid out in **points**: egui's unit, which is the monitor's
+logical pixel multiplied by the interface's own scale, the one the keys step
+and the state file keeps. At an interface scale of 1 a point is a logical
+pixel. The picture is not in it — it is placed in device pixels, so 100% is
+one image pixel to one device pixel at every interface scale. Where these
+pages say "logical pixels" of something the interface draws, they mean
+points; [two scales](interface.md#two-scales) says how the application keeps
+the two apart.
 
 The interface is one function of the application's state:
 

@@ -334,6 +334,10 @@ fn view(b: &mut Builder) -> Vec<Node> {
         b.button("Loupe", Control::Loupe),
         b.submenu("Loupe Magnification", None, magnifications),
         Node::Separator,
+        b.action("Increase Interface Scale", Action::ScaleUp),
+        b.action("Decrease Interface Scale", Action::ScaleDown),
+        b.action("Reset Interface Scale", Action::ScaleReset),
+        Node::Separator,
         b.submenu("Pixel Readout", None, formats),
         b.submenu(
             "Coordinates",

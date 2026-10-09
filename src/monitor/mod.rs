@@ -9,6 +9,11 @@
 //! it. Where nothing can be read, the surface is chosen from the request
 //! alone.
 //!
+//! The same connection asks the compositor which GPU it renders on, for
+//! `render/adapter.rs` to draw the window there: a window drawn on another
+//! GPU has to be imported across, and is shown black where that cannot be
+//! done.
+//!
 //! The table is keyed by what [`key_of`] makes of winit's handle for the
 //! same monitor, so that the application never has to know what a platform
 //! calls one. `wayland.rs` answers on Linux, `macos.rs` on a Mac.
@@ -85,6 +90,9 @@ pub struct Monitors {
     /// rather than kept current by a thread.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(super) live: bool,
+    /// The device node the compositor renders on, numbered as the kernel
+    /// numbers one — a `dev_t` — where the compositor has said.
+    pub(super) main_device: Option<u64>,
 }
 
 impl Monitors {
@@ -107,6 +115,14 @@ impl Monitors {
     /// a monitor in SDR mode but a question nothing answers.
     pub fn speaks_modes(&self) -> bool {
         self.speaks_modes
+    }
+
+    /// The device node the compositor renders on, as the kernel numbers it,
+    /// which is the GPU a window is best drawn on. `None` where the
+    /// compositor has not said: off Wayland, or under one without version 4
+    /// of `zwp_linux_dmabuf_v1`.
+    pub fn main_device(&self) -> Option<u64> {
+        self.main_device
     }
 
     /// The room of every monitor that has said both its mode and its logical
@@ -135,6 +151,7 @@ impl Monitors {
             table: Arc::new(Mutex::new(Table::default())),
             speaks_modes,
             live: false,
+            main_device: None,
         }
     }
 

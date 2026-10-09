@@ -4,7 +4,9 @@
 //! its bar is, and what a stretch of a column comes out as with the planes
 //! standing over it.
 
-use egui::{Align2, Color32, FontId, Stroke, pos2, vec2};
+use std::ops::Range;
+
+use egui::{Align2, Color32, FontId, Stroke, pos2};
 
 use super::*;
 use crate::image::stats::COLOR;
@@ -117,6 +119,26 @@ pub(super) fn bin_across(index: usize) -> f32 {
     }
 }
 
+/// The bins under the `column`th of `columns` device columns across the
+/// plot: every bin any part of it covers, so that a column wider than a bin
+/// takes all of them and one narrower than a bin still takes the one it is
+/// in. Never empty, never past the last bin, and between them the columns
+/// take every bin.
+pub(super) fn bins_under(column: usize, columns: usize) -> Range<usize> {
+    let columns = columns.max(1);
+    let column = column.min(columns - 1);
+    let first = column * BINS / columns;
+    let end = ((column + 1) * BINS).div_ceil(columns).min(BINS);
+    first..end.max(first + 1)
+}
+
+/// The fullest of `bins` in `counts`: what a column over more than one bin
+/// stands as tall as, so that a spike in one of them is not averaged away
+/// by the columns beside it.
+pub(super) fn tallest(counts: &[u32; BINS], bins: Range<usize>) -> u32 {
+    counts[bins].iter().copied().max().unwrap_or(0)
+}
+
 /// How tall a bin's bar stands, from 0 on the axis to 1 at the top of the
 /// plot, against the fullest bin drawn beside it.
 ///
@@ -152,7 +174,6 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     let panels = pass.panels;
     let input = pass.input;
     let painter = ui.painter();
-    let scale = input.scale;
 
     // What applies to this image: the false colors are for a single channel
     // and the color planes are for three, and the panel leaves out whichever
@@ -199,21 +220,23 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
         HISTOGRAM_LUMA.with_alpha(HISTOGRAM_LUMA_UNDER)
     };
 
-    // One column to a bin — the bins are a logical pixel each, which is what
-    // the panel's width was fixed for — cut into stretches by the heights of
-    // the planes standing in it, each stretch filled with what the planes
-    // over it come to. On the device's grid, like every other mark here.
+    // One column to a device pixel — the bins are a point each, which is
+    // what the panel's width was fixed for, and a point is a device pixel
+    // only at one to one — standing as tall as the fullest bin under it, cut
+    // into stretches by the heights of the planes standing in it, each
+    // stretch filled with what the planes over it come to. On the device's
+    // grid, like every other mark here.
     let grid = pass.grid;
     let snap = |value: f32| grid.snap(value);
-    let edge = |index: usize| snap(bars.x + bars.width * index as f32 / BINS as f32);
-    for bin in 0..BINS {
-        let (left, right) = (edge(bin), edge(bin + 1));
+    for column in grid.columns(bars.x, bars.width) {
+        let (left, right) = (column.left, column.right);
+        let bins = bins_under(column.index, column.count);
         let mut heights: Vec<(f32, usize)> = Vec::with_capacity(4);
         if let Some(counts) = luma {
-            heights.push((height_of(counts[bin]), 3));
+            heights.push((height_of(tallest(counts, bins.clone())), 3));
         }
         for (plane, counts) in color.iter().enumerate() {
-            heights.push((height_of(counts[bin]), plane));
+            heights.push((height_of(tallest(counts, bins.clone())), plane));
         }
         heights.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut cover = Cover {
@@ -311,7 +334,8 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     }
 
     // What the display turns each value into, in a band along the foot of
-    // the plot: the bin above a cell, and the color it comes out as under it.
+    // the plot: the value above a cell, and the color it comes out as under
+    // it, a device pixel to the cell.
     //
     // The curve says how much and this says what of, which are different
     // questions on a false-colored image — a curve cannot draw viridis —
@@ -330,11 +354,11 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     // the same ink as the handle that marks white on the band, and the run
     // of it is how much of the axis is out past that.
     let channels = current.image.channels();
-    let hair = 1.0 / scale;
-    for index in 0..BINS {
-        let (left, right) = (edge(index), edge(index + 1));
-        let across = (index as f32 + 0.5) / BINS as f32;
-        let value = transfer.to_linear(axis_min + across * span);
+    let hair = grid.device_pixels(1.0);
+    let cells: Vec<_> = grid.columns(bars.x, bars.width).collect();
+    for column in &cells {
+        let (left, right) = (column.left, column.right);
+        let value = transfer.to_linear(axis_min + column.t_center() * span);
         painter.rect_filled(
             egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
             0.0,
@@ -356,7 +380,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     // full depth. A window left of everything makes the whole ramp black,
     // and a black band on a dark panel is a gap in it without this. One
     // physical pixel, snapped like the band it rings.
-    let (left, right) = (edge(0), edge(BINS));
+    let (left, right) = (cells[0].left, cells[cells.len() - 1].right);
     outline(
         painter,
         grid,
@@ -396,7 +420,9 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     if !(offset.is_finite() && gain.is_finite()) {
         return;
     }
-    let columns = bars.width.max(1.0) as usize;
+    // A vertex to the device pixel, so that a steep toe is drawn as finely
+    // as the screen can show it.
+    let columns = grid.columns(bars.x, bars.width).len();
     // Decoded to run the transform on, then encoded again to be drawn: both
     // axes are in the file's own units, so a display doing nothing would be
     // the diagonal.
@@ -421,7 +447,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     if let Some(white) = plot_scale.white {
         let y = grid.snap(bars.bottom() - white * bars.height);
         painter.rect_filled(
-            egui::Rect::from_min_size(pos2(bars.x, y), vec2(bars.width, 1.0 / scale)),
+            egui::Rect::from(grid.rect(Rect::new(bars.x, y, bars.width, grid.device_pixels(1.0)))),
             0.0,
             theme.text_dim,
         );
@@ -454,6 +480,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::icon::Grid;
 
     /// Either way of scaling the plot draws an empty bin flat on the axis and
     /// the fullest one at the top of it: what changes is only what the bins
@@ -542,5 +569,95 @@ mod tests {
         assert!(luma.r == luma.g && luma.g == luma.b, "{luma:?}");
         let ground = PLOT_BACKGROUND;
         assert!(ground.r.max(ground.g).max(ground.b) < 16, "{ground:?}");
+    }
+
+    /// The device column counts a 256-point plot comes to across the
+    /// interface's scales and the monitor's.
+    const COLUMN_COUNTS: [usize; 6] = [192, 256, 320, 384, 512, 640];
+
+    /// However many columns the plot is cut into, each takes at least one
+    /// bin, they march along the bins without going back, and between them
+    /// they take every one.
+    #[test]
+    fn every_bin_is_under_a_column_however_many_there_are() {
+        for columns in COLUMN_COUNTS {
+            let mut covered = [false; BINS];
+            let mut last = 0..1;
+            for column in 0..columns {
+                let bins = bins_under(column, columns);
+                assert!(!bins.is_empty(), "{columns}: {column}");
+                assert!(bins.end <= BINS, "{columns}: {column}");
+                assert!(bins.start >= last.start, "{columns}: {column}");
+                assert!(bins.end >= last.end, "{columns}: {column}");
+                for bin in bins.clone() {
+                    covered[bin] = true;
+                }
+                last = bins;
+            }
+            assert!(covered.iter().all(|&bin| bin), "{columns}");
+        }
+        // At 1.25 a column is four fifths of a bin: some straddle two.
+        assert_eq!(bins_under(1, 320), 0..2);
+        assert_eq!(bins_under(4, 320), 3..4);
+    }
+
+    /// At a device pixel to the point, a column is its own bin.
+    #[test]
+    fn at_one_to_one_a_column_is_its_bin() {
+        for column in 0..BINS {
+            assert_eq!(bins_under(column, BINS), column..column + 1);
+        }
+    }
+
+    /// One full bin among empty ones still stands at its height whether the
+    /// columns are wider than a bin, as wide, or narrower.
+    #[test]
+    fn a_spike_survives_a_column_wider_than_a_bin() {
+        let mut counts = [0; BINS];
+        counts[101] = 1000;
+        for columns in [192, 256, 320] {
+            let peak = (0..columns)
+                .map(|column| tallest(&counts, bins_under(column, columns)))
+                .max();
+            assert_eq!(peak, Some(1000), "{columns}");
+        }
+    }
+
+    /// At 1.25 every device pixel of the plot is one column, and every bin
+    /// stands in at least one of them.
+    #[test]
+    fn at_one_and_a_quarter_every_column_is_one_device_pixel_and_every_bin_is_drawn() {
+        let grid = Grid::new(1.25);
+        let columns: Vec<_> = grid.columns(20.0, BINS as f32).collect();
+        assert_eq!(columns.len(), 320);
+        for column in &columns {
+            assert!(((column.right - column.left) * 1.25 - 1.0).abs() < 1e-3);
+        }
+        let mut drawn = [false; BINS];
+        for column in &columns {
+            for bin in bins_under(column.index, column.count) {
+                drawn[bin] = true;
+            }
+        }
+        assert!(drawn.iter().all(|&bin| bin));
+    }
+
+    /// At three quarters there are fewer columns than bins, and none of the
+    /// bins is left out of them.
+    #[test]
+    fn at_three_quarters_no_bin_is_dropped() {
+        let columns: Vec<_> = Grid::new(0.75).columns(20.0, BINS as f32).collect();
+        assert_eq!(columns.len(), 192);
+        let mut counts = [0; BINS];
+        for bin in 0..BINS {
+            counts.fill(0);
+            counts[bin] = 7;
+            assert!(
+                columns
+                    .iter()
+                    .any(|column| tallest(&counts, bins_under(column.index, column.count)) == 7),
+                "{bin}"
+            );
+        }
     }
 }

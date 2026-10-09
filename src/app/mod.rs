@@ -352,7 +352,8 @@ struct Sizing {
 /// panels' geometry is worked out once rather than by each of them.
 #[derive(Clone, Copy)]
 struct Sight {
-    /// Physical pixels to the logical one.
+    /// Physical pixels to the interface's point — the monitor's scale and
+    /// the interface's together — what egui lays out in.
     scale: f32,
     /// The window in logical pixels.
     logical: [f32; 2],
@@ -457,6 +458,11 @@ pub struct App {
     /// follow rather than stay in the theme it opened under.
     theme: Theme,
     theme_watch: theme::Watch,
+    /// How large the interface is drawn, on top of the monitor's own scale:
+    /// one of [`ui::scale::SCALES`], or a value between two of them that the
+    /// state file was given by hand. The picture is placed in device pixels
+    /// whatever it is.
+    ui_scale: f32,
     /// The configuration file, watched on the same cadence, so that a key
     /// or a gesture changed in it is in force once the file is saved — see
     /// [`App::reconfigure`]. Idle until `main` asks for it: the tests build
@@ -728,6 +734,7 @@ impl App {
             offered_folder: None,
             theme: Theme::detect(),
             theme_watch,
+            ui_scale: kept_state.ui_scale,
             config_watch: Watch::idle(),
             next_poll: Instant::now() + watch::INTERVAL,
             loader,
@@ -919,6 +926,7 @@ impl App {
             self.output.monitors.as_ref(),
             Some(image),
             None,
+            window::Chrome::new(self.ui_scale),
         );
         let moved = window::centered_on(window, wanted);
         let before = window.inner_size();
@@ -1624,17 +1632,62 @@ impl App {
             .unwrap_or([1.0, 1.0])
     }
 
-    fn scale_factor(&self) -> f32 {
+    /// The monitor's own scale: the window's physical pixels to its logical
+    /// one, as the desktop has it. What the window is sized in and the
+    /// checkerboard is drawn by; everything the interface lays out reads
+    /// [`App::pixels_per_point`] instead.
+    fn device_scale(&self) -> f32 {
         self.shown
             .as_ref()
             .map(|shown| shown.window.scale_factor() as f32)
             .unwrap_or(1.0)
     }
 
-    /// The window in the logical pixels the interface is laid out in. Events
-    /// and the surface are both in physical ones.
+    /// Physical pixels to the interface's point: the monitor's scale and the
+    /// interface's together, which is what egui lays out by and so what
+    /// every conversion between the pointer, the panels and the picture's
+    /// viewport has to use.
+    fn pixels_per_point(&self) -> f32 {
+        self.device_scale() * self.ui_scale
+    }
+
+    /// What was left where it was set by hand, gathered for the state file
+    /// as the loop ends.
+    pub(super) fn kept_state(&self) -> State {
+        State {
+            filmstrip_width: self.filmstrip.slot(),
+            side_width: self.side_width,
+            loupe_magnification: self.panels.loupe_magnification,
+            ui_scale: self.ui_scale,
+            order: self.filmstrip.order(),
+            camera_jpeg: self.rendering == Rendering::CameraJpeg,
+            pixel_format: self.panels.pixel_format,
+            coordinate_format: self.panels.coordinate_format,
+            geographic_format: self.panels.geographic_format,
+        }
+    }
+
+    /// Puts the interface at `scale` of the monitor's: what egui lays out by,
+    /// and what the application converts the pointer and the viewport by.
+    /// A change says the new scale in a toast; nowhere to go — the
+    /// ladder's end, a reset at 1 — says nothing and owes no frame. The
+    /// window keeps its size.
+    pub(super) fn rescale(&mut self, scale: f32) -> Effect {
+        if scale == self.ui_scale {
+            return Effect::Nothing;
+        }
+        self.ui_scale = scale;
+        if let Some(shown) = &self.shown {
+            shown.gui.rescale(scale);
+        }
+        self.toast(ui::scale::said(scale), Level::Message);
+        Effect::Redraw
+    }
+
+    /// The window in the points the interface is laid out in. Events and the
+    /// surface are both in physical pixels.
     fn logical_size(&self) -> [f32; 2] {
-        let scale = self.scale_factor();
+        let scale = self.pixels_per_point();
         let physical = self.window_size();
         [physical[0] / scale, physical[1] / scale]
     }
@@ -1917,7 +1970,7 @@ impl App {
     fn viewport(&self) -> Viewport {
         image_viewport(
             self.window_size(),
-            self.scale_factor(),
+            self.pixels_per_point(),
             self.panels.show_ui,
             self.parts(),
         )
@@ -1930,7 +1983,7 @@ impl App {
 
     /// The window and the view read at `now`.
     fn sight_at(&self, now: Instant) -> Sight {
-        let scale = self.scale_factor();
+        let scale = self.pixels_per_point();
         let physical = self.window_size();
         let logical = [physical[0] / scale, physical[1] / scale];
         let parts = self.parts();
@@ -1945,16 +1998,20 @@ impl App {
     }
 
     /// What this frame's interface is laid out from, in a window `logical`
-    /// pixels across at `scale` device pixels to each: everything the
+    /// points across at `scale` device pixels to each: everything the
     /// application derives per frame from its window, pointer and loader.
     /// Apart from `redraw` so that the interface can be driven over the
-    /// application with no window behind it.
+    /// application with no window behind it. The picture's viewport is
+    /// worked out at `scale` too, so that a test at another scale reads one
+    /// sight rather than two.
     #[cfg(test)]
     fn frame_input(&mut self, logical: [f32; 2], scale: f32) -> FrameInput {
+        let sight = self.sight();
         let sight = Sight {
             logical,
             scale,
-            ..self.sight()
+            viewport: image_viewport(self.window_size(), scale, self.panels.show_ui, sight.parts),
+            ..sight
         };
         let conditions = self.conditions();
         self.frame_input_under(&sight, &conditions)
@@ -2396,6 +2453,7 @@ impl App {
             self.output.monitors.as_ref(),
             self.opening_size(),
             self.sizing.asked,
+            window::Chrome::new(self.ui_scale),
         );
         let attributes = window::with_app_id(
             Window::default_attributes()
@@ -2418,7 +2476,12 @@ impl App {
         timing::window_open();
         window::show_icon();
 
-        let mut renderer = match Renderer::new(window.clone(), self.output.asked) {
+        let main_device = self
+            .output
+            .monitors
+            .as_ref()
+            .and_then(Monitors::main_device);
+        let mut renderer = match Renderer::new(window.clone(), self.output.asked, main_device) {
             Ok(renderer) => renderer,
             Err(error) => {
                 crate::report(&error);
@@ -2464,7 +2527,12 @@ impl App {
             );
         }
 
-        let gui = match Gui::new(&window, &self.theme, renderer.max_texture_side()) {
+        let gui = match Gui::new(
+            &window,
+            &self.theme,
+            renderer.max_texture_side(),
+            self.ui_scale,
+        ) {
             Ok(gui) => gui,
             Err(error) => {
                 crate::report(&error);
@@ -2586,6 +2654,21 @@ impl App {
             return Effect::Redraw;
         }
         match self.files.step(forward) {
+            Some(request) => self.send(request),
+            None => Effect::Nothing,
+        }
+    }
+
+    /// Steps to the first file on the list, or with `last` the last.
+    pub(super) fn step_to_end(&mut self, last: bool) -> Effect {
+        if self.files.len() < 2 {
+            if self.files.len() == 0 || self.folder_first(Then::End(last)) {
+                return Effect::Nothing;
+            }
+            self.toast("No other files to step to", Level::Message);
+            return Effect::Redraw;
+        }
+        match self.files.end(last) {
             Some(request) => self.send(request),
             None => Effect::Nothing,
         }
@@ -3107,6 +3190,9 @@ impl App {
         let loupe = loupe.filter(|_| picture);
         let namer = self.namer_under(conditions);
         let backdrop = ui::backdrop(&self.theme);
+        // The checkerboard is drawn at the monitor's own scale, however
+        // large the interface is.
+        let device_scale = self.device_scale();
 
         let Some(shown) = &mut self.shown else {
             return Effect::Nothing;
@@ -3123,6 +3209,14 @@ impl App {
                 &namer,
             );
         });
+        // The one check that the application's figure for the interface's
+        // point and egui's cannot drift apart: every conversion of the
+        // pointer and the viewport above was made with `scale`.
+        debug_assert!(
+            (shown.gui.ctx.pixels_per_point() - scale).abs() < 1e-4,
+            "egui lays out at {} points, the application at {scale}",
+            shown.gui.ctx.pixels_per_point(),
+        );
 
         let fallback = Display::default();
         let display = self
@@ -3149,7 +3243,7 @@ impl App {
             }),
             display,
             ui: &painted,
-            scale,
+            scale: device_scale,
             backdrop,
             headroom,
         };
@@ -3617,16 +3711,7 @@ impl ApplicationHandler<UserEvent> for App {
     /// outlasts the window.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.copying.join_all();
-        self.state.save(State {
-            filmstrip_width: self.filmstrip.slot(),
-            side_width: self.side_width,
-            loupe_magnification: self.panels.loupe_magnification,
-            order: self.filmstrip.order(),
-            camera_jpeg: self.rendering == Rendering::CameraJpeg,
-            pixel_format: self.panels.pixel_format,
-            coordinate_format: self.panels.coordinate_format,
-            geographic_format: self.panels.geographic_format,
-        });
+        self.state.save(self.kept_state());
     }
 }
 

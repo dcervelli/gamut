@@ -65,7 +65,7 @@ pub const SIZE: [f32; 2] = [
 
 /// The room the strip of buttons down the left takes: a button's width and
 /// the gap between it and the plot. Read by [`super::PANEL_WIDTH`], which is
-/// this and the plot, so that a bin stays exactly one logical pixel wide.
+/// this and the plot, so that a bin stays exactly one point wide.
 pub(super) const TOOLBAR_WIDTH: f32 = BUTTON_SIZE + PANEL_INSET;
 /// Between one button of that strip and the next. Tighter than the gap the
 /// chrome's own strips keep, so that on a color image the four buttons
@@ -291,8 +291,9 @@ pub fn panel(side: Rect, scale: f32) -> Rect {
 }
 
 /// The ground the bins stand on inside that panel, with the label line
-/// above it. The bins are one logical pixel each, so this is the full width
-/// of the plot and the room around it is drawn outside it.
+/// above it. The bins are one point each, so this is the full width of the
+/// plot and the room around it is drawn outside it; what is drawn across it
+/// is one column to the device pixel, however many points that is.
 ///
 /// Set out from the top of the panel down, and so the same whatever rows
 /// the file has under it: the rows are what the panel grows by, and the

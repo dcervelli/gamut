@@ -6,7 +6,7 @@ pkgname=gamut
 # a window with its icon. `main.rs::APP_ID` is where it is set, and `cli`'s
 # tests check that this file still agrees with it.
 _appid=com.dcervelli.gamut
-pkgver=0.10.0
+pkgver=0.11.0
 pkgrel=1
 pkgdesc="A modern image viewer optimized for getting work done, fast."
 arch=('x86_64' 'aarch64')
@@ -41,7 +41,7 @@ makedepends=('cargo' 'pkgconf')
 options=('!debug')
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('6626d1ee331b43a6bc17925068846d96df00607068305540c7b59b7efb731a46')
+sha256sums=('5aa92a8695804cc9904bdfbb5ed16949ae7dab42abd0e41a80bbb2eb4c71ee7a')
 
 prepare() {
   cd "$pkgname-$pkgver"

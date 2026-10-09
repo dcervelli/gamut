@@ -95,6 +95,8 @@ pub enum Action {
     CycleUpscale,
     NextFile,
     PreviousFile,
+    FirstFile,
+    LastFile,
     /// Open the file chooser: a popup that lists the session's files, with
     /// a field that narrows them as it is typed in. While it is up its own
     /// keys are read by the popup — see `ui::chooser` — and the same
@@ -141,6 +143,12 @@ pub enum Action {
     /// steps with the secondary button held.
     ToggleLoupe,
     CycleMagnification,
+    /// The interface drawn a rung larger or smaller on top of the monitor's
+    /// own scale, or at the monitor's own: see [`ui::scale`]. The picture
+    /// is not in it.
+    ScaleUp,
+    ScaleDown,
+    ScaleReset,
     /// Exposure, by this many stops.
     Exposure(f32),
     CycleAutoWindow,
@@ -869,15 +877,16 @@ pub static ROWS: &[Row] = &[
         section: Section::Zoom,
         when: None,
         help: "Pan by 64 pixels",
-        keys: Keys::Bound(arrows!("pan", PLAIN, Pan, Coarse)),
+        keys: Keys::Bound(arrows!("pan", SHIFT, Pan, Coarse)),
     },
     // Shift belongs to the chord here, where it does not for a character:
-    // an arrow is the same key whichever way it is held.
+    // an arrow is the same key whichever way it is held. The arrows alone
+    // step through the files.
     Row {
         section: Section::Zoom,
         when: None,
         help: "Pan by one pixel",
-        keys: Keys::Bound(arrows!("pan.pixel", SHIFT, Pan, Fine)),
+        keys: Keys::Bound(arrows!("pan.pixel", CTRL_SHIFT, Pan, Fine)),
     },
     Row {
         section: Section::Zoom,
@@ -945,6 +954,38 @@ pub static ROWS: &[Row] = &[
             "interface.loupe-magnification",
             CycleMagnification,
             [key('L')]
+        ),
+    },
+    // The desktop's chords for the interface's own zoom, which the plain
+    // `+`, `-` and `0` of the zoom leave free.
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Increase interface scale",
+        keys: one!(
+            "interface.scale.up",
+            ScaleUp,
+            [typed(CTRL, '='), typed(CTRL, '+')]
+        ),
+    },
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Decrease interface scale",
+        keys: one!(
+            "interface.scale.down",
+            ScaleDown,
+            [typed(CTRL, '-'), typed(CTRL, '_')]
+        ),
+    },
+    Row {
+        section: Section::Interface,
+        when: None,
+        help: "Reset interface scale",
+        keys: one!(
+            "interface.scale.reset",
+            ScaleReset,
+            [digit(CTRL, KeyCode::Digit0)]
         ),
     },
     // The three that work the histogram's plot, under the key that opens it.
@@ -1029,7 +1070,12 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.next",
             NextFile,
-            [key(']'), named(PLAIN, NamedKey::PageDown)]
+            [
+                named(PLAIN, NamedKey::ArrowRight),
+                named(PLAIN, NamedKey::ArrowDown),
+                key(']'),
+                named(PLAIN, NamedKey::PageDown)
+            ]
         ),
     },
     Row {
@@ -1039,8 +1085,25 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.previous",
             PreviousFile,
-            [key('['), named(PLAIN, NamedKey::PageUp)]
+            [
+                named(PLAIN, NamedKey::ArrowLeft),
+                named(PLAIN, NamedKey::ArrowUp),
+                key('['),
+                named(PLAIN, NamedKey::PageUp)
+            ]
         ),
+    },
+    Row {
+        section: Section::Files,
+        when: None,
+        help: "First file",
+        keys: one!("files.first", FirstFile, [named(PLAIN, NamedKey::Home)]),
+    },
+    Row {
+        section: Section::Files,
+        when: None,
+        help: "Last file",
+        keys: one!("files.last", LastFile, [named(PLAIN, NamedKey::End)]),
     },
     Row {
         section: Section::Files,
@@ -1055,7 +1118,8 @@ pub static ROWS: &[Row] = &[
         keys: one!("files.list", ToggleFilmstrip, [named(PLAIN, NamedKey::Tab)]),
     },
     // The keys that step through the list, held with Alt, step through
-    // the files that have been on screen instead.
+    // the files that have been on screen instead: Alt with the arrows
+    // across is a browser's back and forward.
     Row {
         section: Section::Files,
         when: Some(When::VisitedBefore),
@@ -1063,7 +1127,11 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.back",
             Back,
-            [typed(ALT, '['), named(ALT, NamedKey::PageUp)]
+            [
+                named(ALT, NamedKey::ArrowLeft),
+                typed(ALT, '['),
+                named(ALT, NamedKey::PageUp)
+            ]
         ),
     },
     Row {
@@ -1073,7 +1141,11 @@ pub static ROWS: &[Row] = &[
         keys: one!(
             "files.forward",
             Forward,
-            [typed(ALT, ']'), named(ALT, NamedKey::PageDown)]
+            [
+                named(ALT, NamedKey::ArrowRight),
+                typed(ALT, ']'),
+                named(ALT, NamedKey::PageDown)
+            ]
         ),
     },
     // The desktop's own dialog, for files and for a folder: the capital
@@ -1369,7 +1441,9 @@ pub static ROWS: &[Row] = &[
 /// menu shortcuts a Mac user already knows — `Cmd+0`, `Cmd+Z`,
 /// `Cmd+Backspace` to throw a file away, `Cmd+Q` and `Cmd+W`; and `Cmd+[`
 /// and `Cmd+]` for back and forward, as a browser has them; `Cmd+,` for the
-/// settings, and Preview's `Cmd+L` and `Cmd+R` to turn the picture. A name
+/// settings, and Preview's `Cmd+L` and `Cmd+R` to turn the picture; and
+/// the interface's scale on `Cmd+Option` with `=`, `-` and `0`, since
+/// `Cmd` with them is the picture's zoom, as Preview has it. A name
 /// not here keeps the table's chords.
 ///
 /// Applied over the table by [`Keymap::mac`](super::keymap::Keymap::mac),
@@ -1388,6 +1462,10 @@ pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
         &[key('+'), key('='), typed(CMD, '+'), typed(CMD, '=')],
     ),
     ("zoom.out", &[key('-'), key('_'), typed(CMD, '-')]),
+    ("pan.pixel.left", &[named(CMD_SHIFT, NamedKey::ArrowLeft)]),
+    ("pan.pixel.right", &[named(CMD_SHIFT, NamedKey::ArrowRight)]),
+    ("pan.pixel.up", &[named(CMD_SHIFT, NamedKey::ArrowUp)]),
+    ("pan.pixel.down", &[named(CMD_SHIFT, NamedKey::ArrowDown)]),
     ("pan.edge.left", &[named(CMD, NamedKey::ArrowLeft)]),
     ("pan.edge.right", &[named(CMD, NamedKey::ArrowRight)]),
     ("pan.edge.up", &[named(CMD, NamedKey::ArrowUp)]),
@@ -1408,6 +1486,18 @@ pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
     (
         "region.shrink.down",
         &[named(CMD_SHIFT, NamedKey::ArrowDown)],
+    ),
+    (
+        "interface.scale.up",
+        &[typed(CMD_OPTION, '='), typed(CMD_OPTION, '+')],
+    ),
+    (
+        "interface.scale.down",
+        &[typed(CMD_OPTION, '-'), typed(CMD_OPTION, '_')],
+    ),
+    (
+        "interface.scale.reset",
+        &[digit(CMD_OPTION, KeyCode::Digit0)],
     ),
     ("interface.help", &[key('?'), key('/'), typed(CMD, '?')]),
     ("interface.settings", &[typed(CMD, ',')]),
@@ -2042,6 +2132,8 @@ impl App {
             // is on screen stays until it arrives.
             NextFile => return self.step(true),
             PreviousFile => return self.step(false),
+            FirstFile => return self.step_to_end(false),
+            LastFile => return self.step_to_end(true),
             // The count's own press, so that the key and the press cannot
             // come to mean different things — except that the key only
             // opens: `Esc` closes the chooser, as a file finder's does.
@@ -2107,6 +2199,9 @@ impl App {
                 self.panels.loupe_magnification = ui::loupe::cycle(self.panels.loupe_magnification);
                 return Effect::Redraw;
             }
+            ScaleUp => return self.rescale(ui::scale::step(self.ui_scale, true)),
+            ScaleDown => return self.rescale(ui::scale::step(self.ui_scale, false)),
+            ScaleReset => return self.rescale(ui::scale::DEFAULT),
             Exposure(stops) => {
                 return self.adjust(|current, _| {
                     current.display.adjust_exposure(stops);
@@ -2708,7 +2803,7 @@ impl App {
         if delta.iter().all(|each| each.abs() < 1e-3) {
             return Effect::Nothing;
         }
-        let by = ui::WHEEL_PIXELS_PER_STEP * self.scale_factor();
+        let by = ui::WHEEL_PIXELS_PER_STEP * self.pixels_per_point();
         let [dx, dy] = [delta[0] * by, delta[1] * by];
         if notched {
             self.animate(|view, image, viewport| view.pan_by(-dx, -dy, image, viewport));

@@ -18,40 +18,116 @@ use crate::ui::chrome::{BAR_HEIGHT, SIDE_WIDTH};
 /// rather than above and below it.
 const MAX_WINDOW_FRACTION: [f64; 2] = [0.75, 0.85];
 
-/// What the panels take out of the window, in the logical pixels they are
-/// laid out in: a side on each edge and a bar top and bottom.
+/// What the panels take out of the window, in the points they are laid out
+/// in: a side on each edge and a bar top and bottom. A window is sized in the
+/// monitor's logical pixels, which are a point only while the interface is
+/// at the monitor's own scale — see [`Chrome`].
 const CHROME: [f64; 2] = [2.0 * SIDE_WIDTH as f64, 2.0 * BAR_HEIGHT as f64];
 
-/// The smallest a window opens at. Below this the chrome has all of it and
+/// The smallest a window opens at, in points. Below this the chrome has all of it and
 /// there is nowhere left for a picture, so a size asked for beneath it is
 /// taken as far as it goes and no further.
 const MIN_WINDOW: [u32; 2] = [320, 240];
 
-/// A logical pixel of slack on [`PANELS_WINDOW`].
+/// A logical pixel of slack on [`Chrome::panels_window`].
 ///
 /// A window is laid out in logical pixels and sized in device ones, so the
 /// size that comes back is the size asked for rounded to the device grid — a
 /// 392-pixel window on a monitor at 1.6 is 627 device pixels and 391.875
 /// logical ones. Asking for exactly the room the panels need therefore leaves
 /// them out about as often as not; asking for a pixel more never does, the
-/// rounding being half a device pixel at worst.
+/// rounding being half a device pixel at worst. A rounding to the device's
+/// grid, and so not grown with the interface's scale.
 const FLOOR_SLACK: f64 = 1.0;
 
-/// The window that has room for the side panel whichever of its two it
-/// holds: the room between the strips and the bars [`ui::PANELS_ROOM`] asks
-/// for, the chrome around it, and [`FLOOR_SLACK`].
-///
-/// The floor a window opens at instead of [`MIN_WINDOW`], where the monitor
-/// has the room to spare. A window that opens too small for its own interface
-/// has the histogram and the information toggles dead in it from the first
-/// frame, and nothing the viewer did asked for that — where the picture is
-/// small, the window is better a little larger than the picture. It is only a
-/// floor: `--size` is not held to it, and neither is a monitor that cannot
-/// take it.
-const PANELS_WINDOW: [f64; 2] = [
-    ui::PANELS_ROOM[0] as f64 + CHROME[0] + FLOOR_SLACK,
-    ui::PANELS_ROOM[1] as f64 + CHROME[1] + FLOOR_SLACK,
-];
+/// The interface's terms in the monitor's: how large the chrome, the
+/// smallest window and the panels' room are in the logical pixels a window is
+/// asked for in, with the interface drawn at `ui_scale` of the monitor's own
+/// scale. The picture is not in it — it is placed in device pixels whatever
+/// the interface's scale — so only what the interface takes grows with it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Chrome {
+    ui_scale: f64,
+}
+
+impl Default for Chrome {
+    fn default() -> Self {
+        Self { ui_scale: 1.0 }
+    }
+}
+
+impl Chrome {
+    /// The interface at `ui_scale`, or at the monitor's own where that is
+    /// no scale at all.
+    pub(super) fn new(ui_scale: f32) -> Self {
+        let ui_scale = f64::from(ui_scale);
+        if ui_scale.is_finite() && ui_scale > 0.0 {
+            Self { ui_scale }
+        } else {
+            Self::default()
+        }
+    }
+
+    /// [`CHROME`] in the monitor's logical pixels.
+    fn chrome(self) -> [f64; 2] {
+        CHROME.map(|side| side * self.ui_scale)
+    }
+
+    /// [`MIN_WINDOW`] in the monitor's logical pixels.
+    fn min_window(self) -> [f64; 2] {
+        MIN_WINDOW.map(|side| f64::from(side) * self.ui_scale)
+    }
+
+    /// The window that has room for the side panel whichever of its two it
+    /// holds: the room between the strips and the bars [`ui::PANELS_ROOM`]
+    /// asks for, the chrome around it, and [`FLOOR_SLACK`].
+    ///
+    /// The floor a window opens at instead of [`Chrome::min_window`], where
+    /// the monitor has the room to spare. A window that opens too small for
+    /// its own interface has the histogram and the information toggles dead
+    /// in it from the first frame, and nothing the viewer did asked for that
+    /// — where the picture is small, the window is better a little larger
+    /// than the picture. It is only a floor: `--size` is not held to it, and
+    /// neither is a monitor that cannot take it.
+    fn panels_window(self) -> [f64; 2] {
+        let chrome = self.chrome();
+        std::array::from_fn(|axis| {
+            f64::from(ui::PANELS_ROOM[axis]) * self.ui_scale + chrome[axis] + FLOOR_SLACK
+        })
+    }
+
+    /// The smallest window a monitor with `room` should be given: one with
+    /// room for the side panel where the monitor can hold it, and
+    /// [`Chrome::min_window`] where it cannot — a floor that did not fit the
+    /// screen would be a window off the edge of it, which is the thing the
+    /// rest of this is for.
+    fn floor_for(self, room: [f64; 2]) -> [f64; 2] {
+        let least = self.min_window();
+        let panels = self.panels_window();
+        if panels[0] <= room[0] && panels[1] <= room[1] {
+            [least[0].max(panels[0]), least[1].max(panels[1])]
+        } else {
+            least
+        }
+    }
+
+    /// The smallest window in the whole logical pixels a window is asked
+    /// for in, rounded up so that it holds the whole of the chrome.
+    fn least(self) -> [u32; 2] {
+        self.min_window().map(|side| side.ceil() as u32)
+    }
+
+    /// A size settled on, rounded to the whole logical pixels a window is
+    /// asked for in and held at the floor the rounding could otherwise drop
+    /// it below.
+    fn logical(self, size: [f64; 2]) -> LogicalSize<u32> {
+        let least = self.least();
+        LogicalSize::new(
+            (size[0].round() as u32).max(least[0]),
+            (size[1].round() as u32).max(least[1]),
+        )
+    }
+}
 
 /// What a window opens at when the first file's header will not say how large
 /// its image is. Every format read here does say, so this is a fallback for a
@@ -176,6 +252,7 @@ pub(super) fn initial_window_size(
     monitors: Option<&Monitors>,
     image: Option<[f32; 2]>,
     asked: Option<[u32; 2]>,
+    chrome: Chrome,
 ) -> LogicalSize<u32> {
     let mut measured: Vec<Monitor> = monitors
         .map(Monitors::rooms)
@@ -188,7 +265,7 @@ pub(super) fn initial_window_size(
             .filter_map(|monitor| Monitor::reported(monitor.size(), monitor.scale_factor()))
             .collect();
     }
-    window_size(&measured, image, asked)
+    window_size(&measured, image, asked, chrome)
 }
 
 /// A monitor as the sizing sees it: the room it is laid out in, in the
@@ -243,48 +320,35 @@ impl Monitor {
 /// still applies to the image itself.
 ///
 /// The image's pixels are physical and the window's are logical, so the
-/// monitor's scale converts between them.
+/// monitor's scale converts between them — the monitor's alone: the
+/// interface's scale grows the chrome, and leaves the picture at its own
+/// pixels.
 ///
-/// A picture smaller than the floor is given the floor: [`PANELS_WINDOW`]
-/// where this monitor can take it, and [`MIN_WINDOW`] where it cannot. The
+/// A picture smaller than the floor is given the floor: the panels' window
+/// where this monitor can take it, and the smallest window where it cannot. The
 /// floor is measured against the monitor's whole room rather than against
 /// [`MAX_WINDOW_FRACTION`] of it — the fraction is about leaving the desktop
 /// its share of a large window, and this is about a small one being usable at
 /// all, so it may exceed the fraction on a monitor with little to spare.
-fn wanted_window(monitor: Monitor, image: [f32; 2]) -> [f64; 2] {
+fn wanted_window(monitor: Monitor, image: [f32; 2], chrome: Chrome) -> [f64; 2] {
     let Monitor { room, scale } = monitor;
     let mut width = f64::from(image[0]) / scale;
     let mut height = f64::from(image[1]) / scale;
 
-    let max_width = room[0] * MAX_WINDOW_FRACTION[0] - CHROME[0];
-    let max_height = room[1] * MAX_WINDOW_FRACTION[1] - CHROME[1];
+    let around = chrome.chrome();
+    let max_width = room[0] * MAX_WINDOW_FRACTION[0] - around[0];
+    let max_height = room[1] * MAX_WINDOW_FRACTION[1] - around[1];
     if max_width > 1.0 && max_height > 1.0 {
         let shrink = (max_width / width).min(max_height / height).min(1.0);
         width *= shrink;
         height *= shrink;
     }
 
-    let floor = floor_for(room);
+    let floor = chrome.floor_for(room);
     [
-        (width + CHROME[0]).max(floor[0]),
-        (height + CHROME[1]).max(floor[1]),
+        (width + around[0]).max(floor[0]),
+        (height + around[1]).max(floor[1]),
     ]
-}
-
-/// The smallest window this monitor should be given: one with room for the
-/// side panel where the monitor can hold it, and [`MIN_WINDOW`] where it cannot —
-/// a floor that did not fit the screen would be a window off the edge of it,
-/// which is the thing the rest of this is for.
-fn floor_for(room: [f64; 2]) -> [f64; 2] {
-    let least = [f64::from(MIN_WINDOW[0]), f64::from(MIN_WINDOW[1])];
-    if PANELS_WINDOW[0] <= room[0] && PANELS_WINDOW[1] <= room[1] {
-        [
-            least[0].max(PANELS_WINDOW[0]),
-            least[1].max(PANELS_WINDOW[1]),
-        ]
-    } else {
-        least
-    }
 }
 
 /// The size to open at, given what the monitors are.
@@ -294,12 +358,13 @@ fn floor_for(room: [f64; 2]) -> [f64; 2] {
 /// lands on is the compositor's to decide and is not known until it has
 /// decided it, so the size that opens is one that no monitor would have to
 /// overrun. Where none of them fits everywhere — a small monitor beside a
-/// large one, and [`MIN_WINDOW`] below the small one's room — the smallest is
-/// taken, as the least bad of them.
+/// large one, and the smallest window below the small one's room — the
+/// smallest is taken, as the least bad of them.
 fn window_size(
     monitors: &[Monitor],
     image: Option<[f32; 2]>,
     asked: Option<[u32; 2]>,
+    chrome: Chrome,
 ) -> LogicalSize<u32> {
     // A size that was asked for is the window itself, chrome and all, and in
     // the logical pixels a compositor lays windows out in. Nothing else has a
@@ -307,7 +372,8 @@ fn window_size(
     // larger than the screen being something a compositor is asked for on
     // purpose.
     if let Some([width, height]) = asked {
-        return LogicalSize::new(width.max(MIN_WINDOW[0]), height.max(MIN_WINDOW[1]));
+        let least = chrome.least();
+        return LogicalSize::new(width.max(least[0]), height.max(least[1]));
     }
 
     // Only a file whose header would not say how large it is arrives here
@@ -321,12 +387,12 @@ fn window_size(
             room: [f64::INFINITY; 2],
             scale: 1.0,
         };
-        return logical(wanted_window(boundless, image));
+        return chrome.logical(wanted_window(boundless, image, chrome));
     }
 
     let wanted: Vec<[f64; 2]> = monitors
         .iter()
-        .map(|&monitor| wanted_window(monitor, image))
+        .map(|&monitor| wanted_window(monitor, image, chrome))
         .collect();
 
     let fits = |size: &[f64; 2]| {
@@ -344,7 +410,7 @@ fn window_size(
         .copied()
         .unwrap_or(wanted[0]);
 
-    logical(chosen)
+    chrome.logical(chosen)
 }
 
 /// Where `window` goes once it is `size` inside its frame: the middle of
@@ -397,15 +463,6 @@ fn centered(origin: [f64; 2], old: [f64; 2], new: [f64; 2], area: Option<Area>) 
         Some(area) => area.origin[axis] + ((area.size[axis] - new[axis]) / 2.0).max(0.0),
         None => origin[axis] + (old[axis] - new[axis]) / 2.0,
     })
-}
-
-/// A size settled on, rounded to the whole logical pixels a window is asked
-/// for in and held at the floor the rounding could otherwise drop it below.
-fn logical(size: [f64; 2]) -> LogicalSize<u32> {
-    LogicalSize::new(
-        (size[0].round() as u32).max(MIN_WINDOW[0]),
-        (size[1].round() as u32).max(MIN_WINDOW[1]),
-    )
 }
 
 #[cfg(test)]
@@ -470,10 +527,15 @@ mod tests {
     /// chrome is not added to it, and the monitors do not shrink it.
     #[test]
     fn an_asked_size_is_the_window() {
-        let size = window_size(&MONITOR, Some([100.0, 100.0]), Some([800, 500]));
+        let size = window_size(
+            &MONITOR,
+            Some([100.0, 100.0]),
+            Some([800, 500]),
+            Chrome::default(),
+        );
         assert_eq!(size, LogicalSize::new(800, 500));
 
-        let huge = window_size(&MONITOR, None, Some([9000, 9000]));
+        let huge = window_size(&MONITOR, None, Some([9000, 9000]), Chrome::default());
         assert_eq!(huge, LogicalSize::new(9000, 9000));
     }
 
@@ -481,7 +543,7 @@ mod tests {
     /// opens at the floor rather than at nothing.
     #[test]
     fn an_asked_size_stops_at_the_smallest_window() {
-        let size = window_size(&MONITOR, None, Some([1, 1]));
+        let size = window_size(&MONITOR, None, Some([1, 1]), Chrome::default());
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }
 
@@ -492,12 +554,12 @@ mod tests {
     fn a_large_picture_is_held_to_its_share_of_each_side() {
         let laptop = [monitor(2880, 1864, 2.0)];
         // 4316 × 6411: a portrait photograph, which the height holds.
-        let tall = window_size(&laptop, Some([4316.0, 6411.0]), None);
+        let tall = window_size(&laptop, Some([4316.0, 6411.0]), None, Chrome::default());
         let height = (932.0 * 0.85_f64).round() as u32;
         assert!(tall.height.abs_diff(height) <= 1, "{tall:?}");
         assert!(tall.width < 1440 * 3 / 4, "{tall:?}");
         // A panorama, which the width holds.
-        let wide = window_size(&laptop, Some([12000.0, 3000.0]), None);
+        let wide = window_size(&laptop, Some([12000.0, 3000.0]), None, Chrome::default());
         assert!(wide.width.abs_diff(1080) <= 1, "{wide:?}");
         assert!(wide.height < 932 * 85 / 100, "{wide:?}");
     }
@@ -506,11 +568,11 @@ mod tests {
     /// it, held inside the monitor.
     #[test]
     fn without_one_the_image_decides() {
-        let small = window_size(&MONITOR, Some([640.0, 480.0]), None);
+        let small = window_size(&MONITOR, Some([640.0, 480.0]), None, Chrome::default());
         assert_eq!(small.width, 640 + 2 * SIDE_WIDTH as u32);
         assert_eq!(small.height, 480 + 2 * BAR_HEIGHT as u32);
 
-        let large = window_size(&MONITOR, Some([8000.0, 6000.0]), None);
+        let large = window_size(&MONITOR, Some([8000.0, 6000.0]), None, Chrome::default());
         assert!(large.width <= 2560 && large.height <= 1440);
     }
 
@@ -524,7 +586,7 @@ mod tests {
     /// actually do with it.
     #[test]
     fn a_small_picture_still_opens_a_window_the_panels_fit_in() {
-        let size = window_size(&MONITOR, Some([32.0, 24.0]), None);
+        let size = window_size(&MONITOR, Some([32.0, 24.0]), None, Chrome::default());
         let content = content_area([size.width as f32, size.height as f32], true, Parts::NONE);
         assert!(content.width >= ui::PANELS_ROOM[0], "{content:?}");
         assert!(content.height >= ui::PANELS_ROOM[1], "{content:?}");
@@ -548,7 +610,7 @@ mod tests {
     #[test]
     fn a_monitor_too_small_for_the_panels_keeps_the_smallest_window() {
         let cramped = [monitor(360, 300, 1.0)];
-        let size = window_size(&cramped, Some([32.0, 24.0]), None);
+        let size = window_size(&cramped, Some([32.0, 24.0]), None, Chrome::default());
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }
 
@@ -559,7 +621,7 @@ mod tests {
     #[test]
     fn a_scaled_monitor_is_measured_in_logical_pixels() {
         let monitors = [monitor(3840, 2160, 2.0)];
-        let size = window_size(&monitors, Some([3000.0, 2000.0]), None);
+        let size = window_size(&monitors, Some([3000.0, 2000.0]), None, Chrome::default());
         assert!(size.width <= 1920 && size.height <= 1080, "{size:?}");
     }
 
@@ -578,10 +640,15 @@ mod tests {
         assert_eq!(measured.room, [2400.0, 1350.0]);
         assert!((measured.scale - 1.6).abs() < 1e-9, "{measured:?}");
 
-        let size = window_size(&[measured], Some([800.0, 480.0]), None);
+        let size = window_size(&[measured], Some([800.0, 480.0]), None, Chrome::default());
         assert_eq!(size.width, 500 + 2 * SIDE_WIDTH as u32);
 
-        let rounded = window_size(&[monitor(3840, 2160, 2.0)], Some([800.0, 480.0]), None);
+        let rounded = window_size(
+            &[monitor(3840, 2160, 2.0)],
+            Some([800.0, 480.0]),
+            None,
+            Chrome::default(),
+        );
         assert_eq!(rounded.width, 400 + 2 * SIDE_WIDTH as u32);
     }
 
@@ -609,13 +676,18 @@ mod tests {
         let big = monitor(3840, 2160, 1.0);
         let small = monitor(1280, 800, 1.0);
 
-        let alone = window_size(&[big], Some([3000.0, 2000.0]), None);
-        let together = window_size(&[big, small], Some([3000.0, 2000.0]), None);
+        let alone = window_size(&[big], Some([3000.0, 2000.0]), None, Chrome::default());
+        let together = window_size(
+            &[big, small],
+            Some([3000.0, 2000.0]),
+            None,
+            Chrome::default(),
+        );
 
         assert!(alone.width > 1280, "the big monitor alone wants more");
         assert_eq!(
             together,
-            window_size(&[small], Some([3000.0, 2000.0]), None)
+            window_size(&[small], Some([3000.0, 2000.0]), None, Chrome::default())
         );
         assert!(
             together.width <= 1280 && together.height <= 800,
@@ -629,7 +701,12 @@ mod tests {
     fn where_nothing_fits_the_smallest_is_taken() {
         let tiny = monitor(200, 150, 1.0);
         let big = monitor(3840, 2160, 1.0);
-        let size = window_size(&[big, tiny], Some([3000.0, 2000.0]), None);
+        let size = window_size(
+            &[big, tiny],
+            Some([3000.0, 2000.0]),
+            None,
+            Chrome::default(),
+        );
         assert_eq!(size, LogicalSize::new(MIN_WINDOW[0], MIN_WINDOW[1]));
     }
 
@@ -642,11 +719,79 @@ mod tests {
         assert_eq!(reported(2560, 1440, 1.0), Some(MONITOR[0]));
     }
 
+    /// The chrome is the interface's, so it grows with the interface's
+    /// scale: a 1200 × 900 picture with the interface at twice the
+    /// monitor's scale is framed by twice the chrome.
+    #[test]
+    fn the_chrome_grows_with_the_interface() {
+        let size = window_size(&MONITOR, Some([1200.0, 900.0]), None, Chrome::new(2.0));
+        assert_eq!(size.width, 1200 + 4 * SIDE_WIDTH as u32);
+        assert_eq!(size.height, 900 + 4 * BAR_HEIGHT as u32);
+    }
+
+    /// The picture is not the interface's: on a monitor at 2, with the
+    /// interface at 2 on top of it, its pixels are divided by the monitor's
+    /// scale alone, so it still opens at 100%.
+    #[test]
+    fn a_scaled_interface_leaves_the_picture_at_its_own_pixels() {
+        let retina = [monitor(5120, 2880, 2.0)];
+        let size = window_size(&retina, Some([2400.0, 1800.0]), None, Chrome::new(2.0));
+        assert_eq!(size.width, 1200 + 4 * SIDE_WIDTH as u32);
+        assert_eq!(size.height, 900 + 4 * BAR_HEIGHT as u32);
+    }
+
+    /// A tiny picture with the interface at 1.5 still opens a window both
+    /// panels fit in, at the interface's own scale, and with a device
+    /// pixel's rounding taken off it.
+    #[test]
+    fn a_small_picture_opens_a_window_the_scaled_panels_fit_in() {
+        let ui_scale = 1.5;
+        let size = window_size(&MONITOR, Some([32.0, 24.0]), None, Chrome::new(ui_scale));
+        for off in [0.0, 0.5] {
+            let points = [
+                (size.width as f32 - off) / ui_scale,
+                (size.height as f32 - off) / ui_scale,
+            ];
+            let content = content_area(points, true, Parts::NONE);
+            assert!(content.width >= ui::PANELS_ROOM[0], "{content:?}");
+            assert!(content.height >= ui::PANELS_ROOM[1], "{content:?}");
+        }
+    }
+
+    /// The panels' window at 1 fits a monitor that the one at 2 does not,
+    /// and there the smallest window is taken, at the interface's scale.
+    #[test]
+    fn a_monitor_with_room_for_the_panels_at_one_but_not_two_keeps_the_scaled_smallest_window() {
+        let modest = [monitor(800, 600, 1.0)];
+        let at_one = window_size(&modest, Some([32.0, 24.0]), None, Chrome::default());
+        assert!(at_one.width > MIN_WINDOW[0], "{at_one:?}");
+        let at_two = window_size(&modest, Some([32.0, 24.0]), None, Chrome::new(2.0));
+        assert_eq!(at_two, LogicalSize::new(640, 480));
+    }
+
+    /// `--size` below the smallest window stops at the smallest window as
+    /// the interface's scale has it.
+    #[test]
+    fn an_asked_size_stops_at_the_scaled_smallest_window() {
+        let size = window_size(&MONITOR, None, Some([1, 1]), Chrome::new(1.25));
+        assert_eq!(size, LogicalSize::new(400, 300));
+    }
+
+    /// A scale that is no scale is the monitor's own.
+    #[test]
+    fn a_chrome_from_nothing_is_one_to_one() {
+        assert_eq!(Chrome::new(f32::NAN), Chrome::default());
+        assert_eq!(Chrome::new(0.0), Chrome::default());
+        assert_eq!(Chrome::new(-1.0), Chrome::default());
+        assert_eq!(Chrome::new(f32::INFINITY), Chrome::default());
+        assert_eq!(Chrome::new(1.0), Chrome::default());
+    }
+
     /// With no monitors at all there is nothing to hold the window inside, so
     /// the image's own pixels are taken as logical ones and the chrome added.
     #[test]
     fn with_no_monitors_the_image_is_the_window() {
-        let size = window_size(&[], Some([640.0, 480.0]), None);
+        let size = window_size(&[], Some([640.0, 480.0]), None, Chrome::default());
         assert_eq!(size.width, 640 + 2 * SIDE_WIDTH as u32);
         assert_eq!(size.height, 480 + 2 * BAR_HEIGHT as u32);
     }

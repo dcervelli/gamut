@@ -6,12 +6,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ## Unreleased
 
-### Added
-
-- A **Gain map** button at the bottom right, and `G`, for a picture carrying
-  a gain map: shows the map in the picture's place, in stops, so the pixel
-  readout says how far each pixel is brightened, and the picture again.
-
 ### Changed
 
 - The histogram and the file information no longer float over the picture.
@@ -23,12 +17,52 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   bars, and `~` closes it. Where `show_histogram` and `show_info` are both
   on, the histogram is shown; `--info` on its own shows the information
   whatever the configuration says.
+
+## 0.11.0 - 2026-10-10
+
+### Added
+
+- `Home` and `End` go to the first and last file in the list.
+- A **Gain map** button at the bottom right, and `G`, for a picture carrying
+  a gain map: shows the map in the picture's place, in stops, so the pixel
+  readout says how far each pixel is brightened, and the picture again.
+- The interface can be drawn larger or smaller than the monitor's own scale
+  makes it, without the picture changing: `Ctrl+=` and `Ctrl+-` step it
+  between 75% and 300%, and `Ctrl+0` puts it back (`⌥⌘=`, `⌥⌘-` and `⌥⌘0`
+  on a Mac, and *Increase Interface Scale*, *Decrease Interface Scale* and
+  *Reset Interface Scale* in the View menu), and a message says the new
+  scale. The size is remembered in the state file as `ui_scale`. Closes #2.
+
+### Changed
+
+- The arrow keys step through the files: Right and Down to the next, Left
+  and Up to the previous, beside `]`, `[`, `Page Down` and `Page Up`. With a
+  region selected they still move the region. Panning moves onto the arrows
+  held with a modifier: `Shift` pans by 64 pixels, `Ctrl+Shift` by one pixel
+  (`⇧⌘` on a Mac), and `Ctrl` still runs to the far side. `Alt+Left` and
+  `Alt+Right` go back and forward in the image history. To pan with the
+  plain arrows again, put `keys.pan.left = left`, and the same for `right`,
+  `up` and `down`, in the configuration file. Closes #6.
 - The information panel describes a picture's gain map in a *Gain map*
   section of its own after *Image*, which wears the *Showing* pill while the
   map is shown: its size and samples, whose description it is, the HDR
   headroom in stops, how far the map lifts the picture at most, and how
   many of those stops the display is applying. The four gain map rows leave
   the *Image* section.
+
+### Fixed
+
+- The histogram's bars are even at a fractional monitor scale such as 1.25,
+  where every other bin came out a device pixel wider than its neighbors;
+  the band under the plot and the false-color swatches likewise.
+- On Linux with two GPUs, the window is drawn on the one the Wayland
+  compositor renders on, where it says which (version 4 of
+  `zwp_linux_dmabuf_v1`), and otherwise on the one a monitor is connected
+  to, the integrated GPU first where both have one. It used to be drawn on
+  the integrated GPU, which on a desktop whose monitor is plugged into a
+  discrete card — or whose compositor renders on the discrete card with a
+  second monitor on the integrated one — showed a black window.
+  `WGPU_ADAPTER_NAME` and `WGPU_POWER_PREF` override the choice. Closes #5.
 
 ## 0.10.0 - 2026-10-01
 

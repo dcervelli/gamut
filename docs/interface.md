@@ -19,9 +19,11 @@ whichever screen it lands on. Where none of them fits everywhere — a monitor
 smaller than `MIN_WINDOW`, say — the smallest answer is taken as the least bad
 of them.
 
-The whole calculation is in logical pixels. The image's own pixels are
-physical, so a monitor's scale converts them; the panel constants are logical
-already. Asking in physical pixels does not work, because winit's Wayland
+The whole calculation is in the monitor's logical pixels. The image's own
+pixels are physical, so a monitor's scale converts them — that scale alone,
+since the picture is not the interface's to grow. The panel constants are in
+points, so `window::Chrome` multiplies them by the interface's scale; only
+`FLOOR_SLACK`, a rounding to the device's grid, stays as it is. Asking in physical pixels does not work, because winit's Wayland
 backend converts the size a window is created with at a scale of `1.0` — the
 surface has none until the compositor configures it — so physical pixels are
 taken as logical ones and the window opens `scale` times too large, well past
@@ -49,10 +51,10 @@ A window also opens no smaller than one the interface itself fits in.
 `ui::PANELS_ROOM` is the room between the strips and the bars the
 [side panel](#the-side-panel) needs for either of what it holds — its least
 width, and the histogram's height, which is taller than the least column of
-information — and `PANELS_WINDOW` is that plus the chrome and a logical pixel
-of slack. A window opening below it would have both those toggles dead in it
-from the first frame, which is not something the viewer
-asked for; where the picture is smaller than the interface, the window is
+information — and `Chrome::panels_window` is that plus the chrome, both at
+the interface's scale, and a logical pixel of slack. A window opening below
+it would have both those toggles dead in it from the first frame, which is
+not something the viewer asked for; where the picture is smaller than the interface, the window is
 better a little larger than the picture. The floor is measured against the
 monitor's whole room rather than against `MAX_WINDOW_FRACTION` of it — the
 fraction is about leaving the desktop its share of a large window, and this is
@@ -72,7 +74,40 @@ the rounding can do.
 They are the whole window, chrome included, in the same logical pixels.
 Neither the image nor the monitors gets a say afterwards: a window larger than
 the screen is something a compositor is asked for on purpose, and only a floor
-of `MIN_WINDOW` applies, below which the chrome would have all of the window.
+of `MIN_WINDOW`, at the interface's scale, applies, below which the chrome
+would have all of the window.
+
+## Two scales
+
+There are two scales between the device and what is drawn on it, and the
+application keeps them apart by name. `App::device_scale` is the monitor's
+own — `window.scale_factor()` — and `App::pixels_per_point` is that times
+`App::ui_scale`, the interface's scale the keys step along
+`ui::scale::SCALES`. egui lays out at the second: `Gui` sets its
+`zoom_factor` to the interface's scale (in the options, not through
+`set_zoom_factor`, which lands a pass late) and egui-winit multiplies that by
+the native scale itself, converting the pointer, the wheel and the window's
+size by the product. So every conversion the application makes between the
+pointer, the panels and the picture's viewport — `Sight::scale`,
+`logical_size`, `viewport`, the wheel's pan — reads `pixels_per_point`; were
+one of them on the device scale, a drag would run ahead of the hand, the
+loupe's rings would sit off its glass, and the picture would be fitted to a
+content area the panels do not leave. `redraw` checks in debug builds that
+egui's figure and the application's agree.
+
+`device_scale` is read in three places only. `app/window.rs` sizes the window
+in the monitor's logical pixels, where the interface's scale is a
+multiplier on the chrome (`window::Chrome`) and not a unit. The checkerboard
+behind a transparent picture is drawn at the device scale (`Scene::scale`),
+since it is the picture's backdrop rather than part of the interface. And
+egui is told the native scale by egui-winit itself.
+
+The interface's scale is kept in the state file and not set in the
+configuration: it is set by hand, with the picture on screen, as the file
+list's width and the loupe's magnification are — see
+[settings](../user-docs/SETTINGS.md#the-state-file). The keys change it in
+place and leave the window's size alone; the next window is sized for it.
+
 Whether the request is honored is the compositor's business — a tiling one
 uses it as the floating size, if it uses it at all.
 
@@ -418,26 +453,26 @@ panel, for the reason the file list's width is held: a width egui settled
 during the pass would leave the picture's fit a frame behind it.
 
 `side::WIDTH_MIN` is `PANEL_WIDTH`, the histogram at its own size: a bin to
-the logical pixel with the buttons beside the plot. That is the one thing
-on either tab that cannot give — a plot narrower than its bins would draw
+the point with the buttons beside the plot. That is the one thing on
+either tab that cannot give — a plot narrower than its bins would draw
 some of them a pixel and some none — and the information's column is a few
 words a line much below it. It is also the width the panel opens at,
 `WIDTH_DEFAULT`, since the narrowest panel is the most it leaves the
 picture. `side::WIDTH_MAX` is that and `BINS` again: room for the plot at
-two device pixels to a bin on a display of one, the widest it is drawn at,
-and about as long a line as the column of facts reads at comfortably.
+two points to a bin, the widest it is drawn at, and about as long a line as
+the column of facts reads at comfortably.
 Wider than that, the panel would take the picture's room to give the words
 more of a line than they use.
 
 The histogram does not stretch to the width it is given. `histogram::panel`
 takes the widest plot that gives every bin the same whole number of device
-pixels — two at twice the logical pixel's width, three, four, at whatever
-scale the display is — and no narrower than one logical pixel to the bin,
-and stands the histogram in the middle of the panel between those steps. A
-plot stretched to any width would give some bins a device pixel more than
-their neighbors and draw a comb that is not in the picture, which is what a
-bin to the logical pixel was chosen to prevent. The information takes the
-whole of the panel at any width.
+pixels — two at twice the point's width, three, four, at whatever scale
+the display and the interface come to — and no narrower than a point to the
+bin, and stands the histogram in the middle of the panel between those
+steps. A plot stretched to any width would give some bins a device pixel
+more than their neighbors and draw a comb that is not in the picture, which
+is what a column to the device pixel was chosen to prevent. The information
+takes the whole of the panel at any width.
 
 ### A window with no room for it
 

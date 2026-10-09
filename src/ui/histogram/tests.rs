@@ -184,8 +184,8 @@ fn the_plot_widens_by_whole_device_pixels_to_the_bin() {
     }
 }
 
-/// A bin is one logical pixel, which is what keeps the bars from landing
-/// astride a pixel boundary, whatever stands beside the plot. Nor does
+/// A bin is one point, which is what the pointer reads the plot by,
+/// whatever stands beside the plot. Nor does
 /// the plot move down for the rows under it, which is what the panel
 /// grows by.
 #[test]

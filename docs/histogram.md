@@ -306,9 +306,18 @@ is looked at for; the full primaries, at a pixel to the bin, come out as a
 hedge of pure red, green and blue spikes that the eye cannot leave alone.
 The ground is the same in every theme and so are the inks, so the reading is
 the same everywhere — see [theme](theme.md) for the two things that resist
-being themed. A bin is at least a logical pixel, and always a whole number
-of device pixels, which fixes the panel's least width and is why nothing
-here smooths the plot.
+being themed. A bin is at least a point, which fixes the panel's least
+width and is what the pointer reads the plot by; a wider panel widens the
+plot in steps that give every bin the same whole number of device pixels.
+What is drawn is one column to the device pixel (`icon::Grid::columns`),
+each as tall as the fullest bin under it (`plot::bins_under`,
+`plot::tallest`): a column to the bin lands half its edges mid-pixel at a
+fractional scale, and the feathering shows as a comb, where a column to the
+pixel is even at any scale; and taking the fullest bin rather than the mean
+keeps a spike from being averaged away where a column is wider than a bin.
+At one device pixel to the point the two are the same picture. The band
+under the plot and a ramp's swatch are cut the same way, which is why
+nothing here smooths the plot.
 
 ## What goes dead
 

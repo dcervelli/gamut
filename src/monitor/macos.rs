@@ -64,6 +64,7 @@ pub fn watch(_notify: impl Fn() + Send + 'static) -> Option<Monitors> {
         table: Arc::new(Mutex::new(table)),
         speaks_modes: true,
         live: true,
+        main_device: None,
     })
 }
 

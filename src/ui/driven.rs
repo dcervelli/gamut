@@ -199,20 +199,37 @@ fn open(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, Sta
 }
 
 fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, State> {
+    build_at(logical, 1.0, count, panels)
+}
+
+/// [`build`] on a device of `scale` pixels to the point, which the frame's
+/// input says too, as the application's does.
+fn build_at(
+    logical: [f32; 2],
+    scale: f32,
+    count: usize,
+    panels: Panels,
+) -> Harness<'static, State> {
     let mut input = input(logical, count);
+    input.scale = scale;
     // The side panel up where it is asked for and the window has room for
     // it, as `App::side_showing` decides, at the width it opens at.
-    let parts = super::chrome::Parts::NONE;
     input.side = panels
         .side
-        .filter(|side| super::room(logical, panels.show_ui, parts).holds(*side))
+        .filter(|side| super::room(logical, panels.show_ui, chrome::Parts::NONE).holds(*side))
         .map(|side| super::side::Shown {
             side,
             width: super::side::WIDTH_DEFAULT,
         });
-    if let Some(shown) = input.side {
-        input.viewport.width -= shown.width;
-    }
+    input.viewport = chrome::image_viewport(
+        [logical[0] * scale, logical[1] * scale],
+        scale,
+        panels.show_ui,
+        chrome::Parts {
+            side: input.side.map(|shown| shown.width),
+            ..chrome::Parts::NONE
+        },
+    );
     let state = State {
         ready: false,
         input,
@@ -225,6 +242,7 @@ fn build(logical: [f32; 2], count: usize, panels: Panels) -> Harness<'static, St
     };
     Harness::builder()
         .with_size(egui::vec2(logical[0], logical[1]))
+        .with_pixels_per_point(scale)
         .build_ui_state(
             |ui, state: &mut State| {
                 if !state.ready {
@@ -701,6 +719,63 @@ fn the_histogram_panel_hands_back_the_hand_on_its_band() {
 /// The curves are dead under a false color, which clips at the top of its
 /// ramp whatever curve is chosen, and refuse the press; the ramps beside
 /// them stay live, and the gray one brings the curves back.
+/// With the interface drawn at one and a half device pixels to the point —
+/// a monitor at 1 with the interface a step and a half up, or the other way
+/// round — egui's panels land where the application works out they will,
+/// so that the picture fitted beside them and the pointer read against them
+/// agree with what is drawn; and the plot, a device pixel to the column,
+/// draws without falling over.
+#[test]
+fn a_scaled_interface_lays_out_where_the_application_says() {
+    use super::side::{Side, WIDTH_DEFAULT};
+
+    let scale = 1.5;
+    let logical = [1200.0, 800.0];
+    let mut with_histogram = panels();
+    with_histogram.side = Some(Side::Histogram);
+    let mut harness = build_at(logical, scale, 1, with_histogram);
+    harness.run();
+    assert_eq!(harness.ctx.pixels_per_point(), scale);
+
+    let parts = chrome::Parts {
+        side: Some(WIDTH_DEFAULT),
+        ..chrome::Parts::NONE
+    };
+    // Everything is where the application puts it in the room the harness
+    // leaves inside its own margin, which the application's window does not
+    // have.
+    let margin = 8.0;
+    let room = [logical[0] - 2.0 * margin, logical[1] - 2.0 * margin];
+    let side = chrome::Chrome::new(room, parts)
+        .side
+        .expect("the side panel is up");
+    let placed = super::histogram::panel(side, scale);
+    assert_eq!(
+        harness.get_by_label("Histogram panel").rect(),
+        egui::Rect::from_min_size(
+            egui::pos2(placed.x + margin, placed.y + margin),
+            egui::vec2(placed.width, placed.height)
+        )
+    );
+    // What egui's panels leave between them is the content area the
+    // application fitted the picture to.
+    let inner = chrome::content_area(room, true, parts);
+    let panel = |name: &str| {
+        egui::PanelState::load(&harness.ctx, egui::Id::new(name))
+            .unwrap_or_else(|| panic!("the {name} panel is up"))
+            .outer_rect
+    };
+    let left = egui::pos2(panel("left").max.x, panel("top").max.y);
+    let right = egui::pos2(panel("side").min.x, panel("bottom").min.y);
+    assert_eq!(
+        egui::Rect::from_min_max(left, right),
+        egui::Rect::from_min_size(
+            egui::pos2(inner.x + margin, inner.y + margin),
+            egui::vec2(inner.width, inner.height)
+        )
+    );
+}
+
 /// The side panel is laid out where the chrome's geometry says, between
 /// the picture and the right strip, and the histogram at its head; while
 /// another file is on its way in it keeps that place and says nothing of

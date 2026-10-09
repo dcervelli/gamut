@@ -770,8 +770,9 @@ pub(super) const X: &[Mark] = &[
 ];
 
 /// The device's grid, in the terms a mark is placed on it: physical pixels
-/// to the logical one, and the arithmetic that puts a coordinate on a whole
-/// one.
+/// to the interface's point — the monitor's scale and the interface's
+/// together, what egui lays out in — and the arithmetic that puts a
+/// coordinate on a whole device pixel.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) struct Grid {
     scale: f32,
@@ -828,6 +829,41 @@ impl Grid {
         )
     }
 
+    /// The whole device pixels across `x..x + width` once its ends are
+    /// snapped: tiling it exactly, one device pixel each, and never fewer
+    /// than one, as [`Grid::rect`] is never thinner than one.
+    ///
+    /// What a run of something sampled along it — the histogram's bars, the
+    /// band under them, a ramp's swatch — is drawn as, so that every device
+    /// pixel is one column with one value, however many points or bins it
+    /// stands for. A column per point instead lands half its edges
+    /// mid-pixel at a fractional scale, and the feathering shows as a comb.
+    ///
+    /// On a grid with no scale the run is cut into whole points, unsnapped,
+    /// as [`Grid::snap`] and [`Grid::rect`] leave it.
+    pub(super) fn columns(self, x: f32, width: f32) -> impl ExactSizeIterator<Item = Column> {
+        let (left, right, count, step) = if self.usable() {
+            let (left, right) = (self.snap(x), self.snap(x + width));
+            let pixels = ((right - left) * self.scale).round();
+            let step = self.device_pixels(1.0);
+            let right = if pixels >= 1.0 { right } else { left + step };
+            (left, right, pixels.max(1.0) as usize, step)
+        } else {
+            let count = width.round().max(1.0) as usize;
+            (x, x + width, count, width / count as f32)
+        };
+        (0..count).map(move |index| Column {
+            left: left + index as f32 * step,
+            right: if index + 1 == count {
+                right
+            } else {
+                left + (index + 1) as f32 * step
+            },
+            index,
+            count,
+        })
+    }
+
     /// The largest whole number of `step`s that fits inside `value`, and
     /// never fewer than one — see [`fit`] for what it is for.
     fn snap_within(self, value: f32, step: f32) -> f32 {
@@ -870,6 +906,25 @@ impl Grid {
         } else {
             value
         }
+    }
+}
+
+/// One device pixel's column of a run that [`Grid::columns`] cut: its edges
+/// in points, and which of how many it is, kept whole so that what it covers
+/// of anything divided along the run can be worked out exactly.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Column {
+    pub left: f32,
+    pub right: f32,
+    pub index: usize,
+    pub count: usize,
+}
+
+impl Column {
+    /// The column's middle as a fraction of the run, from 0 at its start to
+    /// 1 at its end.
+    pub(super) fn t_center(self) -> f32 {
+        (self.index as f32 + 0.5) / self.count as f32
     }
 }
 
@@ -1243,6 +1298,79 @@ mod tests {
         SUN,
         EYE,
     ];
+
+    /// The scales a run of columns is cut at: the display's, and the
+    /// interface's own rungs on top of them, three quarters and two and a
+    /// half among them.
+    const COLUMN_SCALES: [f32; 7] = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5];
+
+    /// The columns start and end where the run's snapped ends are, meet one
+    /// another exactly, and are each one device pixel wide.
+    #[test]
+    fn the_columns_tile_the_run_in_whole_device_pixels() {
+        for scale in COLUMN_SCALES {
+            let grid = Grid::new(scale);
+            for (x, width) in [(12.3, 256.0), (0.0, 100.0), (7.7, 33.3)] {
+                let columns: Vec<Column> = grid.columns(x, width).collect();
+                assert_eq!(columns[0].left, grid.snap(x), "{scale}");
+                let last = columns[columns.len() - 1];
+                assert_eq!(last.right, grid.snap(x + width), "{scale}");
+                assert_eq!(
+                    columns.len() as f32,
+                    ((grid.snap(x + width) - grid.snap(x)) * scale).round(),
+                    "{scale}"
+                );
+                for (index, column) in columns.iter().enumerate() {
+                    assert_eq!(column.index, index);
+                    assert_eq!(column.count, columns.len());
+                    let pixels = (column.right - column.left) * scale;
+                    assert!((pixels - 1.0).abs() < 1e-3, "{scale}: {column:?}");
+                }
+                for pair in columns.windows(2) {
+                    assert_eq!(pair[0].right, pair[1].left, "{scale}");
+                }
+            }
+        }
+    }
+
+    /// At one device pixel to the point, a run of 256 points is 256
+    /// columns, each a point: the bins, as they were drawn before.
+    #[test]
+    fn at_one_to_one_the_columns_are_the_bins() {
+        let columns: Vec<Column> = Grid::new(1.0).columns(10.0, 256.0).collect();
+        assert_eq!(columns.len(), 256);
+        for (index, column) in columns.iter().enumerate() {
+            assert_eq!(column.left, 10.0 + index as f32);
+            assert_eq!(column.right, 11.0 + index as f32);
+        }
+    }
+
+    /// Something narrower than a device pixel is still one column, a pixel
+    /// wide, rather than nothing.
+    #[test]
+    fn a_run_narrower_than_a_pixel_is_still_one_column() {
+        for scale in COLUMN_SCALES {
+            let grid = Grid::new(scale);
+            let columns: Vec<Column> = grid.columns(4.0, 0.1 / scale).collect();
+            assert_eq!(columns.len(), 1, "{scale}");
+            let pixels = (columns[0].right - columns[0].left) * scale;
+            assert!((pixels - 1.0).abs() < 1e-3, "{scale}: {columns:?}");
+            assert_eq!(columns[0].t_center(), 0.5);
+        }
+    }
+
+    /// A grid with no scale still cuts the run, into whole points.
+    #[test]
+    fn an_unusable_grid_still_hands_out_columns() {
+        for scale in [0.0, f32::NAN, f32::INFINITY] {
+            let columns: Vec<Column> = Grid::new(scale).columns(3.0, 10.0).collect();
+            assert_eq!(columns.len(), 10, "{scale}");
+            assert_eq!(columns[0].left, 3.0);
+            assert_eq!(columns[9].right, 13.0);
+            let none: Vec<Column> = Grid::new(scale).columns(3.0, 0.0).collect();
+            assert_eq!(none.len(), 1, "{scale}");
+        }
+    }
 
     fn device(value: f32, scale: f32) -> f32 {
         value * scale

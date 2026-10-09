@@ -292,6 +292,36 @@ impl Files {
         ))
     }
 
+    /// Asks for the first file on the list, or the last, as a walk inward
+    /// past any that fails to decode, which stops short of the file on
+    /// screen. `None` when that end is already on screen or asked for.
+    pub(super) fn end(&mut self, last: bool) -> Option<Asked> {
+        if self.paths.len() < 2 {
+            return None;
+        }
+        let end = if last { self.paths.len() - 1 } else { 0 };
+        if let Some(pending) = &self.pending {
+            if pending.index == end {
+                return None;
+            }
+        } else if self.index == end {
+            return None;
+        }
+        // The files between that end and the one on screen, which a walk
+        // from the end may go on to: none, when the end is on screen and
+        // another read is to be called off.
+        let between = if last {
+            (self.paths.len() - 1).saturating_sub(self.index + 1)
+        } else {
+            self.index.saturating_sub(1)
+        };
+        let step = (end != self.index).then_some(Step {
+            forward: !last,
+            remaining: between,
+        });
+        Some(self.request(end, Reload::Fresh, step, Source::Disk))
+    }
+
     /// Re-reads the file on screen. `None` while a read is already in
     /// flight: a file being written continuously would otherwise stack up a
     /// decode every interval, and the reply already on its way carries a

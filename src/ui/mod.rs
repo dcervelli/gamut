@@ -19,6 +19,7 @@ pub mod loupe;
 pub mod menu;
 pub mod minimap;
 pub mod rename;
+pub mod scale;
 pub mod side;
 mod slider;
 pub mod standin;
@@ -205,10 +206,12 @@ const MENU_OFFSET: f32 = PADDING / 2.0;
 const PANEL_INSET: f32 = 10.0;
 
 /// How wide the histogram is at its own size, which is the side panel at its
-/// narrowest: wide enough that a bin is exactly one logical pixel, which is
-/// what keeps its bars evenly spaced instead of some of them landing astride
-/// a pixel boundary and coming out fatter than their neighbors. The help
-/// popup opens no narrower.
+/// narrowest: wide enough that a bin is exactly one point, so that the
+/// pointer reads one bin to the point across it. What is drawn there is one
+/// column to the device pixel — see `histogram::plot` — which keeps the bars
+/// even at any scale, where a column to the bin would land some of them
+/// astride a pixel boundary and come out fatter than their neighbors. The
+/// help popup opens no narrower.
 const PANEL_WIDTH: f32 = histogram::TOOLBAR_WIDTH + BINS as f32 + 2.0 * PANEL_INSET;
 
 use style::PANEL_RADIUS;
@@ -576,8 +579,9 @@ impl Panels {
 pub struct FrameInput {
     /// Window size in logical pixels, which is what the interface lays out in.
     pub logical: [f32; 2],
-    /// Physical pixels to the logical one, for the few places that have to
-    /// land on the device's grid rather than on the layout's.
+    /// Physical pixels to the interface's point — the monitor's scale and
+    /// the interface's together, what egui lays out in — for the few places
+    /// that have to land on the device's grid rather than on the layout's.
     pub scale: f32,
     /// Where the image is drawn, which is what zoom is measured against.
     pub viewport: Viewport,

@@ -118,6 +118,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  value in whichever of `PixelFormat`'s three ways is in force
   menu.rs        the popup menus' contents: the zoom menu's choices and cells, the
                  pixel-format cells, and the menus of copies and of the file with each item's key beside it
+  scale.rs       the interface's scale on top of the monitor's: SCALES, the rungs the keys
+                 step along, and RANGE, what the state file keeps
   rename.rs      the rename dialog: a modal with the name in a field, judge() saying what is
                  wrong with what has been typed as it is typed, and OK and Cancel; the
                  field, the line under it and the buttons both dialogs are drawn with
@@ -281,6 +283,9 @@ image/         the data model, nothing GPU
 render/        the GPU
   mod.rs         Renderer: surface, device, the three passes; Scene is what a frame draws;
                  UiPaint is what egui drew, and the ui-layer pass hands it to egui-wgpu
+  adapter.rs     which GPU draws the window: the one with a monitor connected, read from
+                 /sys/class/drm, the integrated first among several; WGPU_ADAPTER_NAME and
+                 WGPU_POWER_PREF override it
   color.rs       Color, the sRGB color the interface and the theme speak in
   placement.rs   Placement (where the image lands) and Upscale (the magnification filter)
   upload.rs      texture format choice and the transfer-function LUTs; the "sampled texel is linear" invariant

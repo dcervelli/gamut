@@ -11,6 +11,12 @@
 //! Off Wayland, or under a compositor without the protocol, there is nothing
 //! to read.
 //!
+//! The compositor's main device is read on the same connection: version 4
+//! of `zwp_linux_dmabuf_v1` names, in its default feedback, the device it
+//! renders on, which is the GPU the window should be drawn on
+//! (`render/adapter.rs`). It is read once; the feedback is let go at its
+//! first `done`, since the window's adapter is chosen once.
+//!
 //! The room is read on the same connection, for the window's opening size
 //! (`app::window`). A `wl_output` carries its mode in device pixels and an
 //! integer scale, and winit passes both on; but a compositor running a
@@ -38,6 +44,12 @@ use wayland_protocols::wp::color_management::v1::client::wp_image_description_in
 use wayland_protocols::wp::color_management::v1::client::wp_image_description_v1::{
     self as description, WpImageDescriptionV1,
 };
+use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_feedback_v1::{
+    self as feedback, ZwpLinuxDmabufFeedbackV1,
+};
+use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::{
+    self as dmabuf, ZwpLinuxDmabufV1,
+};
 use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_manager_v1::{
     self as xdg_manager, ZxdgOutputManagerV1,
 };
@@ -48,8 +60,8 @@ use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::{
 use super::{Mode, Monitors, Room, Table};
 
 /// Starts listening. `None` off Wayland, or under a compositor that speaks
-/// neither color management nor `xdg_output`: nothing then says anything
-/// about a monitor that winit does not.
+/// none of color management, `xdg_output` and dmabuf feedback: nothing then
+/// says anything about a monitor, or the GPU, that winit does not.
 ///
 /// The first answers are in hand before this returns, so that the window can
 /// open at the right size and on the right surface; `notify` is called from
@@ -64,21 +76,24 @@ pub fn watch(notify: impl Fn() + Send + 'static) -> Option<Monitors> {
     let mut listener = Listener {
         manager: None,
         xdg_manager: None,
+        dmabuf: None,
+        main_device: None,
         outputs: Vec::new(),
         table: Arc::clone(&table),
         notify: Box::new(notify),
     };
     // One round trip for the globals; one for the outputs' names, modes and
-    // logical sizes, and the descriptions asked for once the manager is
-    // known; and one for what the descriptions hold.
+    // logical sizes, the descriptions asked for once the manager is known,
+    // and the dmabuf feedback; and one for what the descriptions hold.
     queue.roundtrip(&mut listener).ok()?;
-    if listener.manager.is_none() && listener.xdg_manager.is_none() {
+    if listener.manager.is_none() && listener.xdg_manager.is_none() && listener.dmabuf.is_none() {
         return None;
     }
     let speaks_modes = listener.manager.is_some();
     for _ in 0..2 {
         queue.roundtrip(&mut listener).ok()?;
     }
+    let main_device = listener.main_device;
     thread::Builder::new()
         .name("gamut monitors".into())
         .spawn(move || while queue.blocking_dispatch(&mut listener).is_ok() {})
@@ -87,7 +102,15 @@ pub fn watch(notify: impl Fn() + Send + 'static) -> Option<Monitors> {
         table,
         speaks_modes,
         live: false,
+        main_device,
     })
+}
+
+/// The `dev_t` a dmabuf feedback event carries: an array holding the
+/// number in the compositor's own byte order, eight bytes wide on Linux.
+/// `None` for an array of some other width.
+fn device_number(bytes: &[u8]) -> Option<u64> {
+    bytes.try_into().ok().map(u64::from_ne_bytes)
 }
 
 /// What a description says that decides the mode, gathered event by event
@@ -179,6 +202,10 @@ impl Output {
 struct Listener {
     manager: Option<WpColorManagerV1>,
     xdg_manager: Option<ZxdgOutputManagerV1>,
+    /// The dmabuf global, held so that the feedback asked of it stays
+    /// valid; nothing else is asked of it.
+    dmabuf: Option<ZwpLinuxDmabufV1>,
+    main_device: Option<u64>,
     outputs: Vec<Output>,
     table: Arc<Mutex<Table>>,
     notify: Box<dyn Fn() + Send>,
@@ -281,6 +308,14 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Listener {
                     state.xdg_manager = Some(registry.bind(name, version.min(3), handle, ()));
                     state.subscribe(handle);
                 }
+                // Version 4 is where the feedback, and the main device in
+                // it, arrive; bound no higher, since version 6 stops sending
+                // the main device as one event.
+                "zwp_linux_dmabuf_v1" if version >= 4 => {
+                    let dmabuf: ZwpLinuxDmabufV1 = registry.bind(name, 4, handle, ());
+                    dmabuf.get_default_feedback(handle, ());
+                    state.dmabuf = Some(dmabuf);
+                }
                 _ => {}
             },
             wl_registry::Event::GlobalRemove { name } => {
@@ -356,6 +391,42 @@ impl Dispatch<ZxdgOutputV1, u32> for Listener {
                 .zip(u32::try_from(height).ok())
                 .map(|(width, height)| [width, height]);
             state.publish();
+        }
+    }
+}
+
+impl Dispatch<ZwpLinuxDmabufV1, ()> for Listener {
+    /// Bound at version 4, where the formats come through the feedback
+    /// instead; nothing is asked of them.
+    fn event(
+        _: &mut Self,
+        _: &ZwpLinuxDmabufV1,
+        _: dmabuf::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<ZwpLinuxDmabufFeedbackV1, ()> for Listener {
+    /// The main device is the one word wanted of the feedback, and the
+    /// first `done` is where the feedback is let go. The format table's
+    /// file descriptor is closed as its event is dropped.
+    fn event(
+        state: &mut Self,
+        feedback: &ZwpLinuxDmabufFeedbackV1,
+        event: feedback::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            feedback::Event::MainDevice { device } => {
+                state.main_device = device_number(&device);
+            }
+            feedback::Event::Done => feedback.destroy(),
+            _ => {}
         }
     }
 }
@@ -492,6 +563,16 @@ mod tests {
         assert_eq!(headroom_of(reading(Some(Tf::Srgb), 80, 80)), 1.0);
         assert_eq!(headroom_of(reading(None, 0, 0)), 1.0);
         assert_eq!(headroom_of(Reading::default()), 1.0);
+    }
+
+    /// The compositor sends its `dev_t` as the bytes of the number, eight
+    /// of them on Linux; a feedback that sends some other width says
+    /// nothing usable.
+    #[test]
+    fn a_device_number_is_read_in_the_native_byte_order() {
+        assert_eq!(device_number(&0xe201u64.to_ne_bytes()), Some(0xe201));
+        assert_eq!(device_number(&0xe201u32.to_ne_bytes()), None);
+        assert_eq!(device_number(&[]), None);
     }
 
     /// A mode is the panel's own scan; a panel on its side is laid out the
