@@ -2068,6 +2068,7 @@ impl App {
             deleted: self.watch.missing(),
             headroom: self.headroom(),
             hdr_available: self.hdr_available(),
+            room: self.display_headroom(),
             can_pan: self.view.can_pan(self.image_size(), viewport),
             openers: self
                 .openers

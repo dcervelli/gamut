@@ -388,7 +388,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Output) => ToggleHdr,
         Tip::Control(Control::CameraJpeg) => ToggleCameraJpeg,
         Tip::Control(Control::Depth) => ToggleDepth,
-        Tip::Control(Control::GainMap) => ToggleGainMap,
+        Tip::Control(Control::GainMap | Control::ShowGainMap) => ToggleGainMap,
         Tip::Control(Control::Paste) => Action::Paste,
         Tip::Control(Control::Region) => ToggleRegion,
         Tip::Control(Control::Help) => ShowHelp,
@@ -3427,7 +3427,7 @@ impl App {
             Control::Output => self.toggle_hdr(),
             Control::CameraJpeg => self.toggle_camera_jpeg(),
             Control::Depth => self.toggle_beside(Auxiliary::Depth),
-            Control::GainMap => self.toggle_beside(Auxiliary::GainMap),
+            Control::GainMap | Control::ShowGainMap => self.toggle_beside(Auxiliary::GainMap),
             // The cross on the message at the foot of the window. The frame
             // after re-tests the pointer, which is what takes the highlight
             // off a button that is no longer there.

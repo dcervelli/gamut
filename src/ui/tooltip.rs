@@ -398,7 +398,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
     if tip == Tip::Control(Control::Depth) && !depth {
         return said(NO_DEPTH_MAP);
     }
-    if tip == Tip::Control(Control::GainMap) && !gain_map {
+    if matches!(tip, Tip::Control(Control::GainMap | Control::ShowGainMap)) && !gain_map {
         return said(NO_GAIN_MAP);
     }
     if tip == Tip::Control(Control::Paste) && !clipboard {
@@ -444,6 +444,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
                 | Control::TurnRight
                 | Control::Depth
                 | Control::GainMap
+                | Control::ShowGainMap
                 | Control::Play
                 | Control::StepBack
                 | Control::StepForward
@@ -590,6 +591,7 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Log) => "Logarithmic counts",
         Tip::Control(Control::Marks) => "Mark the clipped pixels",
         Tip::Control(Control::Reset) => "Reset the display",
+        Tip::Control(Control::ShowGainMap) => "Show the gain map in the picture's place",
         // Named rather than merely shown: a swatch of viridis is a green
         // rectangle that could be anything, and the map has a name people
         // ask for it by — the same one `--colormap` takes.

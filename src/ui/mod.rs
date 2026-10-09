@@ -649,6 +649,10 @@ pub struct FrameInput {
     /// color space for this window, and the monitor is not known to be in
     /// SDR mode. The switch is drawn dead otherwise.
     pub hdr_available: bool,
+    /// How far above white the surface can go, as a ratio to white: 1 on
+    /// SDR, and infinite on an HDR surface whose monitor has not yet said.
+    /// What the histogram's plot of what is shown runs up to.
+    pub room: f32,
     /// Whether a drag would move the picture: a fitted image has nowhere to
     /// go, and the closed hand is a promise that dragging will move
     /// something.

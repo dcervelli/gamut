@@ -139,6 +139,7 @@ fn input(logical: [f32; 2], count: usize) -> FrameInput {
         deleted: false,
         headroom: Headroom::None,
         hdr_available: false,
+        room: 1.0,
         can_pan: false,
         openers: Vec::new(),
         toast: None,
