@@ -432,15 +432,19 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel:
     let content = pass.content;
     let area = egui::Rect::from(panel);
     // What the regions are drawn on while the pointer is on their rows: the
-    // layer the picture's own marks are painted on, under every panel, this
-    // one included. Nothing is drawn over a stand-in for another file.
-    let picture = ui
-        .painter()
-        .with_clip_rect(if pass.input.standin.is_none() {
+    // layer the picture's own marks are painted on, clipped to the content
+    // area. A painter of its own rather than this one's narrowed, since the
+    // panel's clips to the panel and the picture is beside it. Nothing is
+    // drawn over a stand-in for another file.
+    let picture = egui::Painter::new(
+        ui.ctx().clone(),
+        ui.layer_id(),
+        if pass.input.standin.is_none() {
             content.into()
         } else {
             egui::Rect::NOTHING
-        });
+        },
+    );
     let inside = area.shrink(PANEL_INSET);
     ui.scope_builder(UiBuilder::new().max_rect(inside), |ui| {
         let inside = inside.size();

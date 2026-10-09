@@ -772,6 +772,48 @@ fn a_scaled_interface_lays_out_where_the_application_says() {
     );
 }
 
+/// The pointer on a region's row draws the region on the picture, beside
+/// the panel rather than inside it: what the panel's own drawing is
+/// clipped to is not what the picture's marks are.
+#[test]
+fn a_regions_row_marks_it_on_the_picture() {
+    use super::side::Side;
+    use crate::image::metadata_region::{MetadataRegion, Shape, Units};
+
+    let mut with_info = panels();
+    with_info.side = Some(Side::Info);
+    let mut harness = open(WINDOW, 1, with_info);
+    let mut current = photograph();
+    current.exif.regions = vec![MetadataRegion {
+        label: "Face".into(),
+        name: Some("Jane Doe".into()),
+        details: Vec::new(),
+        shape: Some(Shape::Rectangle {
+            center: [0.5, 0.5],
+            size: [0.5, 0.5],
+        }),
+        units: Units::Shares,
+    }];
+    harness.state_mut().current = Some(current);
+    harness.run();
+
+    let side = egui::PanelState::load(&harness.ctx, egui::Id::new("side"))
+        .expect("the side panel is up")
+        .outer_rect;
+    // The subject written over the region, which is drawn where the
+    // picture is: starting left of the panel.
+    let marked = |harness: &Harness<'static, State>| {
+        harness.output().shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Jane Doe")
+                && shape.clip_rect.min.x < side.min.x
+        })
+    };
+    assert!(!marked(&harness));
+    harness.get_by_label("Jane Doe").hover();
+    harness.run();
+    assert!(marked(&harness));
+}
+
 /// The side panel is laid out where the chrome's geometry says, between
 /// the picture and the right strip, and the histogram at its head; while
 /// another file is on its way in it keeps that place and says nothing of
