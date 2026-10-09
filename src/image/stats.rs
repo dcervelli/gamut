@@ -110,13 +110,19 @@ impl Plot {
     /// range it measured — which a strided scan can miss, and which the plot
     /// therefore does not cover.
     pub fn bin_of(&self, image: &DecodedImage, sample: &Sample) -> Option<usize> {
-        let transfer = image.color.transfer;
-        let channels = sample.channels;
-        let value = luminance(sample.linear(), channels);
+        self.bin_at(Self::value_of(image, sample)?)
+    }
+
+    /// Where one pixel read back out of `image` stands on a plot of it: its
+    /// luminance, worked out as the scan works it out, on the file's own
+    /// curve. `None` for a value the scan would have thrown out as nodata.
+    /// See [`Plot::bin_of`] for why it is read from [`Sample::linear`].
+    pub fn value_of(image: &DecodedImage, sample: &Sample) -> Option<f32> {
+        let value = luminance(sample.linear(), sample.channels);
         if !value.is_finite() || image.nodata.is_some_and(|sentinel| value == sentinel) {
             return None;
         }
-        self.bin_at(encode(transfer, value))
+        Some(encode(image.color.transfer, value))
     }
 
     /// Which bin a value already on the plot's own axis falls in: the same

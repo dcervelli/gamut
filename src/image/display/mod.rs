@@ -214,18 +214,6 @@ impl Display {
         gray && self.colormap != Colormap::Gray
     }
 
-    /// Whether the display is doing nothing at all: the window is 0..1, the
-    /// exposure is nothing and no curve is on, so every value comes out as
-    /// itself. What the histogram asks before it draws the response curve,
-    /// which on such a display is the diagonal, and says nothing the axis
-    /// under it does not.
-    pub fn is_identity(&self) -> bool {
-        self.window_low == 0.0
-            && self.window_high == 1.0
-            && self.exposure_stops == 0.0
-            && self.tone_map == ToneMap::None
-    }
-
     /// Puts the two values that come out black and white where they are
     /// told to, the exposure staying what it is: the levels track's handles,
     /// each of which is dragged to the value it should stand at.
@@ -1471,51 +1459,6 @@ mod tests {
         display.set_displayed_bounds(0.2, f32::INFINITY);
         assert!((display.window_high - 1.0).abs() < 1e-6);
         assert_eq!(display.window_low, 0.2);
-    }
-
-    /// The display is the identity exactly when nothing has been asked of
-    /// it, and any one thing asked of it is enough to make it not.
-    #[test]
-    fn the_identity_is_the_display_with_nothing_asked_of_it() {
-        let identity = Display::default();
-        assert!(identity.is_identity());
-        assert!(
-            !Display {
-                exposure_stops: 0.25,
-                ..identity.clone()
-            }
-            .is_identity()
-        );
-        assert!(
-            !Display {
-                tone_map: ToneMap::Neutral,
-                ..identity.clone()
-            }
-            .is_identity()
-        );
-        assert!(
-            !Display {
-                window_high: 0.5,
-                ..identity.clone()
-            }
-            .is_identity()
-        );
-        assert!(
-            !Display {
-                window_low: 0.1,
-                ..identity.clone()
-            }
-            .is_identity()
-        );
-        // The false color is not a change to the values, so it is not one
-        // to the response.
-        assert!(
-            Display {
-                colormap: Colormap::Turbo,
-                ..identity
-            }
-            .is_identity()
-        );
     }
 
     /// Each handle moves its own end of the window, whatever the file, and

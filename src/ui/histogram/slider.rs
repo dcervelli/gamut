@@ -1,6 +1,7 @@
 //! The exposure's slider under the band.
 
 use super::*;
+use crate::ui::Command;
 use crate::ui::slider::{self as line, Line};
 
 /// The exposure's slider: the interface's one slider (see `ui::slider`),

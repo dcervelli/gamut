@@ -6,6 +6,8 @@
 use egui::{CursorIcon, Sense, WidgetInfo, WidgetType};
 
 use super::*;
+use crate::ui::Command;
+use crate::ui::slider::{HANDLE_WIDTH, Hand, handle};
 
 /// The band under the plot as the levels track it is: a handle at the value
 /// that comes out black and another at the value that comes out white, each
@@ -22,8 +24,8 @@ use super::*;
 /// The handles stand at the values that come out black and white — exposure
 /// included, since those are the two ends of the band's black run and its
 /// white run — and each puts its own value where it is dragged to, the
-/// exposure left as it is: [`Display::put_black`] and
-/// [`Display::put_white`]. A handle is dragged to the pointer rather
+/// exposure left as it is: [`crate::image::display::Display::put_black`] and
+/// [`crate::image::display::Display::put_white`]. A handle is dragged to the pointer rather
 /// than by it, so a drag has no memory to lose: wherever the pointer is
 /// along the axis is where the handle goes, and a hand that runs off the
 /// end of the band puts the handle at the end.

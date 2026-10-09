@@ -1,15 +1,16 @@
-//! The plot itself: the bins as columns, the pointer's rule, the shares
-//! clipped at either end, the band along the foot and the response curve
-//! over the lot — and the arithmetic under it: where a bin stands, how tall
+//! The plot every section draws: the bins as columns, the pointer's rule,
+//! the words in its top corners, the band along its foot and the line that
+//! marks white — and the arithmetic under it: where a bin stands, how tall
 //! its bar is, and what a stretch of a column comes out as with the planes
 //! standing over it.
 
 use std::ops::Range;
 
-use egui::{Align2, Color32, FontId, Stroke, pos2};
+use egui::{Align2, Color32, FontId, pos2};
 
 use super::*;
 use crate::image::stats::COLOR;
+use crate::ui::outline;
 
 /// The ground the plot is drawn on. Not quite black, so that the panel's own
 /// edge is still an edge rather than a hole in it. The one surface with a
@@ -89,11 +90,11 @@ pub(super) fn screened(luma_ink: Color, cover: Cover) -> Color32 {
 /// `None` where white is the top and the line would be the plot's own edge.
 pub(super) struct Scale {
     ceiling: f32,
-    white: Option<f32>,
+    pub(super) white: Option<f32>,
 }
 
 impl Scale {
-    fn new(encoded_white: f32, highest: f32) -> Self {
+    pub(super) fn new(encoded_white: f32, highest: f32) -> Self {
         let ceiling = highest.max(encoded_white).max(f32::MIN_POSITIVE);
         let white = encoded_white / ceiling;
         Self {
@@ -103,7 +104,7 @@ impl Scale {
     }
 
     /// An encoded response as a fraction of the plot's height.
-    fn up(&self, encoded: f32) -> f32 {
+    pub(super) fn up(&self, encoded: f32) -> f32 {
         (encoded / self.ceiling).clamp(0.0, 1.0)
     }
 }
@@ -166,20 +167,27 @@ pub(super) fn bar_fraction(count: u32, peak: u32, log: bool) -> f32 {
     }
 }
 
-/// The plot itself: the bins, the pointer's rule, the shares clipped at
-/// either end, the band along the foot and — where the display is doing
-/// anything — the response curve over the lot.
-pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
+/// What a backdrop's bins are faded to, as a share of the way from the
+/// plot's ground to their own color: the display's plot, which is what the
+/// curve over it is read against rather than a reading of its own.
+const BACKDROP: f32 = 0.55;
+
+/// The bins of `plotted` across `bars`, standing on the plot's ground, with
+/// the rule on `rule` over them: the luminance plane under the color ones,
+/// each where the panel's toggles have it, at one column to a device pixel.
+/// `backdrop` fades them toward the ground, for a plot whose bins are what
+/// something drawn over them is read against.
+pub(super) fn bars(
+    pass: &Pass,
+    ui: &egui::Ui,
+    plotted: &Plot,
+    bars: Rect,
+    backdrop: bool,
+    rule: Option<usize>,
+) {
     let theme = pass.theme;
     let panels = pass.panels;
-    let input = pass.input;
     let painter = ui.painter();
-
-    // What applies to this image: the false colors are for a single channel
-    // and the color planes are for three, and the panel leaves out whichever
-    // the display would ignore rather than drawing it dead.
-    let gray = current.image.is_gray();
-    let bars = plot_area(panel, gray);
     painter.rect_filled(
         egui::Rect::from(bars.inset(-PLOT_INSET, -PLOT_INSET)),
         PLOT_RADIUS,
@@ -189,16 +197,11 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
     // Luminance always goes down first, underneath the color planes: it
     // runs as tall as the tallest of them about as often as not, and painting
     // it on top swamps the color the panel exists to show.
-    let plotted = &current.stats.plot;
     let luma: Option<&[u32; BINS]> = panels.show_luma.then_some(&plotted.luma);
     let color: &[[u32; BINS]] = match plotted.color.as_ref() {
         Some(planes) if panels.show_planes => planes,
         _ => &[],
     };
-    let (axis_min, axis_max) = (plotted.min, plotted.max);
-    let span = axis_max - axis_min;
-    let transfer = current.image.color.transfer;
-    let headroom = input.headroom;
 
     // One peak across every plane on screen, so their heights stay
     // comparable — and only across those, so that a plane left on its own
@@ -218,6 +221,13 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
         HISTOGRAM_LUMA
     } else {
         HISTOGRAM_LUMA.with_alpha(HISTOGRAM_LUMA_UNDER)
+    };
+    let faded = |ink: Color32| {
+        if !backdrop {
+            return ink;
+        }
+        let ground = Color32::from(PLOT_BACKGROUND);
+        ground.lerp_to_gamma(ink, BACKDROP)
     };
 
     // One column to a device pixel — the bins are a point each, which is
@@ -250,7 +260,7 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
                 painter.rect_filled(
                     egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
                     0.0,
-                    screened(luma_ink, cover),
+                    faded(screened(luma_ink, cover)),
                 );
             }
             from = height;
@@ -261,16 +271,15 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
         }
     }
 
-    // The pointer's rule: over the bins it is picking one of, and under the
-    // response curve, since where that curve runs at this value is half of
-    // what the readout above says and the line must not cover it.
+    // The pointer's rule: over the bins it is picking one of, and under
+    // anything drawn over them, which is half of what the readout says
+    // where there is a curve and the line must not cover it.
     //
     // Full height, where the window's own marks are handles on the band. A
     // rule standing through the plot is what a pointer wants and what a
     // permanent annotation does not: this one is only there while it is
     // being aimed, and it has to be followed up from the axis to the curve.
-    let marked = marked(current, panel, input.cursor, input.pointer);
-    if let Some(across) = marked.map(bin_across) {
+    if let Some(across) = rule.map(bin_across) {
         painter.rect_filled(
             egui::Rect::from(grid.rect(Rect::new(
                 bars.x + across * bars.width - CURSOR_WIDTH / 2.0,
@@ -282,38 +291,29 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
             theme.accent.with_alpha(CURSOR_ALPHA),
         );
     }
+}
 
-    if span <= 0.0 {
-        return;
-    }
-
-    // How much of the picture the window is throwing away, in the corner
-    // it is being thrown out of: the share of the pixels at or below what
-    // comes out black in the left corner, and at or above what comes out
-    // white in the right — where the surface is actually clipping them,
-    // rather than showing them or rolling them off. Only where there is a
-    // share to write, so that a corner with a number in it is news.
-    //
-    // This is the question the panel is most often opened to answer, and a
-    // spike against the edge of the plot cannot answer it: the spike says
-    // there is clipping and the number says how much.
-    let (black, white) = current.display.displayed_bounds();
-    let [below, above] = current
-        .stats
-        .plot
-        .clipped(transfer.to_encoded(black), transfer.to_encoded(white));
-    let above = if current.display.clips_white(gray, headroom) {
-        above
-    } else {
-        0.0
-    };
-    let clip_font = FontId::proportional(CLIP_TEXT);
-    for (share, right) in [(below, false), (above, true)] {
-        let Some(words) = share_words(share) else {
+/// Words in the two top corners of the plot `bars`, each in its own ink:
+/// the shares the screen clips at either end, or the ends of the axis.
+/// Backed with the plot's own ground, laid over whatever bar has climbed
+/// into the corner, so that the number stays a number on a picture that has
+/// piled up at one end. Pinned to the ends of the axis they name rather
+/// than set together in one corner: each is about the edge of the plot it
+/// stands at.
+pub(super) fn corners(
+    ui: &egui::Ui,
+    bars: Rect,
+    left: Option<(String, Color32)>,
+    right: Option<(String, Color32)>,
+) {
+    let painter = ui.painter();
+    let font = FontId::proportional(CLIP_TEXT);
+    for (words, at_right) in [(left, false), (right, true)] {
+        let Some((words, ink)) = words else {
             continue;
         };
         let width = width_of(ui, &words, CLIP_TEXT);
-        let x = if right {
+        let x = if at_right {
             bars.right() - CLIP_INSET - width
         } else {
             bars.x + CLIP_INSET
@@ -328,47 +328,35 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
             pos2(text.x, text.y),
             Align2::LEFT_TOP,
             words,
-            clip_font.clone(),
-            theme.accent.into(),
+            font.clone(),
+            ink,
         );
     }
+}
 
-    // What the display turns each value into, in a band along the foot of
-    // the plot: the value above a cell, and the color it comes out as under
-    // it, a device pixel to the cell.
-    //
-    // The curve says how much and this says what of, which are different
-    // questions on a false-colored image — a curve cannot draw viridis —
-    // and the same question answered twice on a gray one, where the band is
-    // the tone curve as a wedge and the curve is it as a shape. It is where
-    // clipping stops being an inference: everything left of the window
-    // comes out black and everything right of it comes out at the top of
-    // the ramp, so the two flat runs at the ends are the range the display
-    // is throwing away, drawn at the width they occupy. The handles that
-    // set those ends are drawn over it, in [`track()`].
+/// The band under the plot `bars`: a device pixel to the cell, each the
+/// color `shade` gives for its place along the axis, from 0 at the left to
+/// 1 at the right, with the accent along its top where `shade` says the
+/// screen goes past white there — which the panel cannot show, since it
+/// cannot glow, so says. Outlined outside the color rather than over it,
+/// so that a band that comes out black is still a band on a dark panel.
+pub(super) fn band(pass: &Pass, ui: &egui::Ui, bars: Rect, shade: impl Fn(f32) -> Shade) {
+    let theme = pass.theme;
+    let painter = ui.painter();
+    let grid = pass.grid;
     let band = ramp(bars);
-    let (top, bottom) = (snap(band.y), snap(band.bottom()));
-    // A cell above white — which only a surface with room above white has,
-    // and only with no curve on — is drawn white, since the panel cannot
-    // glow, with the accent along its top edge to say that the screen does:
-    // the same ink as the handle that marks white on the band, and the run
-    // of it is how much of the axis is out past that.
-    let channels = current.image.channels();
+    let (top, bottom) = (grid.snap(band.y), grid.snap(band.bottom()));
     let hair = grid.device_pixels(1.0);
     let cells: Vec<_> = grid.columns(bars.x, bars.width).collect();
     for column in &cells {
         let (left, right) = (column.left, column.right);
-        let value = transfer.to_linear(axis_min + column.t_center() * span);
+        let (color, above) = shade(column.t_center());
         painter.rect_filled(
             egui::Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
             0.0,
-            Color::from_linear(current.display.shade(value, channels, headroom)),
+            color,
         );
-        if current
-            .display
-            .response(value, channels.is_gray(), headroom)
-            > ABOVE_WHITE
-        {
+        if above {
             painter.rect_filled(
                 egui::Rect::from_min_max(pos2(left, top), pos2(right, top + hair)),
                 0.0,
@@ -376,11 +364,10 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
             );
         }
     }
-    // Outside the color rather than over it, so that the band keeps its
-    // full depth. A window left of everything makes the whole ramp black,
-    // and a black band on a dark panel is a gap in it without this. One
-    // physical pixel, snapped like the band it rings.
-    let (left, right) = (cells[0].left, cells[cells.len() - 1].right);
+    let (Some(first), Some(last)) = (cells.first(), cells.last()) else {
+        return;
+    };
+    let (left, right) = (first.left, last.right);
     outline(
         painter,
         grid,
@@ -393,88 +380,30 @@ pub(super) fn plot(pass: &Pass, ui: &egui::Ui, current: &Current, panel: Rect) {
         hair,
         theme.border.into(),
     );
+}
 
-    // What the display is doing to the values underneath, drawn over them —
-    // and only where it is doing something. On a display with nothing asked
-    // of it the curve is the diagonal from corner to corner, which says
-    // nothing the axis under it does not, and a line across every plot is a
-    // line no one looks at; drawn only when it bends, or leans, it is news.
-    //
-    // The curve is the whole of what the display does, and the only part of
-    // the panel that can show a tone map at all: a shoulder is a shape, not
-    // a threshold, and there is no line that means "rolled off". The handles
-    // on the band place the two values that come out black and white,
-    // exposure included, which a curve meeting its floor tangentially
-    // cannot be read for by eye.
-    if current.display.is_identity() {
-        return;
-    }
-    // Sampled per column rather than per bin: the response is a continuous
-    // function of the value, and stepping it where the transform does not
-    // step would draw a stair that is not there.
-    //
-    // The same one check for every column, the arithmetic being the same
-    // for all of them: a window left non-finite would otherwise put NaN
-    // vertices in the buffer, which no clamp downstream can undo.
-    let (offset, gain) = current.display.transform();
-    if !(offset.is_finite() && gain.is_finite()) {
-        return;
-    }
-    // A vertex to the device pixel, so that a steep toe is drawn as finely
-    // as the screen can show it.
-    let columns = grid.columns(bars.x, bars.width).len();
-    // Decoded to run the transform on, then encoded again to be drawn: both
-    // axes are in the file's own units, so a display doing nothing would be
-    // the diagonal.
-    let responses: Vec<f32> = (0..=columns)
-        .map(|column| {
-            let across = column as f32 / columns as f32;
-            let value = transfer.to_linear(axis_min + across * span);
-            let response = current
-                .display
-                .response(value, channels.is_gray(), headroom)
-                .max(0.0);
-            transfer.to_encoded(response).max(0.0)
-        })
-        .collect();
-    // The plot's height is white, unless the response runs past it — a
-    // surface with room above white, and no curve on — in which case the
-    // top is wherever the response gets to and white is a line across the
-    // plot, so that the room above it can be seen as the room it is rather
-    // than as a clip that is not happening.
-    let highest = responses.iter().copied().fold(0.0, f32::max);
-    let plot_scale = Scale::new(transfer.to_encoded(1.0), highest);
-    if let Some(white) = plot_scale.white {
-        let y = grid.snap(bars.bottom() - white * bars.height);
-        painter.rect_filled(
-            egui::Rect::from(grid.rect(Rect::new(bars.x, y, bars.width, grid.device_pixels(1.0)))),
-            0.0,
-            theme.text_dim,
-        );
-        let size = TEXT_SIZE * 0.75;
-        painter.text(
-            pos2(bars.right() - 2.0, y - size * 0.3),
-            Align2::RIGHT_BOTTOM,
-            WHITE_LABEL,
-            FontId::proportional(size),
-            theme.text_dim.into(),
-        );
-    }
-    let curve: Vec<egui::Pos2> = responses
-        .iter()
-        .enumerate()
-        .map(|(column, &response)| {
-            let across = column as f32 / columns as f32;
-            pos2(
-                bars.x + across * bars.width,
-                bars.bottom() - plot_scale.up(response) * bars.height,
-            )
-        })
-        .collect();
-    painter.add(egui::Shape::line(
-        curve,
-        Stroke::new(CURVE_WIDTH, theme.accent),
-    ));
+/// The line across the plot `bars` that marks white, `white` of the way up
+/// it, where white is not the top of the plot: on a surface with room above
+/// white, the room above it can then be seen as the room it is rather than
+/// as a clip that is not happening.
+pub(super) fn white_line(pass: &Pass, ui: &egui::Ui, bars: Rect, white: f32) {
+    let theme = pass.theme;
+    let grid = pass.grid;
+    let painter = ui.painter();
+    let y = grid.snap(bars.bottom() - white * bars.height);
+    painter.rect_filled(
+        egui::Rect::from(grid.rect(Rect::new(bars.x, y, bars.width, grid.device_pixels(1.0)))),
+        0.0,
+        theme.text_dim,
+    );
+    let size = TEXT_SIZE * 0.75;
+    painter.text(
+        pos2(bars.right() - 2.0, y - size * 0.3),
+        Align2::RIGHT_BOTTOM,
+        WHITE_LABEL,
+        FontId::proportional(size),
+        theme.text_dim.into(),
+    );
 }
 
 #[cfg(test)]

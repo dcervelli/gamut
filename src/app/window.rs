@@ -762,7 +762,7 @@ mod tests {
     /// and there the smallest window is taken, at the interface's scale.
     #[test]
     fn a_monitor_with_room_for_the_panels_at_one_but_not_two_keeps_the_scaled_smallest_window() {
-        let modest = [monitor(800, 600, 1.0)];
+        let modest = [monitor(700, 600, 1.0)];
         let at_one = window_size(&modest, Some([32.0, 24.0]), None, Chrome::default());
         assert!(at_one.width > MIN_WINDOW[0], "{at_one:?}");
         let at_two = window_size(&modest, Some([32.0, 24.0]), None, Chrome::new(2.0));

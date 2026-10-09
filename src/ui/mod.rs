@@ -1182,8 +1182,8 @@ pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
 /// holds it to what [`room`] actually answers.
 pub const PANELS_ROOM: [f32; 2] = [
     side::WIDTH,
-    if histogram::SIZE[1] > info::INFO_MIN_HEIGHT {
-        histogram::SIZE[1]
+    if histogram::MIN_HEIGHT > info::INFO_MIN_HEIGHT {
+        histogram::MIN_HEIGHT
     } else {
         info::INFO_MIN_HEIGHT
     },
@@ -1228,7 +1228,7 @@ pub fn room(logical: [f32; 2], show_ui: bool, parts: chrome::Parts) -> Room {
     let [across, down] = chrome::side_room(logical, show_ui, parts);
     let wide = across >= side::WIDTH;
     Room {
-        histogram: wide && down >= histogram::SIZE[1],
+        histogram: wide && down >= histogram::MIN_HEIGHT,
         info: wide && down >= info::INFO_MIN_HEIGHT,
         help: help::panel(chrome::content_area(logical, show_ui, parts)).is_some(),
     }

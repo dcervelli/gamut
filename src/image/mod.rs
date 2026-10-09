@@ -409,7 +409,7 @@ impl DecodedImage {
     /// working space's. What the histogram's plot of the file reads a pixel
     /// as, to mark the bar the scan of the file as stored counted it in.
     pub fn sample_as_stored(&self, x: u32, y: u32) -> Option<Sample> {
-        Reader::new(self, None).as_stored_only().read(x, y)
+        Reader::new(self, None).without_moves().read(x, y)
     }
 
     /// Whether reading the picture to show it moves a color off where the
@@ -566,11 +566,11 @@ impl<'a> Reader<'a> {
     /// no lift and no matrix, so that a wide-gamut color is read in the
     /// file's own primaries and a gain-mapped picture as its base.
     pub fn as_stored(image: &'a DecodedImage) -> Self {
-        Self::tabulated(image, None).as_stored_only()
+        Self::tabulated(image, None).without_moves()
     }
 
     /// This reader with whatever it would have moved a color by left out.
-    fn as_stored_only(self) -> Self {
+    fn without_moves(self) -> Self {
         Self {
             lift: None,
             matrix: None,

@@ -832,16 +832,13 @@ fn the_side_panel_waits_for_the_file_coming_in() {
     let toggle = harness.get_by_label("Histogram").rect();
     let strip = toggle.center().x - SIDE_WIDTH / 2.0;
     let top = toggle.top() - super::chrome::BAR_PADDING;
-    let side = super::Rect::new(strip - WIDTH, top, WIDTH, 400.0);
-    let placed = super::histogram::panel(side);
     let full = harness.get_by_label("Histogram panel").rect();
-    assert_eq!(
-        full,
-        egui::Rect::from_min_size(
-            egui::pos2(placed.x, placed.y),
-            egui::vec2(placed.width, placed.height)
-        )
-    );
+    assert_eq!(full.min, egui::pos2(strip - WIDTH, top));
+    assert_eq!(full.width(), WIDTH);
+    let side = egui::PanelState::load(&harness.ctx, egui::Id::new("side"))
+        .expect("the side panel is up")
+        .outer_rect;
+    assert_eq!(full.max.y, side.max.y, "down the whole of the side");
     assert!(harness.query_by_label("Window 0").is_some());
     assert!(
         harness.query_by_label("Copy All").is_none(),
@@ -2620,6 +2617,95 @@ fn the_gain_map_toggle_is_there_only_for_a_picture_with_a_gain_map() {
         click(&mut harness, &name),
         [Command::Press(Control::GainMap)]
     );
+}
+
+/// Where `text` was painted inside the side panel, if it was: the words of
+/// the histogram's headers, which are painted rather than named.
+fn painted_in_side(harness: &Harness<'static, State>, text: &str) -> Option<egui::Rect> {
+    let side = egui::PanelState::load(&harness.ctx, egui::Id::new("side"))?.outer_rect;
+    harness
+        .output()
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(shown) if shown.galley.text() == text => {
+                let rect = egui::Rect::from_min_size(shown.pos, shown.galley.size());
+                (rect.min.x >= side.min.x && rect.max.x <= side.max.x).then_some(rect)
+            }
+            _ => None,
+        })
+}
+
+/// The histogram is a column of sections, one for each stage the picture
+/// passes through: a gain map's only for a picture that carries one, whose
+/// button beside it asks for the map in the picture's place.
+#[test]
+fn the_histogram_has_a_section_for_each_stage_the_picture_passes_through() {
+    use crate::image::gain_map::{GainMap, Lift};
+
+    let mut with_histogram = panels();
+    with_histogram.side = Some(super::side::Side::Histogram);
+    let mut harness = open(WINDOW, 1, with_histogram);
+    for title in ["Output", "Display", "File"] {
+        assert!(painted_in_side(&harness, title).is_some(), "{title}");
+    }
+    assert!(painted_in_side(&harness, "Gain map").is_none());
+    assert!(harness.query_by_label("Show gain map").is_none());
+
+    let current = harness.state_mut().current.as_mut().expect("a picture");
+    let mut image = (*current.image).clone();
+    image.gain_map = Some(Arc::new(GainMap {
+        width: 2,
+        height: 2,
+        channels: 1,
+        data: vec![0, 85, 170, 255],
+        lift: Lift::Apple { headroom: 4.0 },
+    }));
+    current.image = Arc::new(image);
+    harness.run();
+    let output = painted_in_side(&harness, "Output").expect("Output");
+    let display = painted_in_side(&harness, "Display").expect("Display");
+    let gain_map = painted_in_side(&harness, "Gain map").expect("Gain map");
+    let file = painted_in_side(&harness, "File").expect("File");
+    assert!(
+        output.min.y < display.min.y
+            && display.min.y < gain_map.min.y
+            && gain_map.min.y < file.min.y,
+        "in the order the data flows, read from the screen back"
+    );
+    assert_eq!(
+        click(&mut harness, "Show gain map"),
+        [Command::Press(Control::ShowGainMap)]
+    );
+}
+
+/// On a window too short for the column, the sections run on below the
+/// side panel and the wheel over it scrolls them up into view.
+#[test]
+fn a_short_histogram_scrolls_to_the_sections_below() {
+    let mut with_histogram = panels();
+    with_histogram.side = Some(super::side::Side::Histogram);
+    let mut harness = open([WINDOW[0], 380.0], 1, with_histogram);
+    let side = egui::PanelState::load(&harness.ctx, egui::Id::new("side"))
+        .expect("the side panel is up")
+        .outer_rect;
+    assert!(side.height() < 320.0, "{side:?}");
+    let before = painted_in_side(&harness, "File").expect("laid out below");
+    assert!(before.min.y > side.max.y, "{before:?} below {side:?}");
+
+    harness.event(egui::Event::PointerMoved(side.center()));
+    for _ in 0..4 {
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -200.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run();
+    }
+    let after = painted_in_side(&harness, "File").expect("still laid out");
+    assert!(after.min.y < before.min.y, "{after:?} from {before:?}");
+    assert!(side.contains(after.center()), "{after:?} in {side:?}");
 }
 
 /// The information panel's Tags tab, with tags handed in: the field takes
