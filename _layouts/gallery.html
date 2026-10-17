@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title | default: site.title }}</title>
+  <link rel="stylesheet" href="{{ '/assets/css/site.css' | relative_url }}">
+</head>
+<!-- gallery.js picks nav-left/nav-bottom and cap-right/cap-below to show the
+     media largest; these classes are the no-JS fallback. -->
+<body class="gallery nav-left cap-below">
+  <header class="topbar">
+    <a class="brand" href="{{ '/' | relative_url }}">{{ site.title }}</a>
+    <button class="nav-toggle" type="button" aria-controls="sidebar" aria-pressed="false" title="Hide the list">☰</button>
+  </header>
+
+  <nav class="sidebar" id="sidebar">
+    <!-- Stands in for the header, which is dropped on short screens. -->
+    <a class="nav-brand" href="{{ '/' | relative_url }}">{{ site.title }}</a>
+    <input class="filter" type="search" placeholder="Filter" aria-label="Filter">
+    {%- for group in site.data.gallery.groups %}
+    <div class="group">
+      <h2>{{ group.group }}</h2>
+      <ul>
+        {%- for item in group.items %}
+        <li><a class="thumb" href="#{{ item.id }}" data-id="{{ item.id }}">
+          {%- if item.thumb %}
+          <img src="{{ '/assets/thumbs/' | append: item.thumb | relative_url }}" alt="" loading="lazy">
+          {%- else %}
+          <span class="tile">{{ item.kind }}</span>
+          {%- endif %}
+          <span class="label">{{ item.title }}</span>
+        </a></li>
+        {%- endfor %}
+      </ul>
+    </div>
+    {%- endfor %}
+  </nav>
+
+  <main class="viewer">
+    {%- for group in site.data.gallery.groups %}{% for item in group.items %}
+    {%- if site.placeholder_media %}
+      {%- assign image_src = '/assets/placeholder/16x9.jpg' | relative_url %}
+      {%- assign video_src = '/assets/placeholder/16x9.mp4' | relative_url %}
+      {%- assign poster = '/assets/placeholder/16x9.mp4.jpg' | relative_url %}
+    {%- else %}
+      {%- assign image_src = site.media_url | append: '/' | append: item.src %}
+      {%- assign video_src = image_src %}
+      {%- assign poster = '/assets/thumbs/' | append: item.thumb | relative_url %}
+    {%- endif %}
+    <section class="pane pane-{{ item.kind }}" data-id="{{ item.id }}">
+      {%- if item.kind == "doc" %}
+      <article class="doc">
+        <h1>{{ item.title }}</h1>
+{{ content }}
+        {{ item.text | markdownify }}
+      </article>
+      {%- else %}
+      <div class="media">
+        {%- case item.kind %}
+        {%- when "image" %}
+        <img src="{{ image_src }}" alt="{{ item.title }}" loading="lazy" title="Full screen">
+        {%- when "video" %}
+        <video src="{{ video_src }}" poster="{{ poster }}" controls playsinline preload="none"></video>
+        {%- when "demo" %}
+        <canvas id="demo-canvas" width="1280" height="720" title="Full screen"></canvas>
+        {%- endcase %}
+      </div>
+      <div class="caption">
+        <h1>{{ item.title }}</h1>
+        {{ item.text | markdownify }}
+      </div>
+      {%- endif %}
+    </section>
+    {%- endfor %}{% endfor %}
+  </main>
+
+  <script src="{{ '/assets/js/gallery.js' | relative_url }}"></script>
+  <script src="{{ '/assets/js/demo.js' | relative_url }}"></script>
+</body>
+</html>

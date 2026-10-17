@@ -1,0 +1,2 @@
+# Overrides for local preview; layered on top of _config.yml by serve.sh.
+media_url: http://localhost:4001

@@ -1,0 +1,21 @@
+title: Gamut
+baseurl: /gamut  # project site lives at <user>.github.io/gamut/
+# Images and video live in the gamut-scripting Pages site; serve.sh points this
+# at a local checkout instead (see _config.local.yml).
+media_url: https://dcervelli.github.io/gamut-scripting
+markdown: kramdown
+kramdown:
+  input: GFM
+defaults:
+  - scope: { path: "" }
+    values: { layout: default }
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - .bundle
+  - serve.sh
+  - _config.local.yml
+# Show assets/placeholder/ (16:9, 1920×1080) in place of every image and video
+# until the media is re-recorded at that size.
+placeholder_media: true

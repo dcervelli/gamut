@@ -1,0 +1,150 @@
+# Sidebar entries for the index page, in display order. The first item is shown
+# when the URL has no #id.
+#   id:    URL fragment (#id) that selects the item
+#   kind:  image | video | demo | doc
+#   src:   media path under site.media_url (image, video); ignored while
+#          _config.yml has placeholder_media: true
+#   thumb: file in assets/thumbs/ (see make-thumbs.sh); omit for a text tile
+#   text:  paragraph shown beside or below the media (Markdown)
+# Titles are placeholders taken from the file names; text is lorem ipsum.
+lorem: &lorem >-
+  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
+  incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis
+  nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+  Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu
+  fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in
+  culpa qui officia deserunt mollit anim id est laborum.
+
+groups:
+  - group: Gamut
+    items:
+      - id: screenshot
+        title: Screenshot
+        kind: image
+        src: screenshots/main_screenshot.jpg
+        thumb: main_screenshot.jpg.jpg
+        text: *lorem
+      - id: film
+        title: Film
+        kind: video
+        src: screenshots/gamut.mp4
+        thumb: gamut.mp4.jpg
+        text: *lorem
+      - id: about
+        title: About
+        kind: doc
+        text: *lorem
+      - id: demo
+        title: Demo
+        kind: demo
+        text: *lorem
+  - group: Features
+    items:
+      - id: animated
+        title: Animated
+        kind: image
+        src: screenshots/animated.gif
+        thumb: animated.gif.jpg
+        text: *lorem
+      - id: compare
+        title: Compare
+        kind: image
+        src: screenshots/compare.gif
+        thumb: compare.gif.jpg
+        text: *lorem
+      - id: depth-maps
+        title: Depth maps
+        kind: image
+        src: screenshots/depth_maps.gif
+        thumb: depth_maps.gif.jpg
+        text: *lorem
+      - id: export
+        title: Export
+        kind: image
+        src: screenshots/export.gif
+        thumb: export.gif.jpg
+        text: *lorem
+      - id: false-color
+        title: False color
+        kind: image
+        src: screenshots/false_color.gif
+        thumb: false_color.gif.jpg
+        text: *lorem
+      - id: file-list
+        title: File list
+        kind: image
+        src: screenshots/file_list.gif
+        thumb: file_list.gif.jpg
+        text: *lorem
+      - id: fuzzy-finder
+        title: Fuzzy finder
+        kind: image
+        src: screenshots/fuzzy_finder.gif
+        thumb: fuzzy_finder.gif.jpg
+        text: *lorem
+      - id: histogram
+        title: Histogram
+        kind: image
+        src: screenshots/histogram.gif
+        thumb: histogram.gif.jpg
+        text: *lorem
+      - id: info
+        title: Info
+        kind: image
+        src: screenshots/info.gif
+        thumb: info.gif.jpg
+        text: *lorem
+      - id: loupe
+        title: Loupe
+        kind: image
+        src: screenshots/loupe.gif
+        thumb: loupe.gif.jpg
+        text: *lorem
+      - id: mandelbrot
+        title: Mandelbrot
+        kind: image
+        src: screenshots/mandelbrot.gif
+        thumb: mandelbrot.gif.jpg
+        text: *lorem
+      - id: open-in
+        title: Open in
+        kind: image
+        src: screenshots/open_in.jpg
+        thumb: open_in.jpg.jpg
+        text: *lorem
+      - id: performance
+        title: Performance
+        kind: image
+        src: screenshots/performance.gif
+        thumb: performance.gif.jpg
+        text: *lorem
+      - id: pixel-copy
+        title: Pixel copy
+        kind: image
+        src: screenshots/pixel_copy.gif
+        thumb: pixel_copy.gif.jpg
+        text: *lorem
+      - id: pixel-grid
+        title: Pixel grid
+        kind: image
+        src: screenshots/pixel_grid.gif
+        thumb: pixel_grid.gif.jpg
+        text: *lorem
+      - id: region
+        title: Region
+        kind: image
+        src: screenshots/region.gif
+        thumb: region.gif.jpg
+        text: *lorem
+      - id: themes
+        title: Themes
+        kind: image
+        src: screenshots/themes.gif
+        thumb: themes.gif.jpg
+        text: *lorem
+      - id: ui
+        title: UI
+        kind: image
+        src: screenshots/ui.gif
+        thumb: ui.gif.jpg
+        text: *lorem
