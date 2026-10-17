@@ -109,6 +109,7 @@ leaves out is filled in from what the raw reader finds in the file.
 | Owner | The owner's name, as set in the camera. |
 | Camera serial number | |
 | Lens serial number | |
+| Software | The camera's firmware, an iPhone's version of iOS, or the program that last saved the file. |
 
 ## Exposure
 
@@ -136,7 +137,7 @@ them. The map button opens where the picture was taken in the browser; the
 | Field | What it says |
 | --- | --- |
 | Altitude | In meters; negative below sea level. |
-| Direction | Which way the camera faced, in degrees from true or magnetic north. The two can be twenty degrees apart. |
+| Direction | Which way the camera faced, in degrees from true or magnetic north. The two can be twenty degrees apart. For a photo from an iPhone or iPad on iOS 8, which recorded it the wrong way round, the bearing it recorded beside it instead. |
 | Speed | How fast the camera was moving, in km/h, mph or knots, as the file records it. |
 | Positioning error | How far off the recorded position may be, as the GPS judged it. |
 

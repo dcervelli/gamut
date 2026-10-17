@@ -1414,7 +1414,12 @@ from the point gravity is seen at (`Shown::vanishing`, `f·(gx, gy)/gz`)
 through where its way crosses the horizon; the half beyond that point is the
 way behind the camera and is cut off. The uprights are spaced in degrees
 round, `Panels::horizon_step` apart, and fall on round bearings where the
-GPS directory gives the lens's heading. A level circle — every way at one
+GPS directory gives the lens's heading (`Exif::heading`). That is
+`GPSImgDirection`, except on an Apple file where `GPSDestBearing` is half a
+turn from it: iOS 8 wrote the direction the wrong way round in every
+orientation and the bearing the right way, where every other iOS writes the
+two equal, so the gap itself marks the file and no version need be read.
+A level circle — every way at one
 elevation — is a cone, which a rectilinear lens shows as a conic: the grid's
 level curves, the same step apart above and below the horizon, and the curve
 through the pointer are sampled a degree of azimuth at a time

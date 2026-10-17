@@ -94,6 +94,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   and each stage is explained under the pointer. `G` and the
   sun beside `HDR` show the profile's lift in the picture's place as a
   gain map, and the information panel describes the profile. `--no-gain-map` leaves the rendering behind too.
+- A *Software* row in the information panel's *Camera* section: the
+  camera's firmware, an iPhone's version of iOS, or the program that last
+  saved the file.
 
 ### Changed
 
@@ -245,6 +248,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - An iPhone's maker note holding an entry of a type TIFF does not define
   is read rather than passed over whole, so such a file's gain map has the
   headroom the note gives it.
+- An iPhone or iPad photo taken on iOS 8 faces the way the camera did. iOS 8
+  wrote the direction half a turn the wrong way, and the right one in
+  another tag beside it, which is now read instead — in the *Direction*
+  row, the *Orientation* section, the horizon grid's bearings and the
+  pointer's direction readout.
 
 ## 0.11.0 - 2026-10-10
 

@@ -151,7 +151,8 @@ pub struct Exif {
     pub focal_equivalent: Option<f64>,
     /// The bearing the lens pointed at, in degrees clockwise from north, as
     /// the GPS directory says — true or magnetic north, as its reference
-    /// does. `None` where the file does not say.
+    /// does — or as it meant to say, on an iPhone of iOS 8 (see
+    /// [`heading`]). `None` where the file does not say.
     pub heading: Option<f64>,
     /// How the pixels are compressed, for a TIFF: its own directory says,
     /// and the info panel's `Image` section shows it. `None` for every other
@@ -455,7 +456,7 @@ impl Exif {
                 Attitude::level(level, orientation.unwrap_or(Orientation::NoTransforms))
             }),
             focal_equivalent: focal_equivalent(exif),
-            heading: rational(exif, Tag::GPSImgDirection).map(|degrees| degrees.rem_euclid(360.0)),
+            heading: heading(exif).map(|(degrees, _)| degrees.rem_euclid(360.0)),
             compression: primary(exif, Tag::Compression)
                 .map(|field| display(exif, field))
                 .filter(|value| !value.is_empty()),
@@ -627,6 +628,9 @@ fn camera(exif: &exif::Exif) -> Vec<Entry> {
     push(&mut rows, OWNER, named(Tag::CameraOwnerName));
     push(&mut rows, CAMERA_SERIAL, named(Tag::BodySerialNumber));
     push(&mut rows, LENS_SERIAL, named(Tag::LensSerialNumber));
+    // A camera's firmware, a phone's version of its system, or whatever
+    // last saved the file over the camera's word.
+    push(&mut rows, SOFTWARE, named(Tag::Software));
     rows
 }
 
@@ -894,12 +898,13 @@ fn rank(name: &str) -> usize {
 }
 
 /// The rows of `Camera`, then of `Exposure`, in the order they are read.
-const ORDER: [&str; 17] = [
+const ORDER: [&str; 18] = [
     CAMERA,
     LENS,
     OWNER,
     CAMERA_SERIAL,
     LENS_SERIAL,
+    SOFTWARE,
     TAKEN,
     MODE,
     SHUTTER,
@@ -922,6 +927,7 @@ pub const LENS: &str = "Lens";
 const OWNER: &str = "Owner";
 const CAMERA_SERIAL: &str = "Camera serial number";
 const LENS_SERIAL: &str = "Lens serial number";
+const SOFTWARE: &str = "Software";
 pub const MODE: &str = "Mode";
 pub const SHUTTER: &str = "Shutter speed";
 pub const APERTURE: &str = "Aperture";
@@ -958,8 +964,8 @@ pub const LONGITUDE: &str = "Longitude";
 /// north the file names — true or magnetic, which can be twenty degrees
 /// apart.
 fn direction(exif: &exif::Exif) -> Option<String> {
-    let degrees = rational(exif, Tag::GPSImgDirection)?;
-    let north = match &primary(exif, Tag::GPSImgDirectionRef).map(|field| &field.value) {
+    let (degrees, reference) = heading(exif)?;
+    let north = match &primary(exif, reference).map(|field| &field.value) {
         Some(Value::Ascii(parts)) => match parts.first().map(Vec::as_slice) {
             Some(b"T") => Some("true"),
             Some(b"M") => Some("magnetic"),
@@ -972,6 +978,29 @@ fn direction(exif: &exif::Exif) -> Option<String> {
         Some(north) => format!("{degrees:.0}\u{00b0} from {north} north"),
         None => format!("{degrees:.0}\u{00b0}"),
     })
+}
+
+/// Which way the camera was pointed, in degrees clockwise from north, and
+/// the tag that says which north.
+///
+/// That is `GPSImgDirection`, but for an iPhone of iOS 8, which wrote it the
+/// opposite way to the lens, in every orientation, and wrote the lens's own
+/// bearing in `GPSDestBearing` beside it. Every other iOS writes the two the
+/// same, so an Apple file with them half a turn apart is one of those, and
+/// the bearing is the one read.
+fn heading(exif: &exif::Exif) -> Option<(f64, Tag)> {
+    let image = rational(exif, Tag::GPSImgDirection)?;
+    let apple = matches!(
+        &primary(exif, Tag::Make).map(|field| &field.value),
+        Some(Value::Ascii(parts)) if parts.first().map(Vec::as_slice) == Some(b"Apple")
+    );
+    if apple
+        && let Some(bearing) = rational(exif, Tag::GPSDestBearing)
+        && ((bearing - image).rem_euclid(360.0) - 180.0).abs() < 0.01
+    {
+        return Some((bearing, Tag::GPSDestBearingRef));
+    }
+    Some((image, Tag::GPSImgDirectionRef))
 }
 
 /// How fast the camera was moving, in the unit the file names — kilometers,
@@ -1525,6 +1554,12 @@ mod tests {
     /// A photograph's own IFD, with a sub-IFD of exposure settings and a GPS
     /// one, laid out as a camera writes them.
     fn photograph() -> Vec<u8> {
+        photograph_by("Apple", None)
+    }
+
+    /// [`photograph`], made by `make`, with a `GPSDestBearing` in true
+    /// degrees beside its direction of 211.8 where there is one.
+    fn photograph_by(make: &str, bearing: Option<(u32, u32)>) -> Vec<u8> {
         let mut exif = Block::new();
         exif.rational(0x829a, &[(1, 50)]); // ExposureTime
         exif.rational(0x829d, &[(89, 50)]); // FNumber
@@ -1562,10 +1597,14 @@ mod tests {
         gps.ascii(0x0010, "T"); // GPSImgDirectionRef, true north
         gps.rational(0x0011, &[(21180, 100)]); // GPSImgDirection
         gps.ascii(0x0012, "WGS-84"); // GPSMapDatum, said nowhere
+        if let Some(bearing) = bearing {
+            gps.ascii(0x0017, "T"); // GPSDestBearingRef, true north
+            gps.rational(0x0018, &[bearing]); // GPSDestBearing
+        }
         gps.rational(0x001f, &[(47, 10)]); // GPSHPositioningError
 
         let mut ifd0 = Block::new();
-        ifd0.ascii(0x010f, "Apple"); // Make
+        ifd0.ascii(0x010f, make); // Make
         ifd0.ascii(0x0110, "Apple iPhone 16 Pro"); // Model
         ifd0.short(0x0112, 6); // Orientation
         ifd0.ascii(0x0131, "26.6"); // Software
@@ -1629,6 +1668,8 @@ mod tests {
                 // The maker is not said twice, though the file says it twice.
                 ("Camera", "Apple iPhone 16 Pro"),
                 ("Lens", "A Lens 6.765mm f/1.78"),
+                // The phone's version of iOS.
+                ("Software", "26.6"),
             ])
         );
         assert_eq!(
@@ -1659,8 +1700,7 @@ mod tests {
         assert!((latitude + 44.68202).abs() < 1e-5, "{latitude}");
         assert!((longitude - 169.16196).abs() < 1e-5, "{longitude}");
         // Nothing is listed field by field: not the rest of the GPS
-        // directory, not the software that wrote the file — the camera's
-        // firmware — and not the orientation, which the `Image` section says.
+        // directory, and not the orientation, which the `Image` section says.
         let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
         assert_eq!(
             names,
@@ -1690,6 +1730,42 @@ mod tests {
             regions_of(&exif, [1500, 2000]),
             ["Subject: 300 \u{00d7} 400 at 600, 800"]
         );
+    }
+
+    /// An iPhone of iOS 8 wrote the direction the wrong way round and the
+    /// bearing beside it the right way: half a turn apart, on an Apple file,
+    /// the bearing is read. Anyone else's bearing, and one that agrees, leave
+    /// the direction as it is.
+    #[test]
+    fn an_ios_8_direction_is_read_from_its_bearing() {
+        let direction = |name: &str, make: &str, bearing| {
+            let path = written(name, &jpeg_with(photograph_by(make, bearing)));
+            let exif = Exif::read(&path);
+            let _ = std::fs::remove_file(&path);
+            let row = section(&exif, Group::Location)
+                .iter()
+                .find(|entry| entry.name == "Direction")
+                .map(|entry| entry.value.clone());
+            (
+                exif.heading.map(|degrees| (degrees * 10.0).round() / 10.0),
+                row,
+            )
+        };
+        assert_eq!(
+            direction("reversed.jpg", "Apple", Some((3180, 100))),
+            (Some(31.8), Some("32\u{00b0} from true north".to_string()))
+        );
+        for (name, make, bearing) in [
+            ("agreeing.jpg", "Apple", Some((21180, 100))),
+            ("elsewhere.jpg", "Canon", Some((3180, 100))),
+            ("alone.jpg", "Apple", None),
+        ] {
+            assert_eq!(
+                direction(name, make, bearing),
+                (Some(211.8), Some("212\u{00b0} from true north".to_string())),
+                "{name}"
+            );
+        }
     }
 
     /// A file with no metadata, and one whose metadata is nonsense, are the
@@ -1759,7 +1835,7 @@ mod tests {
     /// A file saying every field About shows, the four EXIF has a tag for in
     /// both blocks: all six rows, in the table's order, each of the four
     /// read from EXIF and the comment out of UTF-16; and the program that
-    /// wrote the file and when, said nowhere.
+    /// wrote the file said under Camera, and when, said nowhere.
     #[test]
     fn every_field_about_shows_is_read() {
         let exif = Exif::read(&fixture("jpeg-about.jpg"));
@@ -1780,7 +1856,11 @@ mod tests {
         );
         assert_eq!(exif.title(), Some("Four Quadrants"));
         let names: Vec<Group> = exif.sections.iter().map(|section| section.group).collect();
-        assert_eq!(names, [Group::About], "{exif:?}");
+        assert_eq!(names, [Group::About, Group::Camera], "{exif:?}");
+        assert_eq!(
+            section(&exif, Group::Camera),
+            [Entry::new("Software", "generate.sh")]
+        );
     }
 
     /// A file saying none of them has no About section, rather than an
