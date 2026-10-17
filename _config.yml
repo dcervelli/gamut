@@ -1,5 +1,6 @@
 title: Gamut
 baseurl: /gamut  # project site lives at <user>.github.io/gamut/
+repo_url: https://github.com/dcervelli/gamut
 # Images and video live in the gamut-scripting Pages site; serve.sh points this
 # at a local checkout instead (see _config.local.yml).
 media_url: https://dcervelli.github.io/gamut-scripting

@@ -5,12 +5,19 @@
 #   src:   media path under site.media_url (image, video); ignored while
 #          _config.yml has placeholder_media: true
 #   thumb: file in assets/thumbs/ (see make-thumbs.sh); omit for a text tile
-#   text:  paragraph shown beside or below the media (Markdown)
+#   text:  Markdown shown beside or below the media. Write it as a `|` block
+#          so blank lines survive as paragraph breaks (`>` folds them away):
+#            text: |
+#              First paragraph, wrapped
+#              across lines.
+#
+#              Second paragraph.
 # Titles are placeholders taken from the file names; text is lorem ipsum.
-lorem: &lorem >-
+lorem: &lorem |
   Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
   incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis
   nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+
   Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu
   fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in
   culpa qui officia deserunt mollit anim id est laborum.
@@ -18,21 +25,24 @@ lorem: &lorem >-
 groups:
   - group: Gamut
     items:
-      - id: screenshot
-        title: Screenshot
+      - id: about
+        title: About
         kind: image
         src: screenshots/main_screenshot.jpg
         thumb: main_screenshot.jpg.jpg
-        text: *lorem
+        text: |
+            A modern image viewer for understanding and acting on images.
+
+            Image viewers tend toward minimalism or full-fledged editors; gamut stakes a claim in the middle. It's for when you need to *see* the image, *understand* it, and *decide* what you're going to do with it: check for sharpness, assess a render, compare similar images, pull a pixel value or coordinate, extract some metadata, copy a region to chat, delete it outright, or send it to a domain-specific editor.
+
+            Image viewers tend toward minimalism or full-fledged editors; gamut stakes a claim in the middle. It's for when you need to *see* the image, *understand* it, and *decide* what you're going to do with it: check for sharpness, assess a render, compare similar images, pull a pixel value or coordinate, extract some metadata, copy a region to chat, delete it outright, or send it to a domain-specific editor.
+
+            Image viewers tend toward minimalism or full-fledged editors; gamut stakes a claim in the middle. It's for when you need to *see* the image, *understand* it, and *decide* what you're going to do with it: check for sharpness, assess a render, compare similar images, pull a pixel value or coordinate, extract some metadata, copy a region to chat, delete it outright, or send it to a domain-specific editor.
       - id: film
         title: Film
         kind: video
         src: screenshots/gamut.mp4
         thumb: gamut.mp4.jpg
-        text: *lorem
-      - id: about
-        title: About
-        kind: doc
         text: *lorem
       - id: demo
         title: Demo

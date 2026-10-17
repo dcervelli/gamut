@@ -4,7 +4,6 @@
   const body = document.body;
   const panes = document.querySelectorAll(".pane");
   const thumbs = document.querySelectorAll(".thumb");
-  const toggle = document.querySelector(".nav-toggle");
   const filter = document.querySelector(".filter");
   if (!panes.length) return;
 
@@ -17,14 +16,12 @@
   function layout() {
     const W = window.innerWidth, H = window.innerHeight;
     const compact = H < px("--compact-below");
-    const navHidden = body.classList.contains("nav-hidden") && !compact;
     const aspect = px("--media-aspect-w") / px("--media-aspect-h");
     const pad = px("--pad"), gap = px("--gap");
     const header = compact ? 0 : px("--header-h");
 
-    const navs = navHidden ? ["none"] : ["left", "bottom"];
     let best = null;
-    for (const nav of navs) {
+    for (const nav of ["left", "bottom"]) {
       for (const cap of ["right", "below"]) {
         let w = W - 2 * pad, h = H - header - 2 * pad;
         if (nav === "left") w -= px("--sidebar-w");
@@ -63,13 +60,6 @@
       }
     }
   }
-
-  toggle.addEventListener("click", () => {
-    const hidden = body.classList.toggle("nav-hidden");
-    toggle.setAttribute("aria-pressed", String(hidden));
-    toggle.title = hidden ? "Show the list" : "Hide the list";
-    layout();
-  });
 
   // Videos have their own full-screen control; stills and the demo get a click.
   document.querySelectorAll(".media img, .media canvas").forEach((el) => {

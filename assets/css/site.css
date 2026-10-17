@@ -12,7 +12,7 @@
   --sidebar-w: 240px;
   --strip-h: 148px;      /* bottom strip: 160px-wide thumbs plus labels */
   --caption-w: 320px;    /* text column right of the media */
-  --caption-h: 168px;    /* text band below the media */
+  --caption-h: 224px;    /* text band below the media */
   --pad: 24px;           /* around the media and text */
   --gap: 24px;           /* between media and text */
   --compact-below: 520px; /* viewport height at which the header is dropped */
@@ -82,25 +82,26 @@ blockquote {
   text-decoration: none;
 }
 .nav-brand { display: none; }
-.nav-toggle {
-  font: inherit;
-  font-size: 1.1rem;
-  line-height: 1;
-  padding: 5px 9px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: none;
-  color: var(--fg);
-  cursor: pointer;
+.repo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-decoration: none;
 }
-.nav-toggle[aria-pressed="true"] { background: var(--hover); }
+.repo:hover { color: var(--fg); }
 
 .sidebar {
   position: fixed;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   z-index: 1;
 }
+.sidebar-head { flex: none; display: flex; align-items: center; gap: 12px; }
+.sidebar-scroll { flex: 1; min-height: 0; }
 .filter {
   box-sizing: border-box;
   padding: 6px 10px;
@@ -160,28 +161,42 @@ blockquote {
   bottom: 0;
   left: 0;
   width: var(--sidebar-w);
-  overflow-y: auto;
-  padding: 12px;
   border-right: 1px solid var(--rule);
 }
+.nav-left .sidebar-head { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 12px 0; }
+.nav-left .sidebar-scroll { overflow-y: auto; padding: 0 12px 12px; }
 .nav-left .filter { width: 100%; }
 .nav-left .sidebar h2 { margin: 16px 4px 6px; }
 
-/* Bottom strip: one scrolling row, group names written sideways. */
+/* Bottom strip: one scrolling row of thumbnails with group names written
+   sideways, and the filter on a tab rising from its left end. The tab sits in
+   the viewer's padding and only covers the media when the window is tight. */
 .nav-bottom .sidebar {
   left: 0;
   right: 0;
   bottom: 0;
   height: var(--strip-h);
+  border-top: 1px solid var(--rule);
+}
+.nav-bottom .sidebar-head {
+  position: absolute;
+  bottom: 100%; /* over the strip's top border, so the tab joins the strip */
+  left: 0;
+  padding: 6px 8px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-width: 1px 1px 0 0;
+  border-top-right-radius: 8px;
+}
+.nav-bottom .sidebar-scroll {
   display: flex;
   align-items: center;
   gap: 8px;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 12px;
-  border-top: 1px solid var(--rule);
 }
-.nav-bottom .filter { flex: 0 0 120px; }
+.nav-bottom .filter { width: 200px; }
 .nav-bottom .group { display: flex; align-items: center; gap: 4px; }
 .nav-bottom .sidebar h2 {
   writing-mode: vertical-rl;
@@ -192,17 +207,11 @@ blockquote {
 .nav-bottom .sidebar ul { display: flex; gap: 4px; }
 .nav-bottom .thumb { width: 160px; padding: 4px; }
 
-.nav-hidden .sidebar { display: none; }
-
 /* Short screens (a phone on its side): no header; the list carries the title. */
 .compact { --header-h: 0px; }
 .compact .topbar { display: none; }
 .compact .nav-brand { display: block; }
-.compact.nav-left .nav-brand { margin: 0 4px 10px; }
-.compact.nav-bottom .nav-brand { flex: none; writing-mode: vertical-rl; transform: rotate(180deg); }
-/* The hide button lives in the header, so the list can't stay hidden here. */
-.compact.nav-hidden.nav-left .sidebar { display: block; }
-.compact.nav-hidden.nav-bottom .sidebar { display: flex; }
+.compact.nav-left .nav-brand { margin: 0 4px; }
 
 .viewer {
   position: fixed;
@@ -219,17 +228,19 @@ blockquote {
 .nav-left .viewer { left: var(--sidebar-w); }
 .nav-bottom .viewer { bottom: var(--strip-h); }
 
+/* The media sits at the left (or top) and the text takes all the room left
+   over, scrolling on its own when it runs long. */
 .pane { display: none; }
 .pane.active {
   display: flex;
-  align-items: center;
-  justify-content: center;
   gap: var(--gap);
-  min-height: 100%;
+  height: 100%;
   box-sizing: border-box;
   padding: var(--pad);
 }
+.cap-right .pane.active { align-items: center; }
 .cap-below .pane.active { flex-direction: column; }
+.cap-below .media { align-self: center; }
 
 .media { flex: none; width: var(--media-w); height: var(--media-h); }
 .media img, .media video, .media canvas {
@@ -243,18 +254,27 @@ blockquote {
 :fullscreen { cursor: zoom-out; object-fit: contain; background: #000; }
 
 .caption {
-  flex: none;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   box-sizing: border-box;
   overflow-y: auto;
   color: #cfcfd4;
   font-size: 0.95rem;
   line-height: 1.55;
 }
-.cap-right .caption { width: var(--caption-w); max-height: var(--media-h); }
-.cap-below .caption { width: var(--media-w); height: var(--caption-h); }
+.cap-right .caption { align-self: stretch; }
 .caption h1, .doc h1 { margin: 0 0 0.5rem; font-size: 1.3rem; line-height: 1.3; }
 .caption h1 { color: #fff; }
 .caption p { margin: 0 0 0.75rem; }
+.caption > :last-child { margin-bottom: 0; }
 
-.pane-doc.active { align-items: flex-start; background: var(--bg); }
+.pane-doc.active {
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-start;
+  height: auto;
+  min-height: 100%;
+  background: var(--bg);
+}
 .doc { width: 100%; max-width: 760px; }
