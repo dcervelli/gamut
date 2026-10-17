@@ -5,6 +5,7 @@
   const panes = document.querySelectorAll(".pane");
   const thumbs = document.querySelectorAll(".thumb");
   const filter = document.querySelector(".filter");
+  const sections = document.querySelectorAll(".crumb .section");
   if (!panes.length) return;
 
   const css = getComputedStyle(document.documentElement);
@@ -49,6 +50,8 @@
       // A hidden video keeps playing its sound otherwise.
       if (!on) p.querySelectorAll("video").forEach((v) => v.pause());
     }
+    for (const s of sections) s.textContent = target.dataset.title;
+    document.title = document.querySelector(".brand a").textContent + " / " + target.dataset.title;
     for (const t of thumbs) {
       const on = t.dataset.id === target.dataset.id;
       t.classList.toggle("active", on);

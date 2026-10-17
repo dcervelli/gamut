@@ -76,11 +76,16 @@ blockquote {
   z-index: 2;
 }
 .brand, .nav-brand {
-  color: var(--fg);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-weight: 600;
   font-size: 1.15rem;
-  text-decoration: none;
 }
+.brand a, .nav-brand a { color: var(--fg); text-decoration: none; }
+.crumb { color: var(--muted); }
+.crumb .section { color: var(--fg); }
 .nav-brand { display: none; }
 .repo {
   display: flex;
@@ -264,10 +269,10 @@ blockquote {
   line-height: 1.55;
 }
 .cap-right .caption { align-self: stretch; }
-.caption h1, .doc h1 { margin: 0 0 0.5rem; font-size: 1.3rem; line-height: 1.3; }
-.caption h1 { color: #fff; }
+.caption h2 { margin: 1.25rem 0 0.4rem; font-size: 1.05rem; line-height: 1.3; color: #fff; }
 .caption p { margin: 0 0 0.75rem; }
 .caption > :last-child { margin-bottom: 0; }
+.caption img { display: block; margin: 0.25rem 0 0.75rem; border-radius: 4px; }
 
 .pane-doc.active {
   flex-direction: row;

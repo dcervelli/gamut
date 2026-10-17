@@ -1,4 +1,4 @@
-title: Gamut
+title: gamut
 baseurl: /gamut  # project site lives at <user>.github.io/gamut/
 repo_url: https://github.com/dcervelli/gamut
 # Images and video live in the gamut-scripting Pages site; serve.sh points this
