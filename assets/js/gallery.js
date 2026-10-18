@@ -6,6 +6,7 @@
   const thumbs = document.querySelectorAll(".thumb");
   const filter = document.querySelector(".filter");
   const sections = document.querySelectorAll(".crumb .section");
+  const groups = document.querySelectorAll(".crumb-group");
   if (!panes.length) return;
 
   const css = getComputedStyle(document.documentElement);
@@ -47,11 +48,13 @@
     for (const p of panes) {
       const on = p === target;
       p.classList.toggle("active", on);
-      // A hidden video keeps playing its sound otherwise.
-      if (!on) p.querySelectorAll("video").forEach((v) => v.pause());
+      // Play the shown section's video; a hidden one keeps playing otherwise.
+      // play() rejects if the browser blocks autoplay; the controls remain.
+      p.querySelectorAll("video").forEach((v) => (on ? v.play().catch(() => {}) : v.pause()));
     }
+    for (const g of groups) g.textContent = target.dataset.group;
     for (const s of sections) s.textContent = target.dataset.title;
-    document.title = document.querySelector(".brand a").textContent + " / " + target.dataset.title;
+    document.title = [document.querySelector(".brand a").textContent, target.dataset.group, target.dataset.title].join(" / ");
     for (const t of thumbs) {
       const on = t.dataset.id === target.dataset.id;
       t.classList.toggle("active", on);
@@ -64,8 +67,8 @@
     }
   }
 
-  // Videos have their own full-screen control; stills and the demo get a click.
-  document.querySelectorAll(".media img, .media canvas").forEach((el) => {
+  // Videos have their own full-screen control; stills get a click.
+  document.querySelectorAll(".media img").forEach((el) => {
     el.addEventListener("click", () => {
       if (document.fullscreenElement) document.exitFullscreen();
       else el.requestFullscreen?.();

@@ -46,7 +46,7 @@ main {
   margin: 0 auto;
   padding: 1rem 16px 4rem;
 }
-img, canvas, video { max-width: 100%; }
+img, video { max-width: 100%; }
 a { color: var(--accent); }
 blockquote {
   margin: 1rem 0;
@@ -127,8 +127,9 @@ blockquote {
 }
 .sidebar ul { list-style: none; margin: 0; padding: 0; }
 .thumb {
+  --thumb-pad: 6px;
   display: block;
-  padding: 6px;
+  padding: var(--thumb-pad);
   border-radius: 8px;
   color: var(--fg);
   text-decoration: none;
@@ -154,10 +155,20 @@ blockquote {
 .thumb .label {
   display: block;
   margin-top: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
   font-size: 0.85rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.thumb.active .label {
+  /* A band across the bottom of the thumb, out to its edges. */
+  margin: 0 calc(-1 * var(--thumb-pad)) calc(-1 * var(--thumb-pad));
+  padding: 4px calc(var(--thumb-pad) + 4px) var(--thumb-pad);
+  border-radius: 0 0 8px 8px;
+  background: var(--accent);
+  color: var(--bg);
 }
 
 /* Left column. */
@@ -210,7 +221,7 @@ blockquote {
   border-left: 1px solid var(--rule);
 }
 .nav-bottom .sidebar ul { display: flex; gap: 4px; }
-.nav-bottom .thumb { width: 160px; padding: 4px; }
+.nav-bottom .thumb { --thumb-pad: 4px; width: 160px; }
 
 /* Short screens (a phone on its side): no header; the list carries the title. */
 .compact { --header-h: 0px; }
@@ -248,14 +259,14 @@ blockquote {
 .cap-below .media { align-self: center; }
 
 .media { flex: none; width: var(--media-w); height: var(--media-h); }
-.media img, .media video, .media canvas {
+.media img, .media video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #000;
 }
-.media img, .media canvas { cursor: zoom-in; }
+.media img { cursor: zoom-in; }
 :fullscreen { cursor: zoom-out; object-fit: contain; background: #000; }
 
 .caption {

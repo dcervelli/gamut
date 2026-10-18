@@ -1,0 +1,9 @@
+{%- comment -%}
+Sets thumb_src for include.thumb: a path under site.media_url, like src, or a
+bare file name in assets/thumbs/ for items without a thumb there yet.
+{%- endcomment -%}
+{%- if include.thumb contains '/' %}
+  {%- assign thumb_src = site.media_url | append: '/' | append: include.thumb %}
+{%- else %}
+  {%- assign thumb_src = '/assets/thumbs/' | append: include.thumb | relative_url %}
+{%- endif %}

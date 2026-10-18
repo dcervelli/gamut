@@ -1,10 +1,14 @@
 # Sidebar entries for the index page, in display order. The first item is shown
 # when the URL has no #id.
 #   id:    URL fragment (#id) that selects the item
-#   kind:  image | video | demo | doc
+#   kind:  image | video | doc
 #   src:   media path under site.media_url (image, video); ignored while
-#          _config.yml has placeholder_media: true
-#   thumb: file in assets/thumbs/ (see make-thumbs.sh); omit for a text tile
+#          _config.yml has placeholder_media: true, unless placeholder: false
+#   placeholder: false once src is re-recorded at 16:9 (1920x1080), to show
+#          it in place of the placeholder
+#   thumb: media path under site.media_url, like src (screenshots/x_thumb.jpg);
+#          a bare file name is taken from assets/thumbs/ (see make-thumbs.sh)
+#          instead. Omit for a text tile
 #   text:  Markdown shown beside or below the media. Write it as a `|` block
 #          so blank lines survive as paragraph breaks (`>` folds them away):
 #            text: |
@@ -25,12 +29,13 @@ lorem: &lorem |
   culpa qui officia deserunt mollit anim id est laborum.
 
 groups:
-  - group: Gamut
+  - group: General
     items:
       - id: about
         title: About
         kind: image
         src: screenshots/main_screenshot.jpg
+        placeholder: false
         thumb: main_screenshot.jpg.jpg
         file: about.md
       - id: tenets
@@ -44,117 +49,12 @@ groups:
         src: screenshots/gamut.mp4
         thumb: gamut.mp4.jpg
         text: *lorem
-      - id: demo
-        title: Demo
-        kind: demo
-        text: *lorem
   - group: Features
     items:
       - id: animated
-        title: Animated
-        kind: image
-        src: screenshots/animated.gif
-        thumb: animated.gif.jpg
-        text: *lorem
-      - id: compare
-        title: Compare
-        kind: image
-        src: screenshots/compare.gif
-        thumb: compare.gif.jpg
-        text: *lorem
-      - id: depth-maps
-        title: Depth maps
-        kind: image
-        src: screenshots/depth_maps.gif
-        thumb: depth_maps.gif.jpg
-        text: *lorem
-      - id: export
-        title: Export
-        kind: image
-        src: screenshots/export.gif
-        thumb: export.gif.jpg
-        text: *lorem
-      - id: false-color
-        title: False color
-        kind: image
-        src: screenshots/false_color.gif
-        thumb: false_color.gif.jpg
-        text: *lorem
-      - id: file-list
-        title: File list
-        kind: image
-        src: screenshots/file_list.gif
-        thumb: file_list.gif.jpg
-        text: *lorem
-      - id: fuzzy-finder
-        title: Fuzzy finder
-        kind: image
-        src: screenshots/fuzzy_finder.gif
-        thumb: fuzzy_finder.gif.jpg
-        text: *lorem
-      - id: histogram
-        title: Histogram
-        kind: image
-        src: screenshots/histogram.gif
-        thumb: histogram.gif.jpg
-        text: *lorem
-      - id: info
-        title: Info
-        kind: image
-        src: screenshots/info.gif
-        thumb: info.gif.jpg
-        text: *lorem
-      - id: loupe
-        title: Loupe
-        kind: image
-        src: screenshots/loupe.gif
-        thumb: loupe.gif.jpg
-        text: *lorem
-      - id: mandelbrot
-        title: Mandelbrot
-        kind: image
-        src: screenshots/mandelbrot.gif
-        thumb: mandelbrot.gif.jpg
-        text: *lorem
-      - id: open-in
-        title: Open in
-        kind: image
-        src: screenshots/open_in.jpg
-        thumb: open_in.jpg.jpg
-        text: *lorem
-      - id: performance
-        title: Performance
-        kind: image
-        src: screenshots/performance.gif
-        thumb: performance.gif.jpg
-        text: *lorem
-      - id: pixel-copy
-        title: Pixel copy
-        kind: image
-        src: screenshots/pixel_copy.gif
-        thumb: pixel_copy.gif.jpg
-        text: *lorem
-      - id: pixel-grid
-        title: Pixel grid
-        kind: image
-        src: screenshots/pixel_grid.gif
-        thumb: pixel_grid.gif.jpg
-        text: *lorem
-      - id: region
-        title: Region
-        kind: image
-        src: screenshots/region.gif
-        thumb: region.gif.jpg
-        text: *lorem
-      - id: themes
-        title: Themes
-        kind: image
-        src: screenshots/themes.gif
-        thumb: themes.gif.jpg
-        text: *lorem
-      - id: ui
-        title: UI
-        kind: image
-        src: screenshots/ui.gif
-        thumb: ui.gif.jpg
-        text: *lorem
+        title: Animated Formats
+        kind: video
+        src: screenshots/animated.mp4
+        thumb: screenshots/animated_thumb.jpg
+        placeholder: false
+        text: Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame. Tools and controls, like the histogram shown here, work on the current frame.
