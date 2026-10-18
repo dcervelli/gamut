@@ -2,10 +2,7 @@
 # when the URL has no #id.
 #   id:    URL fragment (#id) that selects the item
 #   kind:  image | video | doc
-#   src:   media path under site.media_url (image, video); ignored while
-#          _config.yml has placeholder_media: true, unless placeholder: false
-#   placeholder: false once src is re-recorded at 16:9 (1920x1080), to show
-#          it in place of the placeholder
+#   src:   media path under site.media_url (image, video)
 #   thumb: media path under site.media_url, like src (screenshots/x_thumb.jpg);
 #          a bare file name is taken from assets/thumbs/ (see make-thumbs.sh)
 #          instead. Omit for a text tile
@@ -20,8 +17,6 @@
 #              Second paragraph.
 #   file:  Markdown file in _includes/gallery/ used in place of text, for long
 #          entries. Liquid runs first, so images can use {{ site.media_url }}.
-# Titles are placeholders taken from the file names; text is lorem ipsum.
-#
 
 groups:
   - group: General
@@ -30,7 +25,6 @@ groups:
         title: About
         kind: image
         src: screenshots/main_screenshot.jpg
-        placeholder: false
         thumb: main_screenshot.jpg.jpg
         file: about.md
       - id: tenets
@@ -38,6 +32,15 @@ groups:
         kind: doc
         icon: doc
         file: tenets.md
+      - id: ui
+        title: Mouse & Keyboard UI
+        kind: video
+        src: screenshots/ui.mp4
+        thumb: screenshots/ui_thumb.jpg
+        text: |
+          All features can be keyboard driven, but the hideable UI also has controls with tooltips to learn keyboard shortcuts. Most controls can also be set via CLI flags.
+
+          Open the keyboard shortcut display with `?`. All keyboard shortcuts and mouse gestures can be customized in the [config files](#config-files).
   - group: Features
     items:
       - id: animated
@@ -45,8 +48,98 @@ groups:
         kind: video
         src: screenshots/animated.mp4
         thumb: screenshots/animated_thumb.jpg
-        placeholder: false
         text: Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame. Tools and controls, like the histogram shown here, work on the current frame.
+      - id: pixel-grid
+        title: Pixel Grid
+        kind: video
+        src: screenshots/pixel_grid.mp4
+        thumb: screenshots/pixel_grid_thumb.jpg
+        text: "A dynamically scaled pixel grid atop the image. `g` to toggle."
+      - id: pixel-copy
+        title: Pixel Copy
+        kind: video
+        src: screenshots/pixel_copy.mp4
+        thumb: screenshots/pixel_copy_thumb.jpg
+        text: "Get coordinate or pixel information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats)."
+      - id: loupe
+        title: Loupe
+        kind: video
+        src: screenshots/loupe.mp4
+        thumb: screenshots/loupe_thumb.jpg
+        text: An easily triggerable loupe for quickly examining details. `l` to toggle or `right-mouse` for a quick peek.
+      - id: depth-maps
+        title: Depth Maps
+        kind: video
+        src: screenshots/depth_maps.mp4
+        thumb: screenshots/depth_maps_thumb.jpg
+        text: Some modern phones in some modes capture depth information. gamut supports displaying and querying the depth map. `shift+D` to toggle.
+      - id: export
+        title: Export & Resize
+        kind: video
+        src: screenshots/export.mp4
+        thumb: screenshots/export_thumb.jpg
+        text: A basic file export to lossless PNG or JPG with an option to resize.
+      - id: fuzzy-finder
+        title: Fuzzy Finder
+        kind: video
+        src: screenshots/fuzzy_finder.mp4
+        thumb: screenshots/fuzzy_finder_thumb.jpg
+        file: fuzzy_finder.md
+      - id: file-comparison
+        title: File Comparison
+        kind: video
+        src: screenshots/compare.mp4
+        thumb: screenshots/compare_thumb.jpg
+        text: Files with the same dimensions maintain pan and zoom for easy file comparison.
+      - id: false-color
+        title: False Color
+        kind: video
+        src: screenshots/false_color.mp4
+        thumb: screenshots/false_color_thumb.jpg
+        text: Single channel files in [data mode](#data-mode) can be colored using a false color ramp. Set the ramp in the histogram section or cycle through them with the `r` key.
+      - id: file-list
+        title: File List (Filmstrip)
+        kind: video
+        src: screenshots/file_list.mp4
+        thumb: screenshots/file_list_thumb.jpg
+        text: File list
+      - id: region-selection
+        title: Region Selection
+        kind: video
+        src: screenshots/region.mp4
+        thumb: screenshots/region_thumb.jpg
+        text: Region selection.
+
+  - group: Histogram
+    items:
+      - id: basic-histogram
+        title: Basic Histogram
+        kind: video
+        src: screenshots/histogram.mp4
+        thumb: screenshots/histogram_thumb.jpg
+        file: histogram.md
+      - id: raw-histogram
+        title: RAW Histogram
+        kind: video
+        src: screenshots/histogram_raw.mp4
+        thumb: screenshots/histogram_raw_thumb.jpg
+        file: raw_histogram.md
+
+  - group: Integration
+    items:
+      - id: open-in
+        title: Open in…
+        kind: image
+        src: screenshots/open_in.jpg
+        thumb: screenshots/open_in_thumb.jpg
+        text: Open in
+      - id: themes
+        title: OS Themes
+        kind: video
+        src: screenshots/themes.mp4
+        thumb: screenshots/themes_thumb.jpg
+        text: OS themes
+
   - group: Metadata
     items:
       - id: curated
@@ -54,5 +147,4 @@ groups:
         kind: video
         src: screenshots/curated_info.mp4
         thumb: screenshots/curated_info_thumb.jpg
-        placeholder: false
         file: curated_info.md

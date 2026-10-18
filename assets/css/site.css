@@ -54,6 +54,15 @@ blockquote {
   border-left: 4px solid var(--rule);
   color: var(--muted);
 }
+/* Backtick segments, mostly hotkeys: the body font on a light chip. */
+code {
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+  background: var(--hover);
+  font: inherit;
+  font-size: 0.9em;
+  white-space: nowrap;
+}
 
 /* ---- Gallery layout: header across the top, thumbnails in a left column or
    a bottom strip, media with its text beside or below it. gallery.js sets the

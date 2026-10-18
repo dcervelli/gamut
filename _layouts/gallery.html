@@ -51,16 +51,9 @@
 
   <main class="viewer">
     {%- for group in site.data.gallery.groups %}{% for item in group.items %}
-    {%- if site.placeholder_media and item.placeholder != false %}
-      {%- assign image_src = '/assets/placeholder/16x9.jpg' | relative_url %}
-      {%- assign video_src = '/assets/placeholder/16x9.mp4' | relative_url %}
-      {%- assign poster = '/assets/placeholder/16x9.mp4.jpg' | relative_url %}
-    {%- else %}
-      {%- assign image_src = site.media_url | append: '/' | append: item.src %}
-      {%- assign video_src = image_src %}
-      {%- include gallery-thumb.html thumb=item.thumb %}
-      {%- assign poster = thumb_src %}
-    {%- endif %}
+    {%- assign media_src = site.media_url | append: '/' | append: item.src %}
+    {%- include gallery-thumb.html thumb=item.thumb %}
+    {%- assign poster = thumb_src %}
     {%- if item.file %}
       {%- capture text %}{% include gallery/{{ item.file }} %}{% endcapture %}
     {%- else %}
@@ -76,9 +69,9 @@
       <div class="media">
         {%- case item.kind %}
         {%- when "image" %}
-        <img src="{{ image_src }}" alt="{{ item.title }}" loading="lazy" title="Full screen">
+        <img src="{{ media_src }}" alt="{{ item.title }}" loading="lazy" title="Full screen">
         {%- when "video" %}
-        <video src="{{ video_src }}" poster="{{ poster }}" controls muted loop playsinline preload="none"></video>
+        <video src="{{ media_src }}" poster="{{ poster }}" controls muted loop playsinline preload="none"></video>
         {%- endcase %}
       </div>
       <div class="caption">

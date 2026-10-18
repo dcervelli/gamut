@@ -17,7 +17,3 @@ exclude:
   - .bundle
   - serve.sh
   - _config.local.yml
-# Show assets/placeholder/ (16:9, 1920×1080) in place of every image and video
-# until the media is re-recorded at that size. An item with placeholder: false
-# in _data/gallery.yml shows its own media.
-placeholder_media: true
