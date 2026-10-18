@@ -9,6 +9,8 @@
 #   thumb: media path under site.media_url, like src (screenshots/x_thumb.jpg);
 #          a bare file name is taken from assets/thumbs/ (see make-thumbs.sh)
 #          instead. Omit for a text tile
+#   icon:  name of an SVG in assets/icons/ (doc for doc.svg) drawn on the tile
+#          when there is no thumb
 #   text:  Markdown shown beside or below the media. Write it as a `|` block
 #          so blank lines survive as paragraph breaks (`>` folds them away):
 #            text: |
@@ -19,14 +21,7 @@
 #   file:  Markdown file in _includes/gallery/ used in place of text, for long
 #          entries. Liquid runs first, so images can use {{ site.media_url }}.
 # Titles are placeholders taken from the file names; text is lorem ipsum.
-lorem: &lorem |
-  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-  incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis
-  nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
-
-  Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu
-  fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in
-  culpa qui officia deserunt mollit anim id est laborum.
+#
 
 groups:
   - group: General
@@ -41,14 +36,8 @@ groups:
       - id: tenets
         title: Tenets
         kind: doc
-        thumb: main_screenshot.jpg.jpg
+        icon: doc
         file: tenets.md
-      - id: film
-        title: Film
-        kind: video
-        src: screenshots/gamut.mp4
-        thumb: gamut.mp4.jpg
-        text: *lorem
   - group: Features
     items:
       - id: animated

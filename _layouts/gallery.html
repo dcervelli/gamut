@@ -34,6 +34,9 @@
         <li><a class="thumb" href="#{{ item.id }}" data-id="{{ item.id }}">
           {%- if item.thumb %}
           <img src="{{ thumb_src }}" alt="" loading="lazy">
+          {%- elsif item.icon %}
+          {%- assign icon_src = '/assets/icons/' | append: item.icon | append: '.svg' | relative_url %}
+          <span class="tile icon" style="--icon: url('{{ icon_src }}')"></span>
           {%- else %}
           <span class="tile">{{ item.kind }}</span>
           {%- endif %}

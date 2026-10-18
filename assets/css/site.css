@@ -152,6 +152,14 @@ blockquote {
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
+/* The icon is a mask, so it takes the tile's text color in either theme. */
+.thumb .tile.icon::before {
+  content: "";
+  width: 40%;
+  height: 40%;
+  background: currentColor;
+  mask: var(--icon) center / contain no-repeat;
+}
 .thumb .label {
   display: block;
   margin-top: 4px;
