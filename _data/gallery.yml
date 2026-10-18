@@ -58,3 +58,12 @@ groups:
         thumb: screenshots/animated_thumb.jpg
         placeholder: false
         text: Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame. Tools and controls, like the histogram shown here, work on the current frame.
+  - group: Metadata
+    items:
+      - id: curated
+        title: Curated Metadata
+        kind: video
+        src: screenshots/curated_info.mp4
+        thumb: screenshots/curated_info_thumb.jpg
+        placeholder: false
+        file: curated_info.md
