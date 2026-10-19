@@ -109,6 +109,18 @@ groups:
         src: screenshots/region.mp4
         thumb: screenshots/region_thumb.jpg
         text: Region selection.
+      - id: live-reload
+        title: Live Reload
+        kind: video
+        src: screenshots/live_reload.mp4
+        thumb: screenshots/live_reload_thumb.jpg
+        text: Live reload.
+      - id: horizon-grid
+        title: Horizon Grid
+        kind: video
+        src: screenshots/horizon_grid.mp4
+        thumb: screenshots/horizon_grid_thumb.jpg
+        text: Horizon grid.
 
   - group: Histogram
     items:
