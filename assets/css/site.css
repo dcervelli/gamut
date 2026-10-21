@@ -6,7 +6,9 @@
   --panel: #f6f6f6;
   --hover: #e8e8e8;
   --accent: #2a6fdb;
-  --viewer: #1b1b1f;
+  --viewer: #e9e9ec;     /* behind the media and its text */
+  --viewer-fg: #333;
+  --viewer-head: #111;
   /* Gallery geometry. gallery.js reads these to choose the layout. */
   --header-h: 48px;
   --sidebar-w: 240px;
@@ -31,6 +33,8 @@
     --hover: #24242a;
     --accent: #6ea2ff;
     --viewer: #0b0b0d;
+    --viewer-fg: #cfcfd4;
+    --viewer-head: #fff;
     color-scheme: dark;
   }
 }
@@ -54,6 +58,11 @@ blockquote {
   border-left: 4px solid var(--rule);
   color: var(--muted);
 }
+table { border-collapse: collapse; margin-bottom: 1.5rem; }
+th, td { padding: 4px 16px 4px 0; text-align: left; vertical-align: top; }
+th:last-child, td:last-child { padding-right: 0; }
+/* --rule nearly vanishes on the light --viewer grey, so tint from the text. */
+thead th { border-bottom: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
 /* Backtick segments, mostly hotkeys: the body font on a light chip. */
 code {
   padding: 0.1em 0.4em;
@@ -62,6 +71,19 @@ code {
   font: inherit;
   font-size: 0.9em;
   white-space: nowrap;
+}
+/* Fenced blocks: monospace, line breaks kept, long lines scroll. */
+pre {
+  padding: 0.6em 0.8em;
+  border-radius: 4px;
+  background: var(--hover);
+  overflow-x: auto;
+}
+pre code {
+  padding: 0;
+  background: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
 }
 
 /* ---- Gallery layout: header across the top, thumbnails in a left column or
@@ -156,7 +178,7 @@ code {
 .thumb .tile {
   display: grid;
   place-items: center;
-  color: #888;
+  color: var(--muted);
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -188,38 +210,61 @@ code {
   color: var(--bg);
 }
 
-/* Left column. */
+/* The filter takes the header's left end, as wide as the left column, in
+   either layout; the header runs on to its right. */
+.nav-left .topbar, .nav-bottom .topbar { left: var(--sidebar-w); }
+
+/* Left column, full height. */
 .nav-left .sidebar {
-  top: var(--header-h);
+  top: 0;
   bottom: 0;
   left: 0;
   width: var(--sidebar-w);
   border-right: 1px solid var(--rule);
 }
 .nav-left .sidebar-head { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 12px 0; }
+.nav-left:not(.compact) .sidebar-head {
+  height: var(--header-h);
+  box-sizing: border-box;
+  justify-content: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--rule);
+}
 .nav-left .sidebar-scroll { overflow-y: auto; padding: 0 12px 12px; }
 .nav-left .filter { width: 100%; }
 .nav-left .sidebar h2 { margin: 16px 4px 6px; }
 
-/* Bottom strip: one scrolling row of thumbnails with group names written
-   sideways, and the filter on a tab rising from its left end. The tab sits in
-   the viewer's padding and only covers the media when the window is tight. */
+/* Top strip: one scrolling row of thumbnails under the header with group
+   names written sideways. The filter sits above the strip's left end. */
 .nav-bottom .sidebar {
+  top: var(--header-h);
   left: 0;
   right: 0;
-  bottom: 0;
   height: var(--strip-h);
-  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .nav-bottom .sidebar-head {
   position: absolute;
-  bottom: 100%; /* over the strip's top border, so the tab joins the strip */
+  bottom: 100%;
   left: 0;
-  padding: 6px 8px;
+  width: var(--sidebar-w);
+  height: var(--header-h);
+  box-sizing: border-box;
+  padding: 0 12px;
   background: var(--panel);
   border: 1px solid var(--rule);
-  border-width: 1px 1px 0 0;
-  border-top-right-radius: 8px;
+  border-width: 0 1px 1px 0;
+}
+/* With no header, the filter goes on a tab hanging from the strip's left end.
+   The tab sits in the viewer's padding and only covers the media when the
+   window is tight. */
+.compact.nav-bottom .sidebar-head {
+  top: 100%; /* over the strip's bottom border, so the tab joins the strip */
+  bottom: auto;
+  width: auto;
+  height: auto;
+  padding: 6px 8px;
+  border-bottom-right-radius: 8px;
 }
 .nav-bottom .sidebar-scroll {
   display: flex;
@@ -228,9 +273,16 @@ code {
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent;
 }
-.nav-bottom .filter { width: 200px; }
+/* Safari; Chrome skips these because the standard properties are set. */
+.nav-bottom .sidebar-scroll::-webkit-scrollbar { height: 8px; }
+.nav-bottom .sidebar-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 50%, transparent); border-radius: 4px; }
+.nav-bottom .filter { width: 100%; }
+.compact.nav-bottom .filter { width: 200px; }
 .nav-bottom .group { display: flex; align-items: center; gap: 4px; }
+.nav-bottom .group[hidden] { display: none; }
 .nav-bottom .sidebar h2 {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
@@ -259,7 +311,7 @@ code {
   background: var(--viewer);
 }
 .nav-left .viewer { left: var(--sidebar-w); }
-.nav-bottom .viewer { bottom: var(--strip-h); }
+.nav-bottom .viewer { top: calc(var(--header-h) + var(--strip-h)); }
 
 /* The media sits at the left (or top) and the text takes all the room left
    over, scrolling on its own when it runs long. */
@@ -281,9 +333,70 @@ code {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  background: #000;
+  background: var(--viewer);
 }
 .media img { cursor: zoom-in; }
+
+/* ---- A cycling pane (data-cycle): another section's poster laid over the
+   media, with a call to action through to that section. The incoming frame
+   fades in on top; the outgoing one waits until it is covered, unless the
+   pane's own media is coming back. */
+.media { position: relative; }
+.frame {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.6s 0.6s, visibility 0s 1.2s;
+}
+.media.on-base .frame { transition-delay: 0s, 0.6s; }
+.frame.shown {
+  z-index: 1;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.6s, visibility 0s;
+}
+.media .frame img { cursor: pointer; }
+.cta {
+  position: absolute;
+  left: 50%;
+  bottom: 80px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 0.95rem;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.35);
+  white-space: nowrap;
+}
+.cta .go { font-weight: 400; opacity: 0.75; }
+.cta::after { content: "→"; display: inline-block; margin-left: 0.5em; transition: transform 0.2s; }
+.frame:hover .cta { filter: brightness(1.1); }
+.frame:hover .cta::after { transform: translateX(4px); }
+
+/* The step's link: a tint while it's current, and a bar along its bottom
+   that fills over the step's time. */
+.cycle-link {
+  border-radius: 4px;
+  padding: 0 0.15em;
+  margin: 0 -0.15em;
+  background: linear-gradient(var(--accent), var(--accent)) left bottom / 0% 2px no-repeat;
+  transition: background-color 0.3s;
+}
+/* The bar stands in for the underline, which would run alongside it. */
+.cycle-link.lit {
+  border-radius: 4px 4px 0 0;
+  background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  text-decoration: none;
+}
+.cycle-link.timing { animation: cycle-fill var(--cycle, 5s) linear forwards; }
+@keyframes cycle-fill { to { background-size: 100% 2px; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .frame, .frame.shown, .cycle-link { transition: none; }
+}
 :fullscreen { cursor: zoom-out; object-fit: contain; background: #000; }
 
 .caption {
@@ -292,15 +405,17 @@ code {
   min-height: 0;
   box-sizing: border-box;
   overflow-y: auto;
-  color: #cfcfd4;
+  color: var(--viewer-fg);
   font-size: 0.95rem;
   line-height: 1.55;
 }
 .cap-right .caption { align-self: stretch; }
-.caption h2 { margin: 1.25rem 0 0.4rem; font-size: 1.05rem; line-height: 1.3; color: #fff; }
+.caption h2 { margin: 1.25rem 0 0.4rem; font-size: 1.05rem; line-height: 1.3; color: var(--viewer-head); }
 .caption p { margin: 0 0 0.75rem; }
 .caption > :last-child { margin-bottom: 0; }
 .caption img { display: block; margin: 0.25rem 0 0.75rem; border-radius: 4px; }
+.caption th, .caption td,
+.doc th, .doc td { vertical-align: top; }
 
 .pane-doc.active {
   flex-direction: row;
@@ -311,3 +426,36 @@ code {
   background: var(--bg);
 }
 .doc { width: 100%; max-width: 760px; }
+
+/* Previous/next links under a section's text. Colors come from the text
+   around them, so they suit the dark caption and the light or dark doc. */
+.pager {
+  display: flex;
+  gap: 12px;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+}
+.pager a {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: calc(50% - 6px);
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+  line-height: 1.3;
+}
+.pager a:hover { border-color: var(--accent); }
+.pager .next { margin-left: auto; text-align: right; }
+.pager .dir { font-size: 0.75rem; opacity: 0.7; }
+.pager .prev .dir::before { content: "← "; }
+.pager .next .dir::after { content: " →"; }
+.pager .name {
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

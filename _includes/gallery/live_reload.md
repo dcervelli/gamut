@@ -1,0 +1,1 @@
+All files and directories that are opened are watched for changes and update immediately. This can be helpful in situations like the one in the example. Folders will update (and re-sort with current settings) when files are added, deleted, or changed.

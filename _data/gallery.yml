@@ -17,6 +17,11 @@
 #              Second paragraph.
 #   file:  Markdown file in _includes/gallery/ used in place of text, for long
 #          entries. Liquid runs first, so images can use {{ site.media_url }}.
+#   cycle: seconds per step of a slideshow driven by the text's #id links. The
+#          first link's step shows this item's own src; each later one
+#          highlights its link and shows the linked item's poster (its thumb)
+#          with a link through to it. Hovering a link takes over from the timer
+#          until the links have been left alone for 15 seconds.
 
 groups:
   - group: General
@@ -27,100 +32,109 @@ groups:
         src: screenshots/main_screenshot.jpg
         thumb: main_screenshot.jpg.jpg
         file: about.md
+        cycle: 5
+      - id: install
+        title: Install
+        kind: doc
+        icon: install
+        file: install.md
       - id: tenets
         title: Tenets
         kind: doc
         icon: doc
         file: tenets.md
+      - id: formats
+        title: Formats
+        kind: doc
+        icon: formats
+        file: formats.md
       - id: ui
-        title: Mouse & Keyboard UI
+        title: Getting Started / UI
         kind: video
         src: screenshots/ui.mp4
         thumb: screenshots/ui_thumb.jpg
-        text: |
-          All features can be keyboard driven, but the hideable UI also has controls with tooltips to learn keyboard shortcuts. Most controls can also be set via CLI flags.
+        file: ui.md
 
-          Open the keyboard shortcut display with `?`. All keyboard shortcuts and mouse gestures can be customized in the [config files](#config-files).
   - group: Features
     items:
-      - id: animated
-        title: Animated Formats
+      - id: file-list
+        title: File List (Filmstrip)
         kind: video
-        src: screenshots/animated.mp4
-        thumb: screenshots/animated_thumb.jpg
-        text: Play animated GIF, PNG, WebP and JPEG XL files at normal speed or frame-by-frame. Tools and controls, like the histogram shown here, work on the current frame.
-      - id: pixel-grid
-        title: Pixel Grid
-        kind: video
-        src: screenshots/pixel_grid.mp4
-        thumb: screenshots/pixel_grid_thumb.jpg
-        text: "A dynamically scaled pixel grid atop the image. `g` to toggle."
-      - id: pixel-copy
-        title: Pixel Copy
-        kind: video
-        src: screenshots/pixel_copy.mp4
-        thumb: screenshots/pixel_copy_thumb.jpg
-        text: "Get coordinate or pixel information for the moused-over pixel. Easily copy either the coordinate or color (in a variety of formats)."
-      - id: loupe
-        title: Loupe
-        kind: video
-        src: screenshots/loupe.mp4
-        thumb: screenshots/loupe_thumb.jpg
-        text: An easily triggerable loupe for quickly examining details. `l` to toggle or `right-mouse` for a quick peek.
-      - id: depth-maps
-        title: Depth Maps
-        kind: video
-        src: screenshots/depth_maps.mp4
-        thumb: screenshots/depth_maps_thumb.jpg
-        text: Some modern phones in some modes capture depth information. gamut supports displaying and querying the depth map. `shift+D` to toggle.
-      - id: export
-        title: Export & Resize
-        kind: video
-        src: screenshots/export.mp4
-        thumb: screenshots/export_thumb.jpg
-        text: A basic file export to lossless PNG or JPG with an option to resize.
+        src: screenshots/file_list.mp4
+        thumb: screenshots/file_list_thumb.jpg
+        file: file_list.md
       - id: fuzzy-finder
         title: Fuzzy Finder
         kind: video
         src: screenshots/fuzzy_finder.mp4
         thumb: screenshots/fuzzy_finder_thumb.jpg
         file: fuzzy_finder.md
-      - id: file-comparison
-        title: File Comparison
-        kind: video
-        src: screenshots/compare.mp4
-        thumb: screenshots/compare_thumb.jpg
-        text: Files with the same dimensions maintain pan and zoom for easy file comparison.
-      - id: false-color
-        title: False Color
-        kind: video
-        src: screenshots/false_color.mp4
-        thumb: screenshots/false_color_thumb.jpg
-        text: Single channel files in [data mode](#data-mode) can be colored using a false color ramp. Set the ramp in the histogram section or cycle through them with the `r` key.
-      - id: file-list
-        title: File List (Filmstrip)
-        kind: video
-        src: screenshots/file_list.mp4
-        thumb: screenshots/file_list_thumb.jpg
-        text: File list
-      - id: region-selection
-        title: Region Selection
-        kind: video
-        src: screenshots/region.mp4
-        thumb: screenshots/region_thumb.jpg
-        text: Region selection.
       - id: live-reload
         title: Live Reload
         kind: video
         src: screenshots/live_reload.mp4
         thumb: screenshots/live_reload_thumb.jpg
-        text: Live reload.
+        file: live_reload.md
+      - id: file-comparison
+        title: File Comparison
+        kind: video
+        src: screenshots/compare.mp4
+        thumb: screenshots/compare_thumb.jpg
+        file: file_comparison.md
+      - id: loupe
+        title: Loupe
+        kind: video
+        src: screenshots/loupe.mp4
+        thumb: screenshots/loupe_thumb.jpg
+        file: loupe.md
+      - id: pixel-grid
+        title: Pixel Grid
+        kind: video
+        src: screenshots/pixel_grid.mp4
+        thumb: screenshots/pixel_grid_thumb.jpg
+        file: pixel_grid.md
+      - id: pixel-copy
+        title: Pixel Copy
+        kind: video
+        src: screenshots/pixel_copy.mp4
+        thumb: screenshots/pixel_copy_thumb.jpg
+        file: pixel_copy.md
+      - id: region-selection
+        title: Region Selection
+        kind: video
+        src: screenshots/region.mp4
+        thumb: screenshots/region_thumb.jpg
+        file: region_selection.md
+      - id: export
+        title: Export & Resize
+        kind: video
+        src: screenshots/export.mp4
+        thumb: screenshots/export_thumb.jpg
+        file: export.md
+      - id: animated
+        title: Animated Formats
+        kind: video
+        src: screenshots/animated.mp4
+        thumb: screenshots/animated_thumb.jpg
+        file: animated.md
+      - id: gain-maps
+        title: Gain Maps
+        kind: video
+        src: screenshots/gain_maps.mp4
+        thumb: screenshots/gain_maps_thumb.jpg
+        file: gain_maps.md
+      - id: depth-maps
+        title: Depth Maps
+        kind: video
+        src: screenshots/depth_maps.mp4
+        thumb: screenshots/depth_maps_thumb.jpg
+        file: depth_maps.md
       - id: horizon-grid
         title: Horizon Grid
         kind: video
         src: screenshots/horizon_grid.mp4
         thumb: screenshots/horizon_grid_thumb.jpg
-        text: Horizon grid.
+        file: horizon_grid.md
 
   - group: Histogram
     items:
@@ -136,21 +150,35 @@ groups:
         src: screenshots/histogram_raw.mp4
         thumb: screenshots/histogram_raw_thumb.jpg
         file: raw_histogram.md
-
-  - group: Integration
-    items:
-      - id: open-in
-        title: Open in…
-        kind: image
-        src: screenshots/open_in.jpg
-        thumb: screenshots/open_in_thumb.jpg
-        text: Open in
-      - id: themes
-        title: OS Themes
+      - id: hdr-histogram
+        title: HDR Histogram
         kind: video
-        src: screenshots/themes.mp4
-        thumb: screenshots/themes_thumb.jpg
-        text: OS themes
+        src: screenshots/histogram_hdr.mp4
+        thumb: screenshots/histogram_hdr_thumb.jpg
+        file: hdr_histogram.md
+      - id: proraw-histogram
+        title: ProRAW Histogram
+        kind: video
+        src: screenshots/proraw_histogram.mp4
+        thumb: screenshots/proraw_histogram_thumb.jpg
+        file: proraw_histogram.md
+      - id: data-mode
+        title: Data & Photo Mode
+        kind: doc
+        icon: doc
+        file: modes.md
+      - id: data-histogram
+        title: Data Histogram
+        kind: video
+        src: screenshots/data_histogram.mp4
+        thumb: screenshots/data_histogram_thumb.jpg
+        file: data_histogram.md
+      - id: false-color
+        title: False Color
+        kind: video
+        src: screenshots/false_color.mp4
+        thumb: screenshots/false_color_thumb.jpg
+        file: false_color.md
 
   - group: Metadata
     items:
@@ -160,3 +188,35 @@ groups:
         src: screenshots/curated_info.mp4
         thumb: screenshots/curated_info_thumb.jpg
         file: curated_info.md
+      - id: raw-metadata
+        title: Raw Metadata
+        kind: video
+        src: screenshots/raw_metadata.mp4
+        thumb: screenshots/raw_metadata_thumb.jpg
+        file: raw_metadata.md
+
+  - group: Integration
+    items:
+      - id: open-in
+        title: Open in…
+        kind: image
+        src: screenshots/open_in.jpg
+        thumb: screenshots/open_in_thumb.jpg
+        file: open_in.md
+      - id: open-in-map
+        title: Open in Map
+        kind: video
+        src: screenshots/open_in_map.mp4
+        thumb: screenshots/open_in_map_thumb.jpg
+        file: open_in_map.md
+      - id: themes
+        title: OS Themes
+        kind: video
+        src: screenshots/themes.mp4
+        thumb: screenshots/themes_thumb.jpg
+        file: themes.md
+      - id: config-file
+        title: Config File
+        kind: doc
+        icon: settings
+        file: config_file.md

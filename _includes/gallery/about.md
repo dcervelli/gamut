@@ -1,7 +1,7 @@
-## A modern image viewer for understanding and acting on images.
+## A [modern image viewer](#about) for understanding and acting on images.
 
-Image viewers tend toward minimalism or full-fledged editors; gamut stakes a claim in the middle. It's for when you need to *see* the image, *understand* it, and *decide* what you're going to do with it: check for sharpness, assess a render, compare similar images, pull a pixel value or coordinate, extract some metadata, copy a region to chat, delete it outright, or send it to a domain-specific editor.
+What does **modern** mean? Today's devices take photographs with embedded [GPS position and orientation](#horizon-grid), [HDR gain maps](#gain-maps), [depth information](#depth-maps), [raw development profiles](#proraw-histogram), and more. A modern image viewer is one that uses, visualizes, and makes available this [information](#curated). Beyond photos, it needs features for [data rasters](#data-histogram), animations, UI mockups and other uses.
 
-What does **modern** mean? Today's devices create sophisticated images with color management, high dynamic range (HDR) capture, depth information, raw development profiles, GPS position, orientation, and more. A modern image viewer, therefore, is one that uses, visualizes, and makes availabe this information. Modern also means an approachable UI and blazing fast, GPU-driven performance.
+Modern also means UI conveniences like a [fuzzy file chooser](#fuzzy-finder), remappable keyboard and gesture actions, and GPU-driven performance.
 
-An image viewer serves many audiences: photographer, data scientist, programmer, designer, game developer, GIS analyst, and, of course, the casual user. We carefully consider [our tenets](#tenets) in deciding if a feature clears the bar for inclusion.
+Image viewers tend toward minimalism or full-fledged editors; gamut stakes a claim in the middle. It's for when you need to *see* the image, *understand* it, and *decide* what you're going to do with it: [check for sharpness](#loupe), assess a render, compare similar images, pull a pixel value or coordinate, [extract some metadata](#raw-metadata), copy a region to chat, delete the image outright, or send it to a domain-specific editor.

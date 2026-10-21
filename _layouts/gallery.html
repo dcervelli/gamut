@@ -22,7 +22,7 @@
     <div class="sidebar-head">
       <!-- Stands in for the header, which is dropped on short screens. -->
       <div class="nav-brand"><a href="{{ '/' | relative_url }}">{{ site.title }}</a><span class="crumb"> / <span class="crumb-group"></span> / <span class="section"></span></span></div>
-      <input class="filter" type="search" placeholder="Filter" aria-label="Filter">
+      <input class="filter" type="search" placeholder="Search" aria-label="Search">
     </div>
     <div class="sidebar-scroll">
     {%- for group in site.data.gallery.groups %}
@@ -50,7 +50,28 @@
   </nav>
 
   <main class="viewer">
+    {%- comment %} All items in one list, for each pane's previous/next links. {% endcomment %}
+    {%- assign all_items = "" | split: "" %}
+    {%- for group in site.data.gallery.groups %}
+      {%- assign all_items = all_items | concat: group.items %}
+    {%- endfor %}
+    {%- assign item_index = 0 %}
     {%- for group in site.data.gallery.groups %}{% for item in group.items %}
+    {%- assign prev_index = item_index | minus: 1 %}
+    {%- assign item_index = item_index | plus: 1 %}
+    {%- assign prev_item = nil %}
+    {%- if prev_index >= 0 %}{% assign prev_item = all_items[prev_index] %}{% endif %}
+    {%- assign next_item = all_items[item_index] %}
+    {%- capture pager %}
+        <nav class="pager" aria-label="Sections">
+          {%- if prev_item %}
+          <a class="prev" href="#{{ prev_item.id }}" rel="prev"><span class="dir">Previous</span><span class="name">{{ prev_item.title }}</span></a>
+          {%- endif %}
+          {%- if next_item %}
+          <a class="next" href="#{{ next_item.id }}" rel="next"><span class="dir">Next</span><span class="name">{{ next_item.title }}</span></a>
+          {%- endif %}
+        </nav>
+    {%- endcapture %}
     {%- assign media_src = site.media_url | append: '/' | append: item.src %}
     {%- include gallery-thumb.html thumb=item.thumb %}
     {%- assign poster = thumb_src %}
@@ -59,11 +80,12 @@
     {%- else %}
       {%- assign text = item.text %}
     {%- endif %}
-    <section class="pane pane-{{ item.kind }}" data-id="{{ item.id }}" data-group="{{ group.group | escape }}" data-title="{{ item.title | escape }}">
+    <section class="pane pane-{{ item.kind }}" data-id="{{ item.id }}" data-group="{{ group.group | escape }}" data-title="{{ item.title | escape }}"{% if item.cycle %} data-cycle="{{ item.cycle }}"{% endif %}>
       {%- if item.kind == "doc" %}
       <article class="doc">
 {{ content }}
         {{ text | markdownify }}
+        {{- pager }}
       </article>
       {%- else %}
       <div class="media">
@@ -76,6 +98,7 @@
       </div>
       <div class="caption">
         {{ text | markdownify }}
+        {{- pager }}
       </div>
       {%- endif %}
     </section>

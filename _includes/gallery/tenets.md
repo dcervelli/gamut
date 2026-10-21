@@ -1,3 +1,4 @@
+An image viewer serves many audiences: photographer, data scientist, programmer, designer, game developer, GIS analyst, and, of course, the casual user. We carefully consider these tenets in deciding if a feature clears the bar for inclusion.
 
 ### Fast, always 
 Every pan and zoom runs at full frame rate; decoding and analysis never block the interface. Speed is never traded for a feature.
