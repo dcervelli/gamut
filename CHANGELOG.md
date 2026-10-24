@@ -22,6 +22,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   region to, either Free, the image's Original shape, a preset or a typed
   ratio, with a button that swaps width and height; and boxes for its
   position and size in the image's pixels.
+- WebP-compressed TIFFs open, as GDAL writes an orthophoto with
+  `COMPRESS=WEBP`, an alpha band included.
 
 ### Changed
 

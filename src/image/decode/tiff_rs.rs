@@ -33,9 +33,16 @@
 //! chroma but not to convert, since the conversion is the container's to
 //! define. [`YCbCr`] does it here, from the file's own coefficients and
 //! coding range, chunk by chunk as they are read.
+//!
+//! A WebP-compressed TIFF — what GDAL writes for an orthophoto with
+//! `COMPRESS=WEBP` — holds each chunk as a WebP image of its own, and
+//! [`WebP`] reads them here rather than through the crate. The crate's
+//! reader refuses a four-sample file whose chunk was encoded without alpha,
+//! which is what libtiff does with a chunk whose alpha is opaque throughout,
+//! and so nearly every chunk of an orthophoto with an alpha band.
 
 use std::fs::File;
-use std::io::{self, BufReader, Seek};
+use std::io::{self, BufReader, Read as _, Seek};
 use std::ops::Range;
 
 use ::image::metadata::Orientation;
@@ -63,6 +70,9 @@ const YCBCR_COEFFICIENTS: u16 = 529;
 /// `ReferenceBlackWhite`: the code values of black and white in each
 /// channel, as six rationals.
 const REFERENCE_BLACK_WHITE: u16 = 532;
+
+/// `Compression`'s code for WebP, as libtiff assigns it.
+const COMPRESSION_WEBP: u16 = 50001;
 
 const MAX_IFD_VALUE_BYTES: usize = 16 * 1024 * 1024;
 
@@ -164,6 +174,10 @@ impl super::Decoder for TiffRs {
             tiff::ColorType::YCbCr(_) => Some(YCbCr::read(&mut decoder)?),
             _ => None,
         };
+        let webp = match decoder.find_tag_unsigned::<u16>(Tag::Compression)? {
+            Some(COMPRESSION_WEBP) => Some(WebP::read(&mut decoder, color)?),
+            _ => None,
+        };
 
         // Checked against what will be held rather than the stored depth:
         // every signed or wide type is widened to `f32` on the way in, up to
@@ -199,6 +213,7 @@ impl super::Decoder for TiffRs {
                 directory,
                 geometry: &geometry,
                 ycbcr: ycbcr.as_ref(),
+                webp: webp.as_ref(),
             };
             match held {
                 Width::U8 => Samples::U8 {
@@ -421,6 +436,8 @@ struct Read<'a> {
     /// The conversion each chunk gets on the way in, for a file that holds
     /// its pixels as YCbCr.
     ycbcr: Option<&'a YCbCr>,
+    /// Where each chunk's WebP image is, for a file compressed that way.
+    webp: Option<&'a WebP>,
 }
 
 /// The directory's samples, read a chunk at a time and each put where it
@@ -495,7 +512,15 @@ fn read_rows<R: io::Read + Seek, T: Resident>(
             let index = u32::try_from(index).context("too many TIFF chunks")?;
             let (chunk_width, chunk_height) = decoder.chunk_data_dimensions(index);
             let (chunk_width, chunk_height) = (chunk_width as usize, chunk_height as usize);
-            let mut chunk = T::take(decoder.read_chunk(index)?)?;
+            let mut chunk = T::take(match read.webp {
+                Some(webp) => DecodingResult::U8(webp.chunk(
+                    decoder.inner(),
+                    index,
+                    geometry,
+                    (chunk_width, chunk_height),
+                )?),
+                None => decoder.read_chunk(index)?,
+            })?;
             if let Some(ycbcr) = read.ycbcr {
                 T::to_rgb(&mut chunk, ycbcr);
             }
@@ -516,6 +541,98 @@ fn read_rows<R: io::Read + Seek, T: Resident>(
         }
     }
     Ok(())
+}
+
+/// Where each chunk of a WebP-compressed directory is in the file, read
+/// off its offsets and byte counts. Each chunk is a WebP image the size of
+/// a whole chunk, as libtiff encodes a tile, or of the rows it has, as it
+/// encodes the last strip; either way the image is clipped to the chunk's
+/// data. libtiff writes three samples a pixel as WebP without alpha, and
+/// four as WebP with it unless the chunk's alpha is opaque throughout, when
+/// it leaves it out and the alpha is put back here.
+struct WebP {
+    /// Each chunk's offset and length, in chunk order.
+    chunks: Vec<(u64, u64)>,
+}
+
+impl WebP {
+    fn read<R: io::Read + Seek>(decoder: &mut Decoder<R>, color: tiff::ColorType) -> Result<Self> {
+        if !matches!(color, tiff::ColorType::RGB(8) | tiff::ColorType::RGBA(8)) {
+            bail!("a WebP-compressed TIFF of {color:?}, where WebP holds only 8-bit RGB or RGBA");
+        }
+        let (offsets, lengths) = match decoder.get_chunk_type() {
+            tiff::decoder::ChunkType::Tile => (Tag::TileOffsets, Tag::TileByteCounts),
+            tiff::decoder::ChunkType::Strip => (Tag::StripOffsets, Tag::StripByteCounts),
+        };
+        let offsets = decoder.get_tag_u64_vec(offsets)?;
+        let lengths = decoder.get_tag_u64_vec(lengths)?;
+        if offsets.len() != lengths.len() {
+            bail!(
+                "a TIFF with {} chunk offsets and {} lengths",
+                offsets.len(),
+                lengths.len()
+            );
+        }
+        Ok(Self {
+            chunks: offsets.into_iter().zip(lengths).collect(),
+        })
+    }
+
+    /// The chunk `index`, `data` pixels of it, at the samples a pixel
+    /// `geometry` says. The WebP image's own size is checked against the
+    /// chunk's before anything is decoded.
+    fn chunk<R: io::Read + Seek>(
+        &self,
+        reader: &mut R,
+        index: u32,
+        geometry: &Geometry,
+        data: (usize, usize),
+    ) -> Result<Vec<u8>> {
+        let &(offset, length) = self
+            .chunks
+            .get(index as usize)
+            .ok_or_else(|| anyhow!("TIFF chunk {index} has no offset"))?;
+        // Read through `take`, which grows the buffer only as bytes arrive,
+        // so a length past the end of the file allocates nothing for it.
+        reader.seek(io::SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        reader.take(length).read_to_end(&mut bytes)?;
+        let mut webp = image_webp::WebPDecoder::new(io::Cursor::new(bytes))
+            .with_context(|| format!("TIFF chunk {index}'s WebP"))?;
+        let (width, height) = webp.dimensions();
+        let (width, height) = (width as usize, height as usize);
+        if width < data.0
+            || height < data.1
+            || width > geometry.chunk.0
+            || height > geometry.chunk.1
+        {
+            bail!(
+                "TIFF chunk {index} holds a {width}x{height} WebP, for {}x{} of a {}x{} chunk",
+                data.0,
+                data.1,
+                geometry.chunk.0,
+                geometry.chunk.1
+            );
+        }
+        let stored = if webp.has_alpha() { 4 } else { 3 };
+        let mut decoded = vec![0; width * height * stored];
+        webp.read_image(&mut decoded)
+            .with_context(|| format!("TIFF chunk {index}'s WebP"))?;
+
+        let samples = geometry.samples;
+        let mut chunk = vec![u8::MAX; data.0 * data.1 * samples];
+        for (row, target) in chunk.chunks_exact_mut(data.0 * samples).enumerate() {
+            let source = &decoded[row * width * stored..][..data.0 * stored];
+            for (to, from) in target
+                .chunks_exact_mut(samples)
+                .zip(source.chunks_exact(stored))
+            {
+                let shared = samples.min(stored);
+                to[..shared].copy_from_slice(&from[..shared]);
+            }
+        }
+        Ok(chunk)
+    }
 }
 
 /// How a file's YCbCr samples are turned back into RGB: the luma weights

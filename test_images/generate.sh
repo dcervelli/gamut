@@ -758,6 +758,17 @@ gdal_translate -q -ot Int16 -scale 0 3.984375 -1000 3000 \
 # is clipped.
 gdal_translate -q -of GTiff -co COMPRESS=JPEG -co JPEG_QUALITY=100 -co PHOTOMETRIC=YCBCR \
   -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 tiff-rgb8.tif tiff-jpeg.tif
+# An orthophoto as GDAL writes one now: WebP, lossless, every tile a WebP
+# image of its own, with the alpha band beside the color. Tiled, so that the
+# bottom row of tiles is clipped.
+gdal_translate -q -of GTiff -co COMPRESS=WEBP -co WEBP_LOSSLESS=YES \
+  -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 tiff-rgba8.tif tiff-webp.tif
+# The same with the alpha opaque throughout, as an orthophoto's is: libtiff
+# leaves the alpha out of a tile's WebP wherever every pixel of it is opaque,
+# so the full tiles come without it and the clipped ones, padded, with it.
+magick tiff-rgb8.tif -alpha opaque -depth 8 -type TrueColorAlpha "$work/opaque.tif"
+gdal_translate -q -of GTiff -co COMPRESS=WEBP -co WEBP_LOSSLESS=YES \
+  -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 "$work/opaque.tif" tiff-webp-opaque.tif
 # A picture with an internal mask, as GDAL writes one from an alpha band: a
 # one-bit transparency-mask directory after the picture, which is not a page.
 # The upside-down page is appended after it, so that reaching the second page
