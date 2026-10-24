@@ -222,6 +222,7 @@ fn the_rows_fill_in_as_facts_arrive() {
             sequence: Sequence::Pages {
                 count: 1,
                 default: 0,
+                bands: false,
             },
             title: None,
 

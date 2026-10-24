@@ -279,6 +279,12 @@ fn answer(app: &mut App, mode: Reload) {
     let overrides = app.overrides_for(&path);
     let decoded = crate::loader::decode_rendering(&path, overrides, asked, asked_rendering);
     let format = decode::reader(&path).unwrap_or_default();
+    let page_name = match sequence {
+        Sequence::Pages { .. } => decode::Opened::new(&path)
+            .and_then(|mut opened| opened.page_name(page))
+            .unwrap(),
+        _ => None,
+    };
     let outcome = decoded.map(|(image, _, rendering, camera_jpeg)| Ready {
         stats: Stats::scan(&image),
         stored: crate::image::stats::Stored::scan(&image),
@@ -287,6 +293,7 @@ fn answer(app: &mut App, mode: Reload) {
         gpu: None,
         sequence,
         page,
+        page_name,
         rendering,
         camera_jpeg,
         format,
@@ -2284,6 +2291,7 @@ fn a_reply_the_user_has_stepped_past_is_dropped() {
             gpu: None,
             sequence: Sequence::Still,
             page: 0,
+            page_name: None,
             rendering: Rendering::Developed,
             camera_jpeg: CameraJpeg::Unavailable,
             format: "png",
@@ -2541,6 +2549,7 @@ fn the_transport_bar_is_the_arriving_files_from_the_key() {
             sequence: Sequence::Pages {
                 count: 3,
                 default: 1,
+                bands: false,
             },
             title: None,
             format: None,
@@ -2554,7 +2563,7 @@ fn the_transport_bar_is_the_arriving_files_from_the_key() {
         Some(ui::Transport {
             index: 1,
             count: 3,
-            kind: ui::transport::Kind::Pages,
+            kind: ui::transport::Kind::Pages { name: None },
         })
     );
     assert!(app.parts().transport, "the bar takes its room at the key");
@@ -3480,6 +3489,7 @@ fn a_removed_file_leaves_the_list_and_stays_off_it_until_undo() {
             .input(
                 &app.thumbs,
                 |path| App::key_of(chooser, &HashMap::new(), path),
+                |path| chooser.missing(path),
                 None,
                 false,
                 false,

@@ -562,7 +562,7 @@ fn pages_get_the_steps_alone_and_a_still_gets_no_bar() {
     harness.state_mut().input.transport = Some(Transport {
         index: 1,
         count: 3,
-        kind: Kind::Pages,
+        kind: Kind::Pages { name: None },
     });
     harness.run();
     assert!(harness.query_by_label("Play").is_none());
@@ -575,6 +575,25 @@ fn pages_get_the_steps_alone_and_a_still_gets_no_bar() {
     let harness = open(WINDOW, 1, panels());
     assert!(harness.query_by_label("Play").is_none());
     assert!(harness.query_by_label("Next frame").is_none());
+}
+
+/// A page the file names is counted and then named, in the one readout.
+#[test]
+fn a_named_page_says_its_name_after_the_count() {
+    let mut harness = build(WINDOW, 1, panels());
+    harness.state_mut().input.transport = Some(Transport {
+        index: 5,
+        count: 9,
+        kind: Kind::Pages {
+            name: Some("native forest".to_string()),
+        },
+    });
+    harness.run();
+    assert!(
+        harness
+            .query_by_label("6 / 9 \u{b7} native forest")
+            .is_some()
+    );
 }
 
 /// A toggle whose panel the window cannot take is drawn dead and refuses
@@ -1257,6 +1276,7 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
             modified: None,
             taken: None,
             thumb: None,
+            missing: None,
         })
         .collect();
     let height = filmstrip::row_height(filmstrip::SLOT_MIN, None, 1.0);
@@ -2276,6 +2296,7 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
             index: index + 1,
             dimensions: None,
             thumb: None,
+            missing: None,
             positions: Vec::new(),
             title: (index == 1).then(|| "Common Buzzard".to_string()),
             title_positions: Vec::new(),
@@ -2673,6 +2694,7 @@ fn the_chooser_scrolls_a_moved_cursor_into_view() {
             index: index + 1,
             dimensions: None,
             thumb: None,
+            missing: None,
             positions: Vec::new(),
             title: None,
             title_positions: Vec::new(),

@@ -758,6 +758,17 @@ gdal_translate -q -ot Int16 -scale 0 3.984375 -1000 3000 \
 # is clipped.
 gdal_translate -q -of GTiff -co COMPRESS=JPEG -co JPEG_QUALITY=100 -co PHOTOMETRIC=YCBCR \
   -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 tiff-rgb8.tif tiff-jpeg.tif
+# An orthophoto as GDAL writes one now: WebP, lossless, every tile a WebP
+# image of its own, with the alpha band beside the color. Tiled, so that the
+# bottom row of tiles is clipped.
+gdal_translate -q -of GTiff -co COMPRESS=WEBP -co WEBP_LOSSLESS=YES \
+  -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 tiff-rgba8.tif tiff-webp.tif
+# The same with the alpha opaque throughout, as an orthophoto's is: libtiff
+# leaves the alpha out of a tile's WebP wherever every pixel of it is opaque,
+# so the full tiles come without it and the clipped ones, padded, with it.
+magick tiff-rgb8.tif -alpha opaque -depth 8 -type TrueColorAlpha "$work/opaque.tif"
+gdal_translate -q -of GTiff -co COMPRESS=WEBP -co WEBP_LOSSLESS=YES \
+  -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 "$work/opaque.tif" tiff-webp-opaque.tif
 # A picture with an internal mask, as GDAL writes one from an alpha band: a
 # one-bit transparency-mask directory after the picture, which is not a page.
 # The upside-down page is appended after it, so that reaching the second page
@@ -765,6 +776,47 @@ gdal_translate -q -of GTiff -co COMPRESS=JPEG -co JPEG_QUALITY=100 -co PHOTOMETR
 gdal_translate -q -b 1 -b 2 -b 3 -mask 4 --config GDAL_TIFF_INTERNAL_MASK YES \
   -co COMPRESS=NONE tiff-rgba8.tif "$work/masked.tif"
 tiffcp "$work/masked.tif" tiff-pages.tif,1 tiff-mask.tif
+
+# Several bands of gray in one directory, as GDAL writes a raster of them:
+# the pattern, the pattern upside down and the alpha ramp, each described.
+# Gray is asked for outright, since GDAL would call three 8-bit bands RGB.
+# Tiled interleaved, and tiled a plane to a band, so that the planes past
+# the first have short tiles at the bottom too.
+band() {  # number, source, description -> a VRT band of the source's first
+  echo "  <VRTRasterBand dataType=\"Byte\" band=\"$1\"><Description>$3</Description>"
+  echo "    <SimpleSource><SourceFilename>$2</SourceFilename><SourceBand>${4:-1}</SourceBand></SimpleSource>"
+  echo "  </VRTRasterBand>"
+}
+magick "$work/gray.png" -rotate 180 "$work/gray-upside-down.png"
+for layer in gray gray-upside-down alpha; do
+  magick "$work/$layer.png" -set colorspace sRGB -channel R -separate -depth 8 \
+    -type Grayscale -compress None "$work/$layer.tif"
+done
+{
+  echo '<VRTDataset rasterXSize="32" rasterYSize="24">'
+  band 1 "$work/gray.tif" gray
+  band 2 "$work/gray-upside-down.tif" "upside down"
+  band 3 "$work/alpha.tif" alpha
+  echo '</VRTDataset>'
+} > "$work/bands.vrt"
+gdal_translate -q -co PHOTOMETRIC=MINISBLACK -co TILED=YES -co BLOCKXSIZE=16 \
+  -co BLOCKYSIZE=16 -co COMPRESS=DEFLATE "$work/bands.vrt" tiff-bands.tif
+gdal_translate -q -co PHOTOMETRIC=MINISBLACK -co INTERLEAVE=BAND -co TILED=YES \
+  -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 -co COMPRESS=DEFLATE "$work/bands.vrt" tiff-bands-planar.tif
+# RGB with a fourth band that is not alpha, as a satellite's near infrared.
+{
+  echo '<VRTDataset rasterXSize="32" rasterYSize="24">'
+  band 1 "$PWD/tiff-rgb8.tif" "" 1
+  band 2 "$PWD/tiff-rgb8.tif" "" 2
+  band 3 "$PWD/tiff-rgb8.tif" "" 3
+  band 4 "$work/gray.tif" "near infrared"
+  echo '</VRTDataset>'
+} > "$work/rgbn.vrt"
+gdal_translate -q -co PHOTOMETRIC=RGB -co ALPHA=NO -co COMPRESS=NONE "$work/rgbn.vrt" tiff-rgbn.tif
+# RGB a plane to a channel.
+gdal_translate -q -co INTERLEAVE=BAND -co COMPRESS=NONE tiff-rgb8.tif tiff-rgb-planar.tif
+# Gray and its alpha, which the crate names as two bands.
+magick "$work/gray-alpha.png" -depth 8 -type GrayscaleAlpha -compress None tiff-gray-alpha8.tif
 
 # A no-data sentinel with pixels actually set to it, built from raw floats so
 # the quadrant values are exact.
@@ -1087,6 +1139,8 @@ for i in 0 1 2 3; do
   head -c 40 "$work/dng-tile-$i.jxl" > "$work/dng-tile-cut-$i.jxl"
 done
 dng_tiled bad-dng-jxl.dng none 52546 "$work"/dng-tile-cut-{0,1,2,3}.jxl
+# The bands cut off inside their tiles: the directory reads, the pixels do not.
+head -c 400 tiff-bands.tif > bad-truncated-bands.tif
 # A PNG header followed by rubbish: the decoder is chosen, then fails.
 { printf '\211PNG\r\n\032\n'; head -c 64 /dev/zero | tr '\0' 'X'; } > bad-truncated.png
 # A real image in a format this build does not include. Targa has no decoder

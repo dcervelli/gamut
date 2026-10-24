@@ -14,7 +14,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use super::{
-    CameraJpeg, Overrides, delays, frames, load, load_page, probe, sequence, supported_extensions,
+    CameraJpeg, Overrides, delays, frames, load, load_page, pixel_bytes, probe, sequence,
+    supported_extensions,
 };
 use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
@@ -132,6 +133,13 @@ const TWO_FRAMES: Sequence = Sequence::Animation {
 const TWO_PAGES: Sequence = Sequence::Pages {
     count: 2,
     default: 0,
+    bands: false,
+};
+
+const THREE_BANDS: Sequence = Sequence::Pages {
+    count: 3,
+    default: 0,
+    bands: true,
 };
 
 /// Exact for lossless integer formats: 85/255 and 21845/65535 are both a
@@ -935,6 +943,79 @@ const FIXTURES: &[Fixture] = &[
         tolerance: EXACT,
         ..PLAIN
     },
+    // Three bands of gray in one directory — the pattern, the pattern upside
+    // down, and the alpha ramp — each a page, and the first what `load`
+    // shows. One band of several is read as a measurement, with nothing
+    // placing it on the ground. Interleaved, and stored a plane to a band.
+    Fixture {
+        file: "tiff-bands.tif",
+        covers: "a directory of three bands of gray, interleaved: a page each",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+        sequence: Some(THREE_BANDS),
+        ..PLAIN
+    },
+    Fixture {
+        file: "tiff-bands-planar.tif",
+        covers: "a directory of three bands of gray, a plane to a band, in tiles the last row of which is short",
+        channels: Channels::Gray,
+        kind: Kind::U8,
+        color: LINEAR,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Gray,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+        sequence: Some(THREE_BANDS),
+        ..PLAIN
+    },
+    // Red, green and blue with a fourth band that is not alpha, as a
+    // satellite's near infrared is: the picture, read without the band.
+    Fixture {
+        file: "tiff-rgbn.tif",
+        covers: "RGB with a band beside it that is not alpha: the picture, read without it",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+        ..PLAIN
+    },
+    Fixture {
+        file: "tiff-rgb-planar.tif",
+        covers: "TIFF RGB stored a plane to a channel",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+        ..PLAIN
+    },
+    Fixture {
+        file: "tiff-gray-alpha8.tif",
+        covers: "TIFF gray plus alpha, which the crate names as bands rather than as gray and alpha",
+        channels: Channels::GrayAlpha,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Gray,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+        ..PLAIN
+    },
     // Three directories, of which the middle one is the first's mask.
     Fixture {
         file: "tiff-mask.tif",
@@ -961,6 +1042,32 @@ const FIXTURES: &[Fixture] = &[
         coverage: Coverage::Opaque,
         nodata: None,
         tolerance: LOSSY,
+        ..PLAIN
+    },
+    Fixture {
+        file: "tiff-webp.tif",
+        covers: "WebP compression, lossless, with alpha, in tiles the last row of which is short",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+        ..PLAIN
+    },
+    Fixture {
+        file: "tiff-webp-opaque.tif",
+        covers: "WebP compression of four samples whose alpha is opaque, which libtiff leaves out of every full tile's WebP and keeps in the padded ones",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
         ..PLAIN
     },
     // -------------------------------------------------------- Radiance
@@ -1852,6 +1959,7 @@ const REJECTED: &[(&str, &str)] = &[
     ("unsupported.tga", "unsupported image format"),
     ("bad-truncated.png", "decoding"),
     ("bad-truncated.dng", "decoding"),
+    ("bad-truncated-bands.tif", "decoding"),
     ("bad-dng-jxl.dng", "decoding"),
 ];
 
@@ -1979,6 +2087,29 @@ fn every_fixture_probes_to_the_size_it_decodes_to() {
                 size,
                 (image.width, image.height),
                 "{} ({}) probes to a different size than it decodes to",
+                fixture.file,
+                fixture.covers
+            );
+        }
+    }
+}
+
+#[test]
+/// The thumbnail thread weighs a large file by what the header says one
+/// pixel comes to, so a header that says less than the decoder holds lets
+/// through a file the thread cannot afford. Saying nothing is fine; the
+/// thread then assumes the worst.
+fn every_fixture_weighs_what_it_decodes_to() {
+    for (fixture, image) in fixtures() {
+        let path = directory().join(fixture.file);
+        let weighed =
+            pixel_bytes(&path).unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        if let Some(bytes) = weighed {
+            let pixels = u64::from(image.width) * u64::from(image.height);
+            assert_eq!(
+                bytes * pixels,
+                image.samples.byte_len() as u64,
+                "{} ({}) weighs a pixel differently than it decodes one",
                 fixture.file,
                 fixture.covers
             );
@@ -2429,7 +2560,7 @@ fn every_fixture_says_what_else_it_holds() {
             .iter()
             .filter(|fixture| fixture.sequence.is_some())
             .count(),
-        7,
+        9,
         "the animations and the paged files"
     );
 }
@@ -2577,6 +2708,62 @@ fn a_paged_file_exposes_its_pages() {
             );
         }
     }
+}
+
+/// A band past the first of a directory of gray is a page of its own, read
+/// out of the same chunks — interleaved or a plane to
+/// a band — and named by GDAL's description of it where there is one.
+#[test]
+fn bands_are_pages_named_by_their_descriptions() {
+    let gray = load(&directory().join("tiff-gray8.tif"), Overrides::default()).unwrap();
+    let alpha = load(
+        &directory().join("tiff-gray-alpha8.tif"),
+        Overrides::default(),
+    )
+    .unwrap();
+    for file in ["tiff-bands.tif", "tiff-bands-planar.tif"] {
+        let path = directory().join(file);
+        let pages: Vec<_> = (0..3)
+            .map(|page| load_page(&path, Overrides::default(), page).unwrap())
+            .collect();
+        for (x, y) in PROBES {
+            assert_eq!(
+                pixel(&pages[0], x, y),
+                pixel(&gray, x, y),
+                "{file} at {x},{y}"
+            );
+            assert_eq!(
+                pixel(&pages[1], x, y),
+                pixel(&gray, 31 - x, 23 - y),
+                "{file} at {x},{y}"
+            );
+            assert_eq!(
+                pixel(&pages[2], x, y),
+                pixel(&alpha, x, y)[1..],
+                "{file} at {x},{y}"
+            );
+        }
+        assert!(pages.iter().all(|page| page.color == LINEAR), "{file}");
+        assert!(load_page(&path, Overrides::default(), 3).is_err(), "{file}");
+        assert_eq!(
+            names(&path, 3),
+            [Some("gray"), Some("upside down"), Some("alpha")],
+            "{file}"
+        );
+    }
+}
+
+/// What the file at `path` calls each of its first `count` pages.
+fn names(path: &std::path::Path, count: usize) -> Vec<Option<&'static str>> {
+    (0..count)
+        .map(|page| {
+            super::Opened::new(path)
+                .unwrap()
+                .page_name(page)
+                .unwrap()
+                .map(|name| &*name.leak())
+        })
+        .collect()
 }
 
 /// An ICO is a folder of the same picture at several sizes, and a viewer has

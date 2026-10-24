@@ -1265,11 +1265,16 @@ impl App {
     /// Takes in what the thumbnail thread had to say.
     fn take_thumbnail(&mut self, delivered: Delivered) {
         let facts = matches!(delivered.news, News::Facts(_));
+        let missing = matches!(delivered.news, News::Failed | News::TooLarge);
         if let Some((path, thumb)) = self.chooser.take(delivered) {
             self.hold_thumb(path, thumb);
         }
         if facts {
             self.facts_learned();
+        }
+        // The row shows in the thumbnail's place that none is coming.
+        if missing {
+            self.filmstrip.facts_changed();
         }
     }
 
@@ -1837,7 +1842,9 @@ impl App {
             (Sequence::Pages { count, .. }, _) => Some(ui::Transport {
                 index: current.page,
                 count,
-                kind: ui::transport::Kind::Pages,
+                kind: ui::transport::Kind::Pages {
+                    name: current.page_name.clone(),
+                },
             }),
             _ => None,
         }
@@ -1868,7 +1875,7 @@ impl App {
                     },
                 })
             }
-            Sequence::Pages { count, default } => {
+            Sequence::Pages { count, default, .. } => {
                 let index = match left {
                     Some(Left::Page(page)) => page,
                     _ => default,
@@ -1876,7 +1883,7 @@ impl App {
                 Some(ui::Transport {
                     index: index.min(count.saturating_sub(1)),
                     count,
-                    kind: ui::transport::Kind::Pages,
+                    kind: ui::transport::Kind::Pages { name: None },
                 })
             }
         }
@@ -2166,6 +2173,7 @@ impl App {
             Some(self.filmstrip.input(
                 &self.thumbs,
                 |path| Self::key_of(chooser, glimpsed, path),
+                |path| chooser.missing(path),
                 files.target_path(),
                 conditions.visited_before,
                 conditions.visited_after,
@@ -2833,6 +2841,7 @@ impl App {
             gpu,
             sequence,
             page,
+            page_name,
             rendering,
             camera_jpeg,
             format,
@@ -3021,6 +3030,7 @@ impl App {
             exif,
             sequence,
             page,
+            page_name,
             turn,
             rendering,
             camera_jpeg,

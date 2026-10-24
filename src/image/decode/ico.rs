@@ -111,6 +111,7 @@ impl super::Decoder for Ico {
             Sequence::Pages {
                 count: entries.len(),
                 default: chosen_index(&entries),
+                bands: false,
             }
         } else {
             Sequence::Still

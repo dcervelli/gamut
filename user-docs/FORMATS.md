@@ -289,6 +289,13 @@ Caveats:
   data, is stepped over — and not applied, so the picture shows whole.
 - **The orientation tag is applied**, as a scanner or a camera writing TIFF
   sets it. A page keeps its own.
+- **Each band of a multiband raster is a page**: a GIS raster holding
+  several bands of gray — a stack of a satellite's bands, a classifier's
+  probabilities — opens on its first band, `n` and `N` step through the
+  others, and the bar names each band where the file describes it. Each is
+  read as measurement data. A color raster with bands beside its red, green
+  and blue that are not transparency, such as a near infrared, shows the
+  color picture alone.
 
 ## WebP
 

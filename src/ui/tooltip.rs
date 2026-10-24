@@ -795,8 +795,8 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::PixelFormat) => "Pixel options",
         // The transport bar's, shorter than the key table's sentences.
         Tip::Control(Control::Play) => "Play/pause",
-        Tip::Control(Control::StepBack) => "Previous frame, or page",
-        Tip::Control(Control::StepForward) => "Next frame, or page",
+        Tip::Control(Control::StepBack) => "Previous frame, page, or band",
+        Tip::Control(Control::StepForward) => "Next frame, page, or band",
         Tip::Control(Control::Paste) => "Paste an image",
         // The turn's pair: each names its own way round, where the key
         // table's one line names both.

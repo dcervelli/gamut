@@ -728,7 +728,7 @@ impl When {
             When::RegionSelected => "a region selected",
             When::SeveralFiles => "more than one file",
             When::Animation => "an animation",
-            When::AnimationOrPages => "an animation or a paged file",
+            When::AnimationOrPages => "an animation, pages, or bands",
             When::PointerOnPicture => "the pointer on the picture",
             When::PictureOnClipboard => "a picture on the clipboard",
             When::HdrMode => "the monitor in HDR mode",
@@ -1541,13 +1541,13 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Playback,
         when: Some(When::AnimationOrPages),
-        help: "Next frame of an animation, or page of a file that holds several",
+        help: "Next animation frame, page, or band",
         keys: one!("playback.next", NextFrame, [key('n')]),
     },
     Row {
         section: Section::Playback,
         when: Some(When::AnimationOrPages),
-        help: "Previous frame, or page",
+        help: "Previous animation frame, page, or band",
         keys: one!("playback.previous", PreviousFrame, [key('N')]),
     },
 ];

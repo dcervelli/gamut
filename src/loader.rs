@@ -133,6 +133,8 @@ pub struct Ready {
     pub sequence: Sequence,
     /// Which page `image` is, where the file has pages; zero otherwise.
     pub page: usize,
+    /// What the file calls that page, where it names its pages.
+    pub page_name: Option<String>,
     /// Which picture `image` is: the camera's JPEG only where one was asked
     /// for and the file carries one.
     pub rendering: Rendering,
@@ -457,6 +459,14 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
         let exif = guard("reading the metadata", || {
             Ok(Exif::read_with(&path, Some(&mut opened)))
         })?;
+        // A page's name is a word for the bar, and a file whose names will
+        // not read, or panic the reader, is shown without them.
+        let page_name = match sequence {
+            Sequence::Pages { .. } => guard("reading the page names", || opened.page_name(shown))
+                .ok()
+                .flatten(),
+            _ => None,
+        };
         let (image, decoding, rendering, camera_jpeg) =
             decode_rendering_of(&mut opened, overrides, page, rendering)?;
         Ok((
@@ -464,7 +474,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             decoding,
             exif,
             sequence,
-            shown,
+            (shown, page_name),
             rendering,
             camera_jpeg,
             format,
@@ -501,7 +511,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
             (stats, stored),
             exif,
             sequence,
-            page,
+            (page, page_name),
             rendering,
             camera_jpeg,
             format,
@@ -531,6 +541,7 @@ fn read(request: Request, upload: Option<&Upload>, canceled: &AtomicBool) -> Opt
                 gpu,
                 sequence,
                 page,
+                page_name,
                 rendering,
                 camera_jpeg,
                 format,

@@ -69,6 +69,23 @@ impl super::Decoder for Png {
         Ok(Some(orient::size(width, height, orientation)))
     }
 
+    /// The layout `image` decodes into, which is what the `png` crate puts
+    /// out under the one transformation `image` asks of it: a palette or a
+    /// `tRNS` chunk expanded, a depth under eight widened to eight, sixteen
+    /// kept.
+    fn pixel_bytes(&self, source: &mut dyn ReadSeek) -> Result<Option<u64>> {
+        let mut decoder = ::png::Decoder::new(BufReader::new(source));
+        decoder.set_transformations(::png::Transformations::EXPAND);
+        let reader = decoder.read_info().context("reading the PNG header")?;
+        let (color, depth) = reader.output_color_type();
+        let depth = if depth == ::png::BitDepth::Sixteen {
+            2
+        } else {
+            1
+        };
+        Ok(Some(color.samples() as u64 * depth))
+    }
+
     fn decode(&self, source: &mut dyn ReadSeek, _overrides: Overrides) -> Result<DecodedImage> {
         decode(source)
     }

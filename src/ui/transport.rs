@@ -34,8 +34,9 @@ pub struct Transport {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Kind {
-    /// Several pictures and no clock: the steps and the count.
-    Pages,
+    /// Several pictures and no clock: the steps and the count, and what the
+    /// file calls the page on screen, where it names its pages.
+    Pages { name: Option<String> },
     /// Frames on a clock.
     Animation {
         playing: bool,
@@ -129,9 +130,18 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, transport: &Transport) {
         ui.add_space(PADDING);
 
         let counter = format!("{} / {}", transport.index + 1, transport.count);
-        let Kind::Animation { delays, .. } = &transport.kind else {
-            ui.add(Label::new(RichText::new(counter).color(dim)));
-            return;
+        let delays = match &transport.kind {
+            Kind::Animation { delays, .. } => delays,
+            Kind::Pages { name } => {
+                let readout = match name {
+                    Some(name) => format!("{counter} \u{b7} {name}"),
+                    None => counter,
+                };
+                // A name is the file's to choose, and as long as it likes:
+                // cut short at the bar's end rather than pushed past it.
+                ui.add(Label::new(RichText::new(readout).color(dim)).truncate());
+                return;
+            }
         };
         let (starts, total) = timeline(delays, transport.count);
         let elapsed = starts.get(transport.index).copied().unwrap_or_default();

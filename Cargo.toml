@@ -160,6 +160,7 @@ roxmltree = "0.20"
 # the photometric and the sample format of a measurement raster, the
 # GeoTIFF keys — and `directory` reads a BigTIFF's first directory through
 # it for the metadata reader, which is defined on the original format.
+# Its `webp` feature stays off: `tiff_rs` reads a WebP chunk itself.
 tiff = "0.11.3"
 # The configuration file, which is TOML: parsed into its tables with each
 # key's and value's place in the text, and read from them by hand rather than

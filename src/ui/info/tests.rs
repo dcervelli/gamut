@@ -598,13 +598,29 @@ fn a_file_of_several_pictures_says_how_many() {
     current.sequence = Sequence::Pages {
         count: 5,
         default: 0,
+        bands: false,
     };
     current.page = 1;
+    let rows = written(&current);
+    assert!(rows.iter().any(|row| row == "Pages"), "{rows:?}");
+    assert!(rows.iter().any(|row| row == "Current page"), "{rows:?}");
+    assert!(rows.iter().any(|row| row == "2"), "{rows:?}");
+
+    current.sequence = Sequence::Pages {
+        count: 9,
+        default: 0,
+        bands: true,
+    };
+    current.page = 5;
+    current.page_name = Some("native forest".to_string());
+    let rows = written(&current);
+    assert!(rows.iter().any(|row| row == "Bands"), "{rows:?}");
+    assert!(rows.iter().any(|row| row == "Current band"), "{rows:?}");
     assert!(
-        written(&current)
-            .iter()
-            .any(|row| row == "5 pages, of which this is page 2")
+        rows.iter().any(|row| row == "6 \u{b7} native forest"),
+        "{rows:?}"
     );
+    assert!(!rows.iter().any(|row| row == "Pages"), "{rows:?}");
 }
 
 /// What the panel puts on the clipboard is as much of a table as the

@@ -205,6 +205,14 @@ pub trait Decoder: Sync {
     /// produce, orientation and all. Every fixture is checked for that.
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>>;
 
+    /// What one pixel of [`Decoder::decode`]'s picture comes to in bytes,
+    /// from the header: what the thumbnail thread weighs a large file by
+    /// before it reads a pixel. `None` where the format cannot say without
+    /// decoding, and the thread then assumes the worst a decoder produces.
+    fn pixel_bytes(&self, _source: &mut dyn ReadSeek) -> Result<Option<u64>> {
+        Ok(None)
+    }
+
     /// What the format's own reader of the file has to say about it, for
     /// the information panel, beyond what the EXIF reader gets out of it:
     /// the camera and the exposure as the library parsed them from the
@@ -241,6 +249,13 @@ pub trait Decoder: Sync {
     /// firming up as the frames arrive. `None` where the format has no
     /// such headers to read, and the frames are then the only word on it.
     fn delays(&self, _source: &mut dyn ReadSeek) -> Result<Option<Vec<Duration>>> {
+        Ok(None)
+    }
+
+    /// What the file calls one of its pages, where it names them: a band's
+    /// description, a directory's page name. Only where
+    /// [`Decoder::sequence`] said [`Sequence::Pages`].
+    fn page_name(&self, _source: &mut dyn ReadSeek, _page: usize) -> Result<Option<String>> {
         Ok(None)
     }
 
@@ -662,6 +677,15 @@ impl Opened {
         .map(|(size, _)| size)
     }
 
+    /// What one decoded pixel comes to, from the header — see
+    /// [`Decoder::pixel_bytes`].
+    pub fn pixel_bytes(&mut self) -> Result<Option<u64>> {
+        self.ask("reading the header of", |source, decoder| {
+            decoder.pixel_bytes(source)
+        })
+        .map(|(bytes, _)| bytes)
+    }
+
     /// What the file holds beyond the image [`Opened::decode`] returns,
     /// from its header.
     pub fn sequence(&mut self) -> Result<Sequence> {
@@ -669,6 +693,14 @@ impl Opened {
             decoder.sequence(source)
         })
         .map(|(sequence, _)| sequence)
+    }
+
+    /// What the file calls page `page` — see [`Decoder::page_name`].
+    pub fn page_name(&mut self, page: usize) -> Result<Option<String>> {
+        self.ask("reading the page names of", |source, decoder| {
+            decoder.page_name(source, page)
+        })
+        .map(|(name, _)| name)
     }
 
     /// How long each frame of the animation is shown for, from its headers
@@ -903,6 +935,12 @@ pub fn extension_for(path: &Path, asked: Option<&str>) -> Option<String> {
     Some(known.first().copied().unwrap_or(format).to_string())
 }
 
+/// What one pixel of `path`'s picture comes to decoded, from its header —
+/// see [`Decoder::pixel_bytes`].
+pub fn pixel_bytes(path: &Path) -> Result<Option<u64>> {
+    Opened::new(path)?.pixel_bytes()
+}
+
 /// The format of `path`, as the decoder that owns it says — see
 /// [`Opened::format`]. `None` where nothing claims it, or where it cannot
 /// be opened at all — the panel then says nothing rather than something
@@ -1027,9 +1065,10 @@ mod tests {
                 "gif" | "hdr" | "exr" | "bmp" | "pnm" => "gif/hdr/exr/bmp/netpbm",
                 // A PNG under a TIFF name: sniffed for what it is.
                 "mislabeled" => "png",
-                // The two truncated files still say what they are.
+                // The truncated files still say what they are.
                 "bad" if name.ends_with(".png") => "png",
                 "bad" if name.ends_with(".dng") => "camera raw",
+                "bad" if name.ends_with(".tif") => "tiff",
                 // Not fixtures: the script, the notes, a profile, the raw
                 // samples' directory, and the one format nothing reads.
                 "generate" | "README" | "display" | "raw" | "unsupported" => continue,

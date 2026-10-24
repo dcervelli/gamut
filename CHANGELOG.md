@@ -50,6 +50,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   the format the command wrote; never goes over another file; and goes to
   the trash on undo. `output = "choose"` has the dialog ask whether to make
   a new file or replace the original.
+- A TIFF holding several bands of gray, as a GIS writes a stack of a
+  satellite's bands or a classifier's probabilities, opens with each band
+  as a page, named in the bar where the file describes it. It was refused.
+- WebP-compressed TIFFs open, as GDAL writes an orthophoto with
+  `COMPRESS=WEBP`, an alpha band included.
 
 ### Changed
 
@@ -84,6 +89,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
+- A large PNG is no longer refused a thumbnail in the background for what
+  its pixels might come to rather than what they do: a picture of 8-bit
+  color now gets one up to about 350 megapixels, where it stopped at 67.
+- A file in the file list with no thumbnail coming shows a struck-through
+  picture in its slot, and its tooltip says why, rather than an empty slot
+  that looked like one still on its way. A file too large to thumbnail is
+  no longer recorded as one that failed, so it is tried again later.
 - The file list no longer slides under the pointer when files arrive above
   the one on screen.
 - A file saved by a program that takes it away before writing it again no
@@ -97,6 +109,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A file read while it was half written is no longer recorded in the
   thumbnail cache as one that cannot be read when it was finished within the
   same second.
+- TIFFs of gray with transparency, of RGB stored a plane to a channel, and
+  of RGB with a band beside it that is not transparency now open; they were
+  refused.
 
 ## 0.12.2 - 2026-10-22
 
