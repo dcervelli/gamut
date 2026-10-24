@@ -276,6 +276,10 @@ decoding the file, and one made here is one it will show. They are made in
 the background from the moment the program starts, at low priority, so a
 long list fills in over time rather than holding anything up, and a file
 whose thumbnail has not yet been made shows an empty slot until it has. A
+slot with a struck-through picture in it has no thumbnail coming: the file
+could not be read, or is too large to thumbnail in the background — over
+about 350 megapixels for an 8-bit RGB PNG, 67 for most other formats — in
+which case opening it makes one. The row's tooltip says which. A
 Mac has no cache that file managers share, so there they are `gamut`'s own,
 under `~/Library/Caches/com.dcervelli.gamut/thumbnails`.
 

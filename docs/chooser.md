@@ -209,10 +209,18 @@ header read at once and its thumbnail made straight after, so that a list
 of ten thousand files does not keep the rows on screen waiting for the last
 of them.
 
-A file whose header claims more than `MAX_THUMBNAIL_DECODE_BYTES` would
-hold at four channels of floats is refused before it is read and recorded
-as a failure — the same gigabyte the [player](animation.md) keeps its cache
-under, being the same question of what a background thread may hold. The
+A file whose pixels would come to more than `MAX_THUMBNAIL_DECODE_BYTES`
+decoded is refused before it is read — the same gigabyte the
+[player](animation.md) keeps its cache under, being the same question of
+what a background thread may hold. What a pixel comes to is the format's to
+say from its header, through `Decoder::pixel_bytes`; a format that does not
+say is weighed at four channels of floats, the most any decoder makes, and
+is only asked at all where that worst case would refuse it. The refusal is
+`News::TooLarge`, not `News::Failed`, and is not written to the fail
+directory: the file is not broken, it gets its thumbnail from the picture
+whenever it is shown, and a build that holds more should try it. Either
+way the row draws `icon::IMAGE_OFF` in its slot and says why in its
+tooltip, since an empty slot is what a file not reached yet looks like. The
 decoded image is scanned first — `Stats::scan`, which samples at most two
 million pixels whatever the size and is what the viewer runs on the same
 file — then box-filtered to 512 pixels by `image::resample::downscale`, in

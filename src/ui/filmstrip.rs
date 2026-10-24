@@ -32,6 +32,7 @@ use super::style::{ACTIVE_BUTTON_WASH, SCROLLBAR_GUTTER, SCROLLBAR_WIDTH};
 use super::{TEXT_SIZE, fonts, icon, menu};
 use crate::clock::Civil;
 use crate::image::exif::Taken;
+use crate::thumbnailer::Missing;
 
 /// The width each thumbnail is fitted into, at its narrowest: the
 /// thumbnail thread's smallest display copy, drawn at its own size.
@@ -292,6 +293,8 @@ pub struct Row {
     /// Its thumbnail, once one has arrived and while the screen still
     /// holds it.
     pub thumb: Option<super::Thumb>,
+    /// Why no thumbnail is coming, where none is.
+    pub missing: Option<Missing>,
 }
 
 /// What the strip is drawn from, on each frame it is up.
@@ -632,6 +635,7 @@ fn file(
         modified,
         taken,
         thumb,
+        missing,
     } = input.rows[row];
     let known = Known {
         format,
@@ -667,11 +671,14 @@ fn file(
         slot,
         slot.size().max_elem() * ui.ctx().pixels_per_point(),
         thumb.as_ref(),
+        missing,
         theme,
     );
     let beside = egui::Rect::from_min_max(pos2(edge, slot.top()), pos2(edge, slot.bottom()));
     let response = pass.caption(response, Some(beside), || {
-        (vec![name.to_string()], known.about(path))
+        let mut about = known.about(path);
+        about.extend(missing.map(|missing| missing_words(missing).to_string()));
+        (vec![name.to_string()], about)
     });
 
     // What the list is sorted by, where that is not the name itself: a
@@ -790,6 +797,15 @@ impl Known {
                 super::info::round_pixels(u64::from(width) * u64::from(height))
             }),
         }
+    }
+}
+
+/// What a row's tooltip says, under what is known of its file, about the
+/// thumbnail that is not coming.
+fn missing_words(missing: Missing) -> &'static str {
+    match missing {
+        Missing::Failed => "No thumbnail: the file could not be read",
+        Missing::TooLarge => "Large image; open to make thumbnail",
     }
 }
 

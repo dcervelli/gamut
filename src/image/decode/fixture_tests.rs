@@ -14,7 +14,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use super::{
-    CameraJpeg, Overrides, delays, frames, load, load_page, probe, sequence, supported_extensions,
+    CameraJpeg, Overrides, delays, frames, load, load_page, pixel_bytes, probe, sequence,
+    supported_extensions,
 };
 use crate::image::sequence::{Loops, Sequence};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Referred, Samples};
@@ -2086,6 +2087,29 @@ fn every_fixture_probes_to_the_size_it_decodes_to() {
                 size,
                 (image.width, image.height),
                 "{} ({}) probes to a different size than it decodes to",
+                fixture.file,
+                fixture.covers
+            );
+        }
+    }
+}
+
+#[test]
+/// The thumbnail thread weighs a large file by what the header says one
+/// pixel comes to, so a header that says less than the decoder holds lets
+/// through a file the thread cannot afford. Saying nothing is fine; the
+/// thread then assumes the worst.
+fn every_fixture_weighs_what_it_decodes_to() {
+    for (fixture, image) in fixtures() {
+        let path = directory().join(fixture.file);
+        let weighed =
+            pixel_bytes(&path).unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file));
+        if let Some(bytes) = weighed {
+            let pixels = u64::from(image.width) * u64::from(image.height);
+            assert_eq!(
+                bytes * pixels,
+                image.samples.byte_len() as u64,
+                "{} ({}) weighs a pixel differently than it decodes one",
                 fixture.file,
                 fixture.covers
             );

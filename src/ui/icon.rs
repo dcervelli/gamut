@@ -366,6 +366,32 @@ pub(super) const IMAGE: &[Mark] = &[
     Mark::Line([15.086, 11.914], [6.0, 21.0]),
 ];
 
+/// Lucide's `image-off`: the frame of `image` struck through, its sun cut
+/// in half by the stroke — the mark in a thumbnail's slot where no
+/// thumbnail is coming. The frame is written out as sides and quarter
+/// turns, since it stops short either side of the stroke; the foot's
+/// last curve, a Bézier in Lucide's path, is the eighth of a turn about
+/// the corner's center that it all but is.
+pub(super) const IMAGE_OFF: &[Mark] = &[
+    Mark::Line([2.0, 2.0], [22.0, 22.0]),
+    // The sun's half below the stroke.
+    Mark::arc([9.0, 9.0], 2.0, 45.0, 180.0),
+    // The hill, broken where the stroke crosses it.
+    Mark::Line([13.5, 13.5], [6.0, 21.0]),
+    Mark::Line([18.0, 12.0], [21.0, 15.0]),
+    // The frame below the stroke, from its top-left corner round to the
+    // foot's right.
+    Mark::arc([5.0, 5.0], 2.0, 225.0, -45.0),
+    Mark::Line([3.0, 5.0], [3.0, 19.0]),
+    Mark::arc([5.0, 19.0], 2.0, 180.0, -90.0),
+    Mark::Line([5.0, 21.0], [19.0, 21.0]),
+    Mark::arc([19.0, 19.0], 2.0, 90.0, -45.0),
+    // The frame above it, from the right side's foot round to the top.
+    Mark::Line([21.0, 15.0], [21.0, 5.0]),
+    Mark::arc([19.0, 5.0], 2.0, 0.0, -90.0),
+    Mark::Line([19.0, 3.0], [9.0, 3.0]),
+];
+
 /// Lucide's `file-image`: a sheet with its corner folded and a picture on
 /// it — the mark on the button that opens image files. The sheet is
 /// written out as `clipboard` below is, sides and quarter turns, since

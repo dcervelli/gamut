@@ -19,7 +19,7 @@
 //! made again — once per frame, however many titles arrived in it, and
 //! with the cursor kept on the file it was on.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,7 +27,7 @@ use std::sync::Arc;
 use super::files::Files;
 use crate::fuzzy::{self, Matcher};
 use crate::image::sequence::Sequence;
-use crate::thumbnailer::{Delivered, Facts, News, Thumb};
+use crate::thumbnailer::{Delivered, Facts, Missing, News, Thumb};
 use crate::ui::chooser::{Input, Row, Step};
 
 /// How many thumbnails the screen keeps at once: about 125 MiB at the
@@ -56,7 +56,9 @@ pub struct Chooser {
     /// they are made again before the rows are built.
     stale: bool,
     facts: HashMap<PathBuf, Facts>,
-    failed: HashSet<PathBuf>,
+    /// The files the thread has no thumbnail of and is not making one
+    /// of, and why.
+    failed: HashMap<PathBuf, Missing>,
     /// The rows as the frame last saw them, and whether anything they were
     /// built from has changed since.
     rows: Option<Arc<[Row]>>,
@@ -87,7 +89,7 @@ impl Chooser {
             matches: Vec::new(),
             stale: false,
             facts: HashMap::new(),
-            failed: HashSet::new(),
+            failed: HashMap::new(),
             rows: None,
             dirty: true,
             thumbs_seen: 0,
@@ -228,7 +230,11 @@ impl Chooser {
                 None
             }
             News::Failed => {
-                self.failed.insert(path);
+                self.failed.insert(path, Missing::Failed);
+                None
+            }
+            News::TooLarge => {
+                self.failed.insert(path, Missing::TooLarge);
                 None
             }
             News::Thumb(thumb) => Some((path, thumb)),
@@ -243,7 +249,7 @@ impl Chooser {
     /// had been given up on, so that the caller can ask for it again.
     pub fn learn(&mut self, path: &Path, facts: Facts) -> bool {
         self.know(path.to_path_buf(), facts);
-        let was_failed = self.failed.remove(path);
+        let was_failed = self.failed.remove(path).is_some();
         self.dirty |= was_failed;
         was_failed
     }
@@ -251,7 +257,7 @@ impl Chooser {
     /// Takes back having given up on `path`: the file has been written
     /// since the thread looked, and is to be looked at again.
     pub fn forget_failure(&mut self, path: &Path) {
-        self.dirty |= self.failed.remove(path);
+        self.dirty |= self.failed.remove(path).is_some();
     }
 
     /// What the header of `path` said, where it has been read: what the
@@ -263,7 +269,13 @@ impl Chooser {
     /// Whether the thread has given up on `path`: no thumbnail is coming
     /// unless the file decodes on screen after all.
     pub fn given_up(&self, path: &Path) -> bool {
-        self.failed.contains(path)
+        self.failed.contains_key(path)
+    }
+
+    /// Why the thread has given up on `path`, where it has: what the row
+    /// shows in the thumbnail's place.
+    pub fn missing(&self, path: &Path) -> Option<Missing> {
+        self.failed.get(path).copied()
     }
 
     /// The file at `row` of the list as the frame last saw it.
@@ -285,7 +297,7 @@ impl Chooser {
         visible
             .filter_map(|row| self.path_at(row))
             .filter(|path| {
-                !self.failed.contains(*path)
+                !self.failed.contains_key(*path)
                     && (thumbs.get(path).is_none() || !self.facts.contains_key(*path))
             })
             .map(Path::to_path_buf)
@@ -344,6 +356,7 @@ impl Chooser {
                     index: index + 1,
                     dimensions: facts.and_then(|facts| facts.size),
                     thumb: thumbs.get(path),
+                    missing: self.missing(path),
                     positions,
                     title,
                     title_positions,

@@ -49,6 +49,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
+- A large PNG is no longer refused a thumbnail in the background for what
+  its pixels might come to rather than what they do: a picture of 8-bit
+  color now gets one up to about 350 megapixels, where it stopped at 67.
+- A file in the file list with no thumbnail coming shows a struck-through
+  picture in its slot, and its tooltip says why, rather than an empty slot
+  that looked like one still on its way. A file too large to thumbnail is
+  no longer recorded as one that failed, so it is tried again later.
 - The file list no longer slides under the pointer when files arrive above
   the one on screen.
 - On a display scaled by a fraction, such as 1.6, the words over the file

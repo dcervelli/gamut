@@ -60,9 +60,15 @@ pub const DISPLAY_SIDES: [u32; 3] = [thumbnail::SIDE / 4, thumbnail::SIDE / 2, t
 /// What a file's pixels may come to, decoded, before the thread declines to
 /// hold them: the same figure the player keeps its cache under, being the
 /// same question — what a background thread may hold on a machine that is
-/// also showing a picture. Reckoned at the worst case, four channels of
-/// floats, from the size the header claims.
+/// also showing a picture. Reckoned from the size the header claims, at
+/// what the header says a pixel comes to where the format says
+/// ([`decode::pixel_bytes`]), and at [`WORST_PIXEL_BYTES`] where it does
+/// not.
 pub const MAX_THUMBNAIL_DECODE_BYTES: u64 = 1 << 30;
+
+/// The most one pixel comes to out of any decoder: four channels of
+/// floats.
+const WORST_PIXEL_BYTES: u64 = 16;
 
 /// Something the thread has to say about one file.
 pub struct Delivered {
@@ -79,6 +85,20 @@ pub enum News {
     /// No thumbnail is coming: the file could not be read, or the cache
     /// already says this version could not read it.
     Failed,
+    /// No thumbnail is coming from the thread, the file being larger
+    /// decoded than [`MAX_THUMBNAIL_DECODE_BYTES`]. Not a failure, and not
+    /// recorded as one: it is made from the picture if the file is shown,
+    /// and asked for again by a build that will hold more.
+    TooLarge,
+}
+
+/// Why a file has no thumbnail and none is coming.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Missing {
+    /// The file could not be read.
+    Failed,
+    /// The file is too large to decode in the background.
+    TooLarge,
 }
 
 /// What a file's header says about it.
@@ -617,12 +637,7 @@ fn make(
     overrides: Overrides,
     canceled: &AtomicBool,
 ) -> News {
-    // Refused before it is read: what the pixels would come to, at the
-    // worst case a decoder produces, against what a background thread may
-    // hold.
-    let refused = facts.size.is_some_and(|(width, height)| {
-        u64::from(width) * u64::from(height) * 16 > MAX_THUMBNAIL_DECODE_BYTES
-    });
+    let refused = too_large(path, facts.size);
     // The picture the file carries of itself, where it carries one large
     // enough — a camera's JPEG of its raw — stands in for the picture: a
     // likeness is all a thumbnail is, and it is had in a few milliseconds
@@ -638,7 +653,7 @@ fn make(
     let made = if let Some(preview) = preview {
         Ok(preview)
     } else if refused {
-        Err(anyhow!("too large to thumbnail in the background"))
+        return News::TooLarge;
     } else {
         guard("decoding", || decode::load(path, overrides))
     };
@@ -666,6 +681,26 @@ fn make(
             News::Failed
         }
     }
+}
+
+/// Whether the picture at `path`, `size` pixels as its header says, is
+/// refused before it is read: what its pixels would come to against what
+/// a background thread may hold. The format is asked what a pixel comes
+/// to only where the worst case would refuse it, so a file within the cap
+/// whatever it holds is not opened for the question.
+fn too_large(path: &Path, size: Option<(u32, u32)>) -> bool {
+    let Some((width, height)) = size else {
+        return false;
+    };
+    let pixels = u64::from(width) * u64::from(height);
+    if pixels.saturating_mul(WORST_PIXEL_BYTES) <= MAX_THUMBNAIL_DECODE_BYTES {
+        return false;
+    }
+    let each = guard("reading the header", || decode::pixel_bytes(path))
+        .ok()
+        .flatten()
+        .unwrap_or(WORST_PIXEL_BYTES);
+    pixels.saturating_mul(each) > MAX_THUMBNAIL_DECODE_BYTES
 }
 
 /// A thumbnail read back from the cache, reduced for the screen.
@@ -874,6 +909,95 @@ mod tests {
             assert_eq!((copy.width, copy.height), (side, side / 2));
             assert_eq!(copy.rgba.len(), (side * side / 2 * 4) as usize);
         }
+    }
+
+    /// A PNG that states its size and layout and holds no pixels: a header,
+    /// and the start of a data chunk for the header's reader to stop at.
+    fn stated_png(path: &Path, width: u32, height: u32, depth: u8, color: u8) {
+        fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+            out.extend((data.len() as u32).to_be_bytes());
+            let start = out.len();
+            out.extend(kind);
+            out.extend(data);
+            let mut crc = !0u32;
+            for byte in &out[start..] {
+                crc ^= u32::from(*byte);
+                for _ in 0..8 {
+                    crc = if crc & 1 == 1 {
+                        (crc >> 1) ^ 0xedb8_8320
+                    } else {
+                        crc >> 1
+                    };
+                }
+            }
+            out.extend((!crc).to_be_bytes());
+        }
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        let mut header = Vec::new();
+        header.extend(width.to_be_bytes());
+        header.extend(height.to_be_bytes());
+        header.extend([depth, color, 0, 0, 0]);
+        chunk(&mut out, b"IHDR", &header);
+        chunk(&mut out, b"IDAT", &[0; 4]);
+        std::fs::write(path, out).unwrap();
+    }
+
+    /// A file is refused by what its pixels come to as the format decodes
+    /// them, not by the worst a decoder can make of a pixel: eight-bit RGB
+    /// past the worst case's cap and inside the true one is thumbnailed.
+    #[test]
+    fn a_large_file_is_weighed_by_what_its_pixels_come_to() {
+        let dir = std::env::temp_dir().join(format!("gamut-weighed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let weighed = |name: &str, side: u32, depth: u8, color: u8| {
+            let path = dir.join(name);
+            stated_png(&path, side, side, depth, color);
+            too_large(&path, Some((side, side)))
+        };
+        // 81 megapixels: past the cap at sixteen bytes a pixel.
+        assert!(!weighed("rgb8.png", 9000, 8, 2), "three bytes a pixel");
+        assert!(!weighed("rgba16.png", 9000, 16, 6), "eight bytes a pixel");
+        // 400 megapixels at three bytes is past it whatever they are.
+        assert!(weighed("huge.png", 20000, 8, 2));
+        // A palette is expanded to three or four bytes; a gray of one bit
+        // is widened to one.
+        assert!(!weighed("gray1.png", 30000, 1, 0));
+        assert!(weighed("palette.png", 20000, 8, 3));
+        assert!(
+            !too_large(&dir.join("absent.png"), None),
+            "no size, no refusal"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file too large to thumbnail in the background is said to be so,
+    /// and is not recorded as a failure: it is no broken file, and a build
+    /// that will hold more should try it.
+    #[test]
+    fn a_refused_file_is_not_remembered_as_a_failure() {
+        let dir = std::env::temp_dir().join(format!("gamut-refused-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dirs = Dirs::under(&dir.join("thumbnails"));
+        let huge = dir.join("huge.png");
+        stated_png(&huge, 20000, 20000, 8, 2);
+        let facts = header(&huge).expect("the header reads");
+        let news = thumbnail_one(
+            &huge,
+            &facts,
+            Some(&dirs),
+            Overrides::default(),
+            &AtomicBool::new(false),
+        );
+        assert!(matches!(news, News::TooLarge));
+        let key = thumbnail::key(&std::path::absolute(&huge).unwrap());
+        let (mtime, bytes) = stat(&huge).unwrap();
+        assert_eq!(
+            thumbnail::lookup(&dirs, &key, mtime, bytes),
+            Lookup::Missing
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The whole trip: a file thumbnailed into a cache directory of the

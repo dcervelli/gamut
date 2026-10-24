@@ -1273,6 +1273,7 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
             modified: None,
             taken: None,
             thumb: None,
+            missing: None,
         })
         .collect();
     let height = filmstrip::row_height(filmstrip::SLOT_MIN, None, 1.0);
@@ -2292,6 +2293,7 @@ fn the_chooser_takes_the_keys_while_open_and_gives_them_back() {
             index: index + 1,
             dimensions: None,
             thumb: None,
+            missing: None,
             positions: Vec::new(),
             title: (index == 1).then(|| "Common Buzzard".to_string()),
             title_positions: Vec::new(),
@@ -2689,6 +2691,7 @@ fn the_chooser_scrolls_a_moved_cursor_into_view() {
             index: index + 1,
             dimensions: None,
             thumb: None,
+            missing: None,
             positions: Vec::new(),
             title: None,
             title_positions: Vec::new(),
