@@ -44,6 +44,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- Undo takes away an export or a paste: the new file goes to the trash and
+  leaves the list.
 - The configuration file is TOML, `~/.config/gamut/config.toml`: words go
   in quotes, a command is a `[command.<name>]` table, and a line of the
   shell can hold a `#` or run over several lines. A configuration in the old

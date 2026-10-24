@@ -543,6 +543,13 @@ impl Files {
         }
     }
 
+    /// Takes `path`, which is not the file on screen, off the list: a file
+    /// the window made, taken away again.
+    pub(super) fn forget(&mut self, path: &Path) {
+        debug_assert!(self.shown_path() != Some(path), "step away from it first");
+        self.drop_path(path);
+    }
+
     /// Takes `path` off the list, wherever it is, keeping the file on
     /// screen and a read in flight aimed where they were.
     fn drop_path(&mut self, path: &Path) {

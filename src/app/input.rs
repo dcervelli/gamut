@@ -1273,7 +1273,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Files,
         when: Some(When::Undoable),
-        help: "Undo the last rename, deletion, removal or replacement",
+        help: "Undo the last rename, deletion, removal, replacement or new file",
         keys: one!("files.undo", Undo, [typed(CTRL, 'z')]),
     },
     Row {
@@ -3373,6 +3373,7 @@ impl App {
         // A paste is the window's own doing: from here on nothing showing
         // is the window's to answer, not the command line's.
         self.from_command_line = false;
+        self.created(path.clone());
         let request = self.files.adopt(path, Source::Clipboard(offer.mime));
         let sent = self.send(request);
         self.list_changed();

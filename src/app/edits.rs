@@ -22,7 +22,9 @@
 //! stood. A replacement — a command's output put in the place of the file
 //! it ran on — keeps the original in the trash, and undo puts it back over
 //! the edited file, which goes to the trash in its turn: neither undoing
-//! nor doing loses a file.
+//! nor doing loses a file. A file the window made — an export, a paste, a
+//! command's new file — is undone by moving it to the trash, from where it
+//! can still be taken back.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,6 +64,9 @@ pub(super) enum Edit {
     /// is in in the trash, and the path both are called, as the list
     /// spells it.
     Replaced { entry: Entry, path: PathBuf },
+    /// A file the window made — an export, a paste, a command's new file —
+    /// by the path it joined the list as.
+    Created { path: PathBuf },
 }
 
 /// A run of a command that replaces the file it ran on, as the window holds
@@ -97,7 +102,7 @@ pub(super) struct Renaming {
 /// What the messages that say how to undo say about it: the chords bound to
 /// undo, as the key table spells them, so that a message cannot name a key
 /// that does something else — and nothing where none is bound.
-fn to_undo(keys: &super::keymap::Keymap) -> String {
+pub(super) fn to_undo(keys: &super::keymap::Keymap) -> String {
     match keys.spelled("files.undo") {
         key if key.is_empty() => String::new(),
         key => format!(" {key} to undo."),
@@ -494,8 +499,49 @@ impl App {
                 );
             }
             Edit::Replaced { entry, path } => self.unreplace(&entry, &path),
+            Edit::Created { path } => self.uncreate(&path),
         }
         Effect::Redraw
+    }
+
+    /// Notes that the window made the file at `path`, which has joined the
+    /// list as that, for undo to take away again.
+    pub(super) fn created(&mut self, path: PathBuf) {
+        self.edits.push(Edit::Created { path });
+    }
+
+    /// Takes away a file the window made: to the trash, so that an undo
+    /// pressed once too often costs nothing, and off the list — stepping
+    /// away from it as a deletion does where it is on screen.
+    fn uncreate(&mut self, path: &Path) {
+        let name = name_of(path);
+        if fs::symlink_metadata(path).is_err() {
+            self.forget_made(path);
+            self.toast(format!("{name} is no longer there."), Level::Warning);
+            return;
+        }
+        let Some(trash) = &self.trash else {
+            self.toast(NO_TRASH, Level::Error);
+            return;
+        };
+        if let Err(error) = trash.put(path) {
+            super::input::report(&error);
+            self.toast(super::input::briefly(&error), Level::Error);
+            return;
+        }
+        self.forget_made(path);
+        self.toast(format!("Moved {name} to the trash."), Level::Message);
+    }
+
+    /// A file the window made has gone: off the list, stepped away from
+    /// where it is on screen.
+    fn forget_made(&mut self, path: &Path) {
+        if self.files.shown_path() == Some(path) {
+            self.step_off(Some(path));
+        } else if self.files.position(path).is_some() {
+            self.files.forget(path);
+            self.list_changed();
+        }
     }
 
     /// Puts the original of a replaced file back, the edited one going to

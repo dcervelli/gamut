@@ -117,9 +117,11 @@ path as the list spelled it, where it stood and whether it was kept
 whatever its directory said — a paste; `Renamed`, with both spellings;
 `Removed`, with the path, where it stood and whether it was kept so — a removal touches
 nothing on disk, but it takes a file out of the walk, and that is as
-much a mistake to reach for undo over; and `Replaced`, with the trash entry
-the original is in and the path. One stack and one key for all
-four, because the moment a reader reaches for undo is the moment they
+much a mistake to reach for undo over; `Replaced`, with the trash entry
+the original is in and the path; and `Created`, with the path a file the
+window made joined the list as — an export, a paste, a command's new
+file. One stack and one key for all
+five, because the moment a reader reaches for undo is the moment they
 have just made a mistake, and that is no time to ask which kind. Only
 what touched the disk or the list goes on it: the view and the display
 change dozens of times a session and have their own ways back — `z`,
@@ -237,8 +239,15 @@ while it is pending the dialog opens as ever but Export and `Enter` are
 dead, with a line saying why; `App::export_shown` refuses the press too,
 so the button and the press cannot disagree.
 
-An export is not an edit and is not on the undo stack. It changes nothing
-that was there; the new file is deleted like any other.
+An export is on the undo stack as `Edit::Created`, as a paste and a
+command's new file are. It changes nothing that was there, but it puts a
+file on the list beside the one on screen, and undo pressed after an
+export that passed over it would reach the deletion before it — putting a
+file back that the reader did not mean to, while the file they did mean
+stayed. Undoing one is `App::uncreate`: the file to the trash rather than
+removed, so an undo pressed once too often costs nothing, and off the list
+— stepped away from as a deletion is where it is on screen, and taken out
+by `Files::forget` where it is not.
 
 A playing animation is stopped while the dialog is up and set playing again
 when it goes, by `App::close_export`, which both Cancel and Export go

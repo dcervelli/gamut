@@ -3928,7 +3928,7 @@ fn an_export_is_judged_as_typed_and_written_beside_the_source() {
         written.to_rgb8().get_pixel(0, 0)[0] > 128,
         "the exposure is in the pixels"
     );
-    assert_eq!(said(&app), "Exported b.png.");
+    assert_eq!(said(&app), spelled_here("Exported b.png. Ctrl+Z to undo."));
     assert_eq!(app.files.pending().map(|pending| pending.index), Some(1));
     answer(&mut app, Reload::Fresh);
     assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
@@ -3936,6 +3936,51 @@ fn an_export_is_judged_as_typed_and_written_beside_the_source() {
     assert_eq!(current.turn, Turn::NONE, "the turn is in its pixels");
     assert_eq!(app.image_size(), [6.0, 8.0]);
 
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// Undo takes away a file the window made: an export goes to the trash
+/// and off the list, stepped away from where it is on screen, or left
+/// where it is not; one already gone is said to be.
+#[test]
+fn undo_takes_an_export_to_the_trash() {
+    use input::Action::{Export, Undo};
+
+    let (mut app, dir) = app_over("export-undo", &[("a.png", 8, 6)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let export = |app: &mut App, name: &str| {
+        let _ = app.perform(Export);
+        let _ = app.act(ui::Command::ExportName(name.to_string()));
+        let _ = app.act(ui::Command::Press(ui::Control::ExportTo));
+        app.copying.join_all();
+        let _ = app.poll_copies();
+        answer(app, Reload::Fresh);
+    };
+    export(&mut app, "b.png");
+    assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+    assert!(app.conditions().undoable);
+    assert_eq!(app.perform(Undo), Effect::Redraw);
+    assert_eq!(said(&app), "Moved b.png to the trash.");
+    assert!(!dir.join("b.png").exists());
+    assert!(dir.join("Trash/files/b.png").exists());
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.files.paths(), [dir.join("a.png")]);
+    assert!(!app.conditions().undoable);
+
+    // Made, then stepped away from: it leaves the list behind the file on
+    // screen.
+    export(&mut app, "c.png");
+    let _ = app.perform(input::Action::PreviousFile);
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.perform(Undo), Effect::Redraw);
+    assert_eq!(said(&app), "Moved c.png to the trash.");
+    assert_eq!(app.files.paths(), [dir.join("a.png")]);
+    assert_eq!(app.files.shown_path(), Some(dir.join("a.png").as_path()));
+
+    export(&mut app, "d.png");
+    std::fs::remove_file(dir.join("d.png")).unwrap();
+    assert_eq!(app.perform(Undo), Effect::Redraw);
+    assert_eq!(said(&app), "d.png is no longer there.");
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
@@ -3991,7 +4036,10 @@ fn an_export_is_written_at_the_size_asked_for() {
     assert!(!dir.join("second.png").exists());
     let written = ::image::open(dir.join("big.png")).expect("big.png was written");
     assert_eq!((written.width(), written.height()), (16, 12));
-    assert_eq!(said(&app), "Exported big.png.");
+    assert_eq!(
+        said(&app),
+        spelled_here("Exported big.png. Ctrl+Z to undo.")
+    );
     answer(&mut app, Reload::Fresh);
 
     // Shrunk, and the region is what the percentage is of.

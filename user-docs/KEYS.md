@@ -140,7 +140,7 @@ on screen, since there is then nowhere to pan to.
 | `F2` | Rename the file on screen | `files.rename` |
 | `Del` | Move the file on screen to the trash, and show the next | `files.delete` |
 | `⌫` (`Backspace`) | Take the file on screen off the list, and show the next | `files.remove` |
-| `Ctrl+Z` | Undo the last rename, deletion, removal or replacement | `files.undo` |
+| `Ctrl+Z` | Undo the last rename, deletion, removal, replacement or new file | `files.undo` |
 | `Ctrl+E` | Export the picture as shown to a new JPG or PNG | `files.export` |
 | `Ctrl+Shift+M` | Open map of image location in browser, for a picture that records its location | `files.map` |
 | `Ctrl+Alt+Shift+M` | Open map of image bounds in browser, for a picture placed in latitude and longitude | `files.map-bounds` |
@@ -378,7 +378,8 @@ come back to.
 session: a deleted file comes out of the trash and back into the list where
 it was, a renamed file gets its old name back, a removed file goes back
 onto the list where it stood, and whichever it is, it is the file on
-screen afterwards. Only what touched the disk or the list is on that
+screen afterwards. A file `gamut` made — an export, a paste, or a
+command's new file — goes to the trash and leaves the list. Only what touched the disk or the list is on that
 stack — zoom, exposure and the rest are put back by hand, or by `z`. An undo that cannot
 be done says why: the trash was emptied in the meantime, or something else
 now has the name. Nothing is remembered across a restart; after that the
@@ -429,8 +430,8 @@ screen does not show:
 dialog away. The new file joins the list after the file on screen and is
 shown, upright and at its own settings, since what was done is now in its
 pixels. One export is written at a time: while a large one is still being
-written, the dialog opens but Export waits, and says so. Stepping back finds the original as you left it. An export is not on
-the undo stack; delete the new file as you would any other.
+written, the dialog opens but Export waits, and says so. Stepping back finds the original as you left it. Undo moves the new
+file to the trash.
 
 ## Playing an animation
 
@@ -546,6 +547,7 @@ no use to come back to. It is named for the moment you pasted it, in the same
 form a screenshot is named in: `pasted_2026-09-04_11-40-32.png`. Where it
 goes is wherever your desktop keeps pictures — `~/Pictures` unless you have
 told it otherwise — and the directory is made if it is not there yet.
+Undo moves it to the trash.
 
 There is a button for it too, in the left strip under the region button. It
 is there only while the clipboard is holding an image `gamut` can show, so

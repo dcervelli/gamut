@@ -264,8 +264,16 @@ impl App {
     /// its own, which is right — what was done to the picture is in its
     /// pixels now.
     pub(super) fn exported(&mut self, path: PathBuf) {
-        self.toast(format!("Exported {}.", name_of(&path)), Level::Message);
+        self.toast(
+            format!(
+                "Exported {}.{}",
+                name_of(&path),
+                super::edits::to_undo(&self.keys)
+            ),
+            Level::Message,
+        );
         self.from_command_line = false;
+        self.created(path.clone());
         let request = self.files.adopt(path, Source::Disk);
         let _ = self.send(request);
         self.list_changed();

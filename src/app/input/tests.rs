@@ -425,7 +425,7 @@ fn the_help_popup_says_what_is_bound() {
             .map(|row| row.key.clone())
     };
     assert_eq!(
-        key("Undo the last rename, deletion, removal or replacement").as_deref(),
+        key("Undo the last rename, deletion, removal, replacement or new file").as_deref(),
         Some(spelled_here("Ctrl+E").as_str())
     );
     assert_eq!(
