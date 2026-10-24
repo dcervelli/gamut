@@ -101,9 +101,17 @@ This is how GitHub retired `::set-output` for `$GITHUB_OUTPUT`. An unknown
 line in the result file is an error the window says, since that file is the
 script's deliberate answer; the output is free text, shown verbatim.
 
-`open` takes a path only, and only one that exists. A URL would hand the
-script's words to `xdg-open`, which starts whatever claims the scheme; a
-script that wants a browser runs one itself. A path already on the list is
+`open` takes a path only, and only one that exists and that `decode::probe`
+reads, so that the list never takes in a file it cannot show. A URL would
+hand the script's words to `xdg-open`, which starts whatever claims the
+scheme; a script that wants a browser runs one itself. A run that replaced
+its file wrote into a folder taken away as the run ends, so its `open`s are
+read against it first: `GAMUT_OUTPUT` is the replaced file by then, and is
+opened as that, and any other path inside the folder is refused, since it
+would join the list and be gone a moment later. The paths are compared as
+written, made absolute with `.` and `..` read away, since the output may
+already have been moved. What is refused goes in the Output tab as well as
+in a message, since the message about a replacement is said over it. A path already on the list is
 gone to with `Files::go_to`, found by its absolute form since the list may
 hold it relative; any other joins it beside the file on screen with
 `Files::adopt`, as an export does. A script that writes beside the picture

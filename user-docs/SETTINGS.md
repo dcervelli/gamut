@@ -321,7 +321,7 @@ without quotes:
 
 | Line | What the window does |
 | --- | --- |
-| `open = <path>` | Shows that image, joining it to the list beside the file on screen. A relative path is read from the command's folder. With several, the last |
+| `open = <path>` | Shows that image, joining it to the list beside the file on screen. A relative path is read from the command's folder. With several, the last. One `gamut` cannot read is not shown, and the window says so |
 | `message = <words>` | Says the words at the foot of the window |
 | `error = <words>` | Says them as something that went wrong |
 
@@ -374,8 +374,12 @@ edited file goes to the trash in its turn, so neither way loses a file.
 The file is left as it was, and the window says why, when the command
 fails, writes nothing, or writes something `gamut` cannot read, and when
 the file changed or was moved while the command ran. The hidden folder is
-removed however the command ends. The window's own message about the change
-is what it says afterward, in place of any `message` line.
+removed however the command ends, so anything else written there is gone
+with it: an `open` of `GAMUT_OUTPUT` shows the file it replaced, and an
+`open` of any other file in that folder is refused. The window's own
+message about the change is what it says afterward, in place of any
+`message` line, and anything the result file asked for that could not be
+done is in the **Output** tab.
 
 The new version keeps the original's permissions and nothing else of the
 file is carried across for you: if your command drops metadata, the file

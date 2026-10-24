@@ -5904,6 +5904,70 @@ output = "replace"
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
+/// An `open` of `GAMUT_OUTPUT` after a replacement opens the file it
+/// replaced, which is where the output is by then; an `open` of anything
+/// else left in the output's folder is refused, since that folder is taken
+/// away as the run ends, and nothing joins the list.
+#[test]
+fn an_open_into_the_output_folder_is_the_replaced_file_or_refused() {
+    let (mut app, dir) = app_over("command-open-scratch", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let file = dir.join("a.png");
+    std::fs::create_dir_all(dir.join("made")).unwrap();
+    write_png(&dir.join("made"), "wider.png", 6, 2);
+    let received = with_commands(
+        &mut app,
+        r#"[command.own]
+run = 'cp made/wider.png "$GAMUT_OUTPUT"; echo "open = $GAMUT_OUTPUT" >> "$GAMUT_RESULT"'
+output = "replace"
+[command.extra]
+run = 'cp made/wider.png "$GAMUT_OUTPUT"; d=$(dirname "$GAMUT_OUTPUT"); cp made/wider.png "$d/extra.png"; echo "open = $d/../$(basename "$d")/extra.png" >> "$GAMUT_RESULT"'
+output = "replace"
+"#,
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    assert_eq!(
+        said(&app),
+        spelled_here("own changed a.png. The original is in the trash. Ctrl+Z to undo.")
+    );
+    assert_eq!(app.files.paths(), std::slice::from_ref(&file));
+    answer(&mut app, Reload::InPlace);
+    assert_eq!(app.current.as_ref().unwrap().pixels(), [6, 2]);
+
+    // Said in the Output tab, since the message about the replacement is
+    // said over it.
+    let _ = app.perform(input::Action::Command(1));
+    finish(&mut app, &received);
+    let run = app.commands.run_on(Some(&file)).expect("kept");
+    let last = run.lines.last().expect("the refusal is a line");
+    assert!(last.error);
+    assert_eq!(
+        last.text,
+        "extra.png was left in the folder made for its output, \
+         which is taken away when it ends."
+    );
+    assert_eq!(app.files.paths(), [file]);
+    assert_eq!(output_dirs(&dir), Vec::<PathBuf>::new());
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// An `open` of a file the window cannot read is refused, rather than put
+/// on the list as a file that will not show.
+#[test]
+fn an_open_of_a_file_that_will_not_read_is_refused() {
+    let (mut app, dir) = app_over("command-open-junk", &[("a.png", 4, 3)]);
+    let received = with_commands(
+        &mut app,
+        "[command.junk]\nrun = 'echo junk > j.png; echo \"open = j.png\" >> \"$GAMUT_RESULT\"'\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    assert_eq!(said(&app), "junk: j.png can't be read.");
+    assert_eq!(app.files.len(), 1);
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
 /// Undoing a replacement whose original has since been emptied from the
 /// trash keeps the edited file, and says so.
 #[test]

@@ -205,6 +205,24 @@ fn expand_home(path: &str) -> PathBuf {
     }
 }
 
+/// `path` absolute, with its `.` and `..` read away, as the script may
+/// write it: for telling whether two spellings name the same place without
+/// asking the disk, where the one may already be gone.
+fn lexically(path: &Path) -> PathBuf {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut read = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                read.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => read.push(other),
+        }
+    }
+    read
+}
+
 /// A value fit for the environment: a NUL cannot be in one, and a
 /// control character from a file's metadata has no business reaching a
 /// script that may print it to a terminal.
@@ -498,11 +516,16 @@ impl App {
             _ => None,
         };
         let id = self.commands.runs + 1;
-        let replacing = match (command.replaces, &about) {
-            (true, Some(file)) => match self.prepare_replacing(&command.label, file, id) {
-                Some(replacing) => Some(replacing),
-                None => return Effect::Redraw,
-            },
+        // The file as the list spells it, which what is done to it once the
+        // run is over finds it by; the absolute path is the script's.
+        let listed = self.files.shown_path().map(Path::to_path_buf);
+        let replacing = match (command.replaces, &about, listed) {
+            (true, Some(file), Some(listed)) => {
+                match self.prepare_replacing(&command.label, file, listed, id) {
+                    Some(replacing) => Some(replacing),
+                    None => return Effect::Redraw,
+                }
+            }
             _ => None,
         };
         if let Some(replacing) = &replacing {
@@ -539,13 +562,20 @@ impl App {
         Effect::Redraw
     }
 
-    /// What run `id` of `label`, which replaces `file`, is given to write
-    /// its output to, and the file as it is now, which it has to still be
-    /// once the run is over. `None`, with the reason said, where the file
-    /// cannot be replaced: there is no trash to keep the original in, the
-    /// file is a link — whose replacement would be a file in the link's
-    /// place — or is not there, or its folder will not take a directory.
-    fn prepare_replacing(&mut self, label: &str, file: &Path, id: u64) -> Option<Replacing> {
+    /// What run `id` of `label`, which replaces `file` — `listed` on the
+    /// list — is given to write its output to, and the file as it is now,
+    /// which it has to still be once the run is over. `None`, with the
+    /// reason said, where the file cannot be replaced: there is no trash to
+    /// keep the original in, the file is a link — whose replacement would
+    /// be a file in the link's place — or is not there, or its folder will
+    /// not take a directory.
+    fn prepare_replacing(
+        &mut self,
+        label: &str,
+        file: &Path,
+        listed: PathBuf,
+        id: u64,
+    ) -> Option<Replacing> {
         let name = super::edits::name_of(file);
         if self.trash.is_none() {
             self.toast(super::edits::NO_TRASH, Level::Error);
@@ -585,7 +615,7 @@ impl App {
         };
         let output = dir.join(file.file_name().unwrap_or_default());
         Some(Replacing {
-            file: file.to_path_buf(),
+            file: listed,
             dir,
             output,
             was,
@@ -828,17 +858,10 @@ impl App {
         let reveal = !finished.stdout.text.trim().is_empty()
             || (failed && !finished.stderr.text.trim().is_empty());
         let logged = finished.dir.is_some();
-        self.commands.keep(
-            finished.about.clone(),
-            Run {
-                label: label.clone(),
-                took: finished.took,
-                ended: ended.clone(),
-                lines,
-                logged,
-            },
-            finished.dir.map(|dir| dir.join("stdout")),
-        );
+        // What of the result file could not be done, said in the Output tab
+        // as well as by a message: the message has one slot, and what a
+        // replacement says is said over it.
+        let mut refused: Vec<String> = Vec::new();
         let mut effect = Effect::Redraw;
         // The file replaced before anything the result file asks is done,
         // so that an `open` of it finds the new one.
@@ -876,7 +899,13 @@ impl App {
                             self.toast(crate::escape_controls(&words), Level::Error);
                         }
                         Directive::Open(path) => {
-                            effect = effect.also(self.open_made(&label, &path, cwd.as_deref()));
+                            match self.open_made(&path, cwd.as_deref(), replacing.as_ref()) {
+                                Ok(opened) => effect = effect.also(opened),
+                                Err(why) => {
+                                    self.toast(format!("{label}: {why}"), Level::Error);
+                                    refused.push(why);
+                                }
+                            }
                         }
                     }
                 }
@@ -914,6 +943,22 @@ impl App {
         if let Some(replacing) = replacing {
             let _ = std::fs::remove_dir_all(replacing.dir);
         }
+        let reveal = reveal || !refused.is_empty();
+        lines.extend(refused.into_iter().map(|why| Line {
+            text: why,
+            error: true,
+        }));
+        self.commands.keep(
+            finished.about.clone(),
+            Run {
+                label,
+                took: finished.took,
+                ended,
+                lines,
+                logged,
+            },
+            finished.dir.map(|dir| dir.join("stdout")),
+        );
         if reveal {
             effect = effect.also(self.reveal_info(ui::tags::Tab::Output));
         }
@@ -922,19 +967,38 @@ impl App {
 
     /// An `open` line: the image the script made, shown in the window — the
     /// file it is already on the list as, or a newcomer beside the file on
-    /// screen, as an export joins it.
-    fn open_made(&mut self, label: &str, path: &str, cwd: Option<&Path>) -> Effect {
+    /// screen, as an export joins it, where it is one the window reads.
+    /// What is wrong with it otherwise, for the caller to say.
+    ///
+    /// `scratch` is where a run that replaced its file wrote, which is
+    /// taken away once the run is over. Its output is the file it replaced
+    /// by now, so an `open` of `GAMUT_OUTPUT` is an `open` of that; anything
+    /// else in there is refused, since it would join the list only to be
+    /// gone from under it a moment later.
+    fn open_made(
+        &mut self,
+        path: &str,
+        cwd: Option<&Path>,
+        scratch: Option<&Replacing>,
+    ) -> Result<Effect, String> {
         let path = expand_home(path);
         let path = match cwd {
             Some(cwd) if path.is_relative() => cwd.join(path),
             _ => path,
         };
+        let name = super::edits::name_of(&path);
+        let path = match scratch {
+            Some(scratch) if lexically(&path) == lexically(&scratch.output) => scratch.file.clone(),
+            Some(scratch) if lexically(&path).starts_with(lexically(&scratch.dir)) => {
+                return Err(format!(
+                    "{name} was left in the folder made for its output, \
+                     which is taken away when it ends."
+                ));
+            }
+            _ => path,
+        };
         if !path.is_file() {
-            self.toast(
-                format!("{label}: no file at {}", crate::shown_path(&path)),
-                Level::Error,
-            );
-            return Effect::Redraw;
+            return Err(format!("no file at {}", crate::shown_path(&path)));
         }
         let absolute = std::path::absolute(&path).unwrap_or_else(|_| path.clone());
         let listed = self.files.position(&path).or_else(|| {
@@ -943,6 +1007,9 @@ impl App {
                 .iter()
                 .position(|each| std::path::absolute(each).is_ok_and(|each| each == absolute))
         });
+        if listed.is_none() && crate::image::decode::probe(&path).is_err() {
+            return Err(format!("{name} can't be read."));
+        }
         self.from_command_line = false;
         let request = match listed {
             Some(index) => self.files.go_to(index),
@@ -952,7 +1019,7 @@ impl App {
                 request
             }
         };
-        self.send(request).also(Effect::Redraw)
+        Ok(self.send(request).also(Effect::Redraw))
     }
 
     /// The Output tab's copy: the whole of the last run's output on the
