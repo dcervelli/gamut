@@ -52,7 +52,7 @@ use crate::openers::{self, Opener};
 use crate::player;
 use crate::portal::{self, Pick, Picked};
 use crate::render::{Draw, GpuImage, HdrPreference, Placement, Reduced, Renderer, Scene, Upscale};
-use crate::settings::{Config, State, StateFile};
+use crate::settings::{Config, Loaded, Rewrite, State, StateFile};
 use crate::theme::{self, Theme};
 use crate::thumbnailer::{Delivered, Facts, News, Thumb, Thumbnailer};
 use crate::timing;
@@ -2005,6 +2005,22 @@ impl App {
         );
     }
 
+    /// Says, as the window opens, what became of a configuration file in
+    /// the old format: rewritten as TOML, or read as it would have been,
+    /// the terminal having why it could not be.
+    pub fn rewrote(&mut self, rewrite: Rewrite) {
+        let (message, level) = match rewrite {
+            Rewrite::Written => (CONFIG_REWRITTEN, Level::Message),
+            Rewrite::Unwritten => (CONFIG_UNWRITTEN, Level::Warning),
+        };
+        self.toasts.show(
+            Instant::now(),
+            message.to_string(),
+            level,
+            toast::LINGER_AT_OPENING,
+        );
+    }
+
     /// Says what the copies prepared on their own threads did. Returns
     /// whether anything was said, and so whether a redraw is owed.
     ///
@@ -2466,7 +2482,9 @@ impl App {
         if !self.config_watch.poll() {
             return Effect::Nothing;
         }
-        let (config, complaint) = Config::load();
+        let Loaded {
+            config, complaint, ..
+        } = Config::load();
         self.reconfigure(config, complaint)
     }
 
@@ -3488,6 +3506,16 @@ fn hdr_state_of(offered: bool, speaks_modes: bool, monitor: Option<Mode>) -> Hdr
 
 /// Said when the configuration file has been read again and taken whole.
 const RECONFIGURED: &str = "Configuration reloaded.";
+
+/// Said as the window opens where the configuration was found in the old
+/// format and rewritten as TOML.
+const CONFIG_REWRITTEN: &str =
+    "Your configuration was rewritten as config.toml. The old file is unchanged.";
+
+/// Said as the window opens where it was found in the old format and the
+/// new file could not be written.
+const CONFIG_UNWRITTEN: &str =
+    "Your configuration is in the old format and could not be rewritten. See the terminal.";
 
 /// Said when a raw arrives with the camera's JPEG asked for and none in it.
 const NO_CAMERA_JPEG_SHOWN: &str = "No camera JPEG in this file; showing the developed picture.";

@@ -253,7 +253,7 @@ the zoom menu the pointer is on the menu, and the middle of the window is
 what stays. Asked for the zoom the view is already at, `set_zoom_at` puts
 the detail under the anchor in the middle instead — `1` at actual size goes
 to the detail rather than doing nothing — as a move, being asked for by
-name. The double-click is not that: its default is `zoom.100.toggle`, whose
+name. The double-click is not that: its default is `zoom.toggle`, whose
 `View::toggle_zoom` goes to actual size about the anchor from anywhere but
 actual size itself, and from there to the whole image, so that in and out
 again is two double-clicks on the same spot. Actual size is judged by the

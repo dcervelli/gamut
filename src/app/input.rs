@@ -884,7 +884,7 @@ pub static ROWS: &[Row] = &[
         section: Section::Zoom,
         when: None,
         help: "Toggle between 100% and fit whole image",
-        keys: one!("zoom.100.toggle", ToggleZoom(1.0), []),
+        keys: one!("zoom.toggle", ToggleZoom(1.0), []),
     },
     Row {
         section: Section::Zoom,
@@ -1292,7 +1292,7 @@ pub static ROWS: &[Row] = &[
         section: Section::Files,
         when: Some(When::Geographic),
         help: "Open map of image bounds in browser",
-        keys: one!("files.map.bounds", OpenMapBounds, [typed(CTRL_ALT, 'M')]),
+        keys: one!("files.map-bounds", OpenMapBounds, [typed(CTRL_ALT, 'M')]),
     },
     // The region's own section: the key that puts one up, what the fit
     // does while it is, and the names that are tried before the plain ones
@@ -1639,7 +1639,7 @@ pub static MAC_DEFAULTS: &[(&str, &[Chord])] = &[
     ("files.undo", &[typed(CMD, 'z')]),
     ("files.export", &[typed(CMD, 'e')]),
     ("files.map", &[typed(CMD, 'M')]),
-    ("files.map.bounds", &[typed(CTRL_CMD, 'M')]),
+    ("files.map-bounds", &[typed(CTRL_CMD, 'M')]),
     // Preview's.
     ("display.turn.left", &[key(';'), typed(CMD, 'l')]),
     ("display.turn.right", &[key('\''), typed(CMD, 'r')]),

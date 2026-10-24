@@ -161,6 +161,13 @@ roxmltree = "0.20"
 # GeoTIFF keys — and `directory` reads a BigTIFF's first directory through
 # it for the metadata reader, which is defined on the original format.
 tiff = "0.11.3"
+# The configuration file, which is TOML: parsed into its tables with each
+# key's and value's place in the text, and read from them by hand rather than
+# through serde, so that a value it cannot use is said on its own line and
+# the rest still taken. Already in the tree under `egui_kittest`; the order
+# the file writes its tables in is kept, which is the order the commands are
+# listed in.
+toml = { version = "1.1.4", default-features = false, features = ["std", "parse", "preserve_order"] }
 # The container half of Ultra HDR: finds the gain map through MPF and XMP and
 # hands back raw JPEG bytes, leaving the decoding to whatever codec we already
 # have. `ultrahdr-core`, which does the gain map arithmetic, comes with it.

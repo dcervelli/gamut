@@ -3644,25 +3644,25 @@ fn the_command_dialog_hands_back_each_value() {
             rows: vec![
                 row(
                     "Size",
-                    Kind::read("number 1 10").unwrap(),
+                    Kind::number(Some((1.0, 10.0)), None).unwrap(),
                     Value::Number(size.to_string()),
                     refused,
                 ),
                 row(
                     "Mode",
-                    Kind::read("radio blur black").unwrap(),
+                    Kind::radio(vec!["blur".into(), "black".into()], None).unwrap(),
                     Value::Radio(0),
                     None,
                 ),
                 row(
                     "Note",
-                    Kind::read("checkbox").unwrap(),
+                    Kind::Checkbox { default: false },
                     Value::Checkbox(false),
                     None,
                 ),
                 row(
                     "Strength",
-                    Kind::read("slider 0 100 50").unwrap(),
+                    Kind::slider(0.0, 100.0, Some(50.0), None).unwrap(),
                     Value::Slider(50.0),
                     None,
                 ),

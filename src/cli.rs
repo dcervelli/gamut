@@ -23,7 +23,7 @@ use crate::image::decode::Overrides;
 use crate::image::display::{AutoWindow, Colormap, Startup, ToneMap};
 use crate::image::{Primaries, Transfer};
 use crate::render::{HdrPreference, Upscale};
-use crate::settings::Config;
+use crate::settings::{Config, Loaded, Rewrite};
 
 /// What the program is, after its name at the top of `--help` and in the
 /// manual page's NAME line.
@@ -163,7 +163,7 @@ const FLAGS: &[Flag] = &[
         help: &[
             "Print a configuration file, every setting at its",
             "default and commented out, to be saved as",
-            "~/.config/gamut/config and edited",
+            "~/.config/gamut/config.toml and edited",
         ],
         apply: |_, _| {
             print!("{}", Config::template());
@@ -656,6 +656,8 @@ pub struct Args {
     /// What the window says about the configuration file, if some of it
     /// could not be used; the terminal has already been told.
     pub complaint: Option<String>,
+    /// Whether the configuration was found in the old format.
+    pub rewrite: Option<Rewrite>,
     pub options: Options,
 }
 
@@ -715,7 +717,11 @@ pub fn parse_args() -> Result<Option<Args>> {
         .filter(|path| !path.is_dir())
         .cloned()
         .collect();
-    let (mut config, complaint) = Config::load();
+    let Loaded {
+        mut config,
+        complaint,
+        rewrite,
+    } = Config::load();
     // The side panel holds one of the two, the histogram where both are
     // on, so a flag asking for the information alone is not overruled by
     // the configuration's asking for the histogram.
@@ -731,6 +737,7 @@ pub fn parse_args() -> Result<Option<Args>> {
         paste,
         named,
         complaint,
+        rewrite,
         options: Options {
             overrides,
             startup,

@@ -20,6 +20,7 @@ use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
 use super::input::{Action, Section, When};
 use crate::gestures::{Mods, modifiers_token, read_modifier, with_modifiers};
+use crate::settings::document::{key, string};
 
 /// A key: the character it types, the name of one that types none, or —
 /// where the character would depend on the layout — the place on the
@@ -93,11 +94,23 @@ const NAMED: &[(NamedKey, &str, &str)] = &[
 /// The line of the template that names the modifiers, in the words this
 /// platform writes them in.
 #[cfg(not(target_os = "macos"))]
-const MODIFIER_LINE: &str =
+pub(crate) const MODIFIER_LINE: &str =
     "# ctrl, alt, shift, super; the key one character as the keyboard types it\n";
 #[cfg(target_os = "macos")]
-const MODIFIER_LINE: &str =
+pub(crate) const MODIFIER_LINE: &str =
     "# ctrl, option, shift, cmd; the key one character as the keyboard types it\n";
+
+/// What the template says a `keys.` line takes, and what a chord is.
+pub(crate) fn chords_prose() -> String {
+    format!(
+        "# Keys: each keys.<name> takes its chords in quotes, whitespace between;\n\
+         # \"\" unbinds it. A chord is modifiers joined by + and then a key:\n\
+         {MODIFIER_LINE}\
+         # (> rather than shift+., L for Shift+L), a digit of the number row by its\n\
+         # place (shift+2), or space, enter, esc, tab, backspace, delete, insert,\n\
+         # home, end, pageup, pagedown, left, right, up, down, f1 to f12.\n"
+    )
+}
 
 /// The four arrows, which a column of four with one prefix names at once.
 const ARROWS: [NamedKey; 4] = [
@@ -736,17 +749,9 @@ impl Keymap {
     /// Every name at its chords, commented out, under its section and what
     /// its line says it does, as `--print-config` lists them.
     pub fn template(&self) -> String {
-        let mut text = String::from(
-            "\n# Keys: each keys.<name> takes its chords, whitespace between them; with\n\
-             # none the name is unbound. A chord is modifiers joined by + and then a key:\n",
-        );
-        text.push_str(MODIFIER_LINE);
+        let mut text = format!("\n{}", chords_prose());
         text.push_str(
-            "# (> rather than shift+., L for Shift+L), a digit of the number row by its\n\
-             # place (shift+2), or space, enter, esc, tab, backspace, delete, insert,\n\
-             # home, end, pageup, pagedown, left, right, up, down, f1 to f12. # starts\n\
-             # a comment, so the key that types it is written by its place: shift+3.\n\
-             # A chord set here is taken from whichever other name held it. With a\n\
+            "# A chord set here is taken from whichever other name held it. With a\n\
              # region selected the region's names are tried first, then the rest.\n",
         );
         for section in Section::ALL {
@@ -765,8 +770,12 @@ impl Keymap {
                         .iter()
                         .map(Chord::token)
                         .collect();
-                    let line = format!("# keys.{} = {}", bound.name, tokens.join(" "));
-                    let _ = writeln!(text, "{}", line.trim_end());
+                    let _ = writeln!(
+                        text,
+                        "# keys.{} = {}",
+                        key(bound.name),
+                        string(&tokens.join(" "))
+                    );
                     for describing in self.rows.iter() {
                         match describing.keys {
                             Keys::Also(name) if name == bound.name => {
@@ -1127,11 +1136,11 @@ mod tests {
         let mut names = 0;
         for line in template
             .lines()
-            .filter_map(|line| line.strip_prefix("# keys."))
+            .filter_map(|line| line.strip_prefix("# "))
+            .filter(|line| line.starts_with("keys."))
         {
-            let (name, value) = line
-                .split_once(" = ")
-                .unwrap_or((line.trim_end_matches(" ="), ""));
+            let (name, value) = crate::settings::document::single(line);
+            let name = name.strip_prefix("keys.").expect("a key's name");
             let chords = value.split_whitespace().map(chord).collect();
             read.bind(name, chords).unwrap();
             names += 1;
@@ -1164,7 +1173,7 @@ mod tests {
                 // ⌃⇧⌘M, by the author's choice.
                 assert!(
                     !chord.mods.control_key()
-                        || (bound.name == "files.map.bounds" && chord.mods.super_key()),
+                        || (bound.name == "files.map-bounds" && chord.mods.super_key()),
                     "{} is held with Ctrl",
                     bound.name
                 );

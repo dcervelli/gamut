@@ -2,12 +2,15 @@
 # Redact: a copy of the picture on screen with the region marked in gamut
 # blacked out, written beside it and then shown. Linux.
 #
-# In ~/.config/gamut/config:
+# In ~/.config/gamut/config.toml, the key above the first [command] table
+# and the table below the rest:
 #
-#   command.redact.label = Redact region
-#   command.redact.run = /path/to/redact-linux.sh
-#   command.redact.needs = region
-#   keys.command.redact = ctrl+shift+r
+#   keys.command.redact = "ctrl+shift+r"
+#
+#   [command.redact]
+#   label = "Redact region"
+#   run = "/path/to/redact-linux.sh"
+#   needs = "region"
 #
 # Needs ImageMagick: `pacman -S imagemagick`, `apt install imagemagick` or
 # `dnf install ImageMagick`. The region arrives in the file's own pixels,

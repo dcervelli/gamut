@@ -6,17 +6,20 @@ which is its own. Neither has to exist.
 
 ## The configuration file
 
-`~/.config/gamut/config` (under `$XDG_CONFIG_HOME` if you set it) says how the
-window opens every time. It is in the same place on a Mac. `gamut` only reads it: toggling a panel in the window
-lasts until the window closes and does not change the file.
+`~/.config/gamut/config.toml` (under `$XDG_CONFIG_HOME` if you set it) says
+how the window opens every time. It is in the same place on a Mac. `gamut`
+only reads it: toggling a panel in the window lasts until the window closes
+and does not change the file.
 
-Each line is `name = value`, and a `#` at the start of a line or after a space
-starts a comment. Anything left out keeps its default. To start a file with every setting, every key and every mouse
-gesture listed, commented out at its default, run:
+It is a [TOML](https://toml.io) file. Each line is `name = value`; words go in
+quotes, and `true`, `false` and numbers do not. `#` starts a comment, outside
+quotes. Anything left out keeps its default. To start a file with every
+setting, every key and every mouse gesture listed, commented out at its
+default, run:
 
 ```
 mkdir -p ~/.config/gamut
-gamut --print-config > ~/.config/gamut/config
+gamut --print-config > ~/.config/gamut/config.toml
 ```
 
 Or press `Ctrl+,` (`⌘,` on a Mac), or **Edit configuration file** at the foot
@@ -42,27 +45,46 @@ settings are:
 
 `--histogram`, `--info`, `--no-minimap` and `--alone` override the file for
 that one run.
-If a line has a misspelled name or a value `gamut` does not recognize, it
-names the line on the terminal and uses the rest of the file. The window
-says so too as it opens, naming the first such line and how many more there
-are.
+If a line has a misspelled name, a value `gamut` does not recognize, or
+something TOML cannot read, `gamut` names the line on the terminal and uses
+the rest of the file. The window says so too as it opens, naming the first
+such line and how many more there are.
+
+Settings, keys and gestures go above the first command — see
+[Commands](#commands) — since in TOML every line after a `[command.<name>]`
+heading belongs to that command.
+
+### A configuration from an earlier version
+
+Earlier versions read `~/.config/gamut/config`, with values written without
+quotes. If `gamut` finds that file and no `config.toml`, it
+writes `config.toml` from it, with the same settings, keys, gestures and
+commands, and your comments where you left them, and says so as the window
+opens. From then on it reads only `config.toml`; the old file is left as it
+was, for you to delete. Two key names changed with it, because TOML cannot
+hold a name and a longer name that starts with it: `zoom.100.toggle` is now
+`zoom.toggle`, and `files.map.bounds` is now `files.map-bounds`.
+
+If `config.toml` cannot be written there, `gamut` reads the old file as it
+would have rewritten it, every time it starts, and says so.
 
 ### Keys
 
 Every key has a dotted name — `zoom.in`, `files.undo`, `region.move.left` —
 listed beside it in [Keys and mouse](KEYS.md), and in the file
-`--print-config` writes. A line binds the name to the keys after it,
-separated by spaces, in place of its defaults:
+`--print-config` writes. A line binds the name to the keys in quotes after
+it, separated by spaces, in place of its defaults:
 
 ```
-keys.zoom.in = + =
-keys.files.undo = ctrl+z
-keys.files.export = ctrl+shift+e
-keys.files.chooser =
+keys.zoom.in = "+ ="
+keys.files.undo = "ctrl+z"
+keys.files.export = "ctrl+shift+e"
+keys.files.chooser = ""
 ```
 
 The last line binds `files.chooser` to nothing, so no key opens the chooser,
-and the help popup (`?`) marks its line **unbound**.
+and the help popup (`?`) marks its line **unbound**. A list in brackets,
+`["+", "="]`, is read the same way.
 
 A key is written as the modifiers held with it, each followed by `+`, and
 then the key itself. The modifiers are `ctrl` (or `control`), `alt`,
@@ -82,9 +104,6 @@ same key as `super` and `alt`, so one file serves both. The key is one of:
   `backspace`, `delete` (or `del`), `insert`, `home`, `end`, `pageup`,
   `pagedown`, `left`, `right`, `up`, `down`, and `f1` to `f12`. These names
   are read in any case; a single character is not.
-
-`#` starts a comment, so to use the key that types it, write the number-row
-key it is on: `shift+3` on most layouts.
 
 A key has one job at a time. Binding a key to a name takes it away from
 whichever name had it, so a key moved from one job to another does not also
@@ -110,15 +129,18 @@ may wrap in the help popup.
 ### Gestures
 
 Each thing the mouse can do on the picture or the minimap is a slot, named
-`gesture.<surface>.<what is done>`, and holds one behavior:
+`gesture.<surface>.<what is done>`, and holds one behavior, in quotes:
 
 ```
-gesture.image.middle.drag = pan
-gesture.image.middle.hold = loupe
-gesture.image.ctrl+wheel = exposure
-gesture.image.left.drag = zoom-box
-gesture.image.back.click = none
+gesture.image.middle.drag = "pan"
+gesture.image.middle.hold = "loupe"
+gesture.image."ctrl+wheel" = "exposure"
+gesture.image.left.drag = "zoom-box"
+gesture.image.back.click = "none"
 ```
+
+A part of the name with a `+` in it goes in quotes, as `"ctrl+wheel"` does
+above: TOML reads a name bare only where it is letters, digits, `-` and `_`.
 
 The surface is `image` or `minimap`. What is done is a button, held with any
 modifiers, and how it is used: `left`, `middle`, `right`, `back` or
@@ -170,50 +192,75 @@ to zoom to, and a click on a handle makes it the current one.
 
 A command is a line of the shell that `gamut` runs for you, with the file on
 screen and what you have marked on it handed over in its environment. Each
-one is a few lines of the file, all starting `command.` and its name:
+one is a table of the file, under a `[command.<name>]` heading, after every
+setting, key and gesture:
 
 ```
-command.redact.label = Redact region
-command.redact.run = ~/bin/redact.sh
-command.redact.needs = region
-command.redact.input.style = radio black blur = black
-command.redact.input.style.label = Style
-keys.command.redact = ctrl+shift+r
+keys.command.redact = "ctrl+shift+r"
+
+[command.redact]
+label = "Redact region"
+run = "~/bin/redact.sh"
+needs = "region"
+
+[[command.redact.input]]
+name = "style"
+label = "Style"
+kind = "radio"
+choices = ["black", "blur"]
+default = "black"
 ```
 
 Only `run` is required. A command appears at the foot of the file menu,
 under the button before the file's name, and on a Mac in **File ▸
-Commands**. The help popup lists it with its key. Bind a key to it with
-`keys.command.<name>`, or a click with `gesture.image.<button>.click =
-command.<name>`; a command has no key until you give it one. The name is
-lower-case letters, digits, `_` and `-`.
+Commands**, in the order the file has them. The help popup lists it with
+its key. Bind a key to it with `keys.command.<name>`, or a click with
+`gesture.image.<button>.click = "command.<name>"`, above the first command;
+a command has no key until you give it one. The name is lower-case letters,
+digits, `_` and `-`.
 
-| Line | What it does |
+| Field | What it does |
 | --- | --- |
 | `run` | The line the shell runs, as `sh -c` would. It runs in the folder of the file on screen, or your home folder with nothing open. A script's `$0` is `gamut` |
 | `label` | What the menu, the help popup and the window's messages call it. The name, if left out |
-| `needs` | What it cannot run without: `file` (the default), `region`, `pointer`, `location` (a photo that says where it was taken), `georeference` (a map placed on the ground), or `none`, which runs from the empty window too. Without it, the item is dead and its tooltip says why |
+| `needs` | What it cannot run without: `"file"` (the default), `"region"`, `"pointer"`, `"location"` (a photo that says where it was taken), `"georeference"` (a map placed on the ground), or `"none"`, which runs from the empty window too. Without it, the item is dead and its tooltip says why |
 | `confirm` | `true` asks before running, even with nothing to ask |
 | `shown` | `true` writes the picture as you see it, turned, exposed and toned, to a PNG for the command to read, in `GAMUT_SHOWN` |
-| `input.<name>` | Something to ask before it runs. The window puts up a dialog with every input in the order the file first names them, and the answer reaches the command as `GAMUT_INPUT_<NAME>`, in capitals. The name is lower-case letters, digits and `_` |
-| `input.<name>.label` | What the dialog calls that input. Its name, if left out |
+| `input` | What to ask before it runs: one `[[command.<name>.input]]` table for each, below. The window puts up a dialog with every input in the order the file has them |
 
-An input is one of these, each with a default where the line gives none:
+A `run` line in single quotes is read exactly as written, which suits a
+line of the shell with double quotes in it:
 
-| Input | Written | Reaches the command as |
+```
+run = 'magick "$GAMUT_FILE" -negate "$GAMUT_DIR/$GAMUT_STEM-negative.png"'
+```
+
+Three single quotes on each side hold a script of several lines.
+
+Each input has a `name`, which reaches the command as `GAMUT_INPUT_<NAME>`
+in capitals and is lower-case letters, digits and `_`; a `label`, what the
+dialog calls it, which is its name if left out; and a `kind`, with what
+that kind takes:
+
+| `kind` | Also takes | Reaches the command as |
 | --- | --- | --- |
-| A line of text | `string`, then the default text | What was typed |
-| A number | `number`, then a least and a most, then a default. All optional; the dialog refuses a number outside them | The number: `4.5` |
-| A checkbox | `checkbox true` or `checkbox false` | `true` or `false` |
-| A choice of words | `radio`, the words, then `=` and the default: `radio png jpg = jpg`. The first word, if no default | The word chosen |
-| A slider | `slider`, a least, a most, a default and a step: `slider 0 1 0.5 0.05`. The default is the least, and the step 1 between whole numbers or a hundredth of the range otherwise | The number |
+| `"string"`, a line of text | `default`, the text it starts with | What was typed |
+| `"number"` | `min` and `max`, which the dialog keeps a number between, and `default`. All optional, though `min` and `max` go together | The number: `4.5` |
+| `"checkbox"` | `default`, `true` or `false` | `true` or `false` |
+| `"radio"`, a choice of words | `choices`, a list of two or more: `["png", "jpg"]`; and `default`, one of them, the first if left out | The word chosen |
+| `"slider"` | `min` and `max`, which it needs; `default`, the least if left out; and `step`, 1 between whole numbers or a hundredth of the range otherwise | The number |
+
+Inputs can also be written as a list in the command's table, one to a line:
+
+```
+input = [
+  { name = "blur", label = "Blur radius", kind = "slider", min = 1, max = 50, default = 10 },
+  { name = "format", kind = "radio", choices = ["png", "jpg"] },
+]
+```
 
 The dialog opens with what you last chose for that command in this
 session. `Enter` runs it, `Esc` closes it.
-
-A `run` line is read as every line of the file is: a `#` after a space
-starts a comment there too, so a command that needs one belongs in a script
-of its own, named by `run`.
 
 #### What a command is told
 
@@ -267,8 +314,8 @@ rest are, in the map's own coordinates, and in latitude and longitude where
 #### What a command tells the window
 
 To have the window show an image the command made, or say something,
-write lines to the file `GAMUT_RESULT` names, written as this file's lines
-are:
+write lines of `name = value` to the file `GAMUT_RESULT` names, the value
+without quotes:
 
 | Line | What the window does |
 | --- | --- |
@@ -319,9 +366,15 @@ These use programs you install yourself: ImageMagick's `magick`,
 Black out the region, in a new file beside the photo, and show it:
 
 ```
-command.redact.label = Redact region
-command.redact.needs = region
-command.redact.run = out="$GAMUT_DIR/$GAMUT_STEM-redacted.$GAMUT_EXT"; magick "$GAMUT_FILE" -fill black -draw "rectangle $GAMUT_REGION_X,$GAMUT_REGION_Y $((GAMUT_REGION_X + GAMUT_REGION_WIDTH - 1)),$((GAMUT_REGION_Y + GAMUT_REGION_HEIGHT - 1))" "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+[command.redact]
+label = "Redact region"
+needs = "region"
+run = '''
+out="$GAMUT_DIR/$GAMUT_STEM-redacted.$GAMUT_EXT"
+magick "$GAMUT_FILE" -fill black \
+  -draw "rectangle $GAMUT_REGION_X,$GAMUT_REGION_Y $((GAMUT_REGION_X + GAMUT_REGION_WIDTH - 1)),$((GAMUT_REGION_Y + GAMUT_REGION_HEIGHT - 1))" \
+  "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+'''
 ```
 
 The coordinates are the file's own, so this blacks out the right place
@@ -330,77 +383,100 @@ whichever way the photo was held, and the new file keeps its orientation.
 Blur it instead, as hard as the slider says:
 
 ```
-command.blur.label = Blur region
-command.blur.needs = region
-command.blur.input.radius = slider 1 50 12
-command.blur.input.radius.label = Radius
-command.blur.run = out="$GAMUT_DIR/$GAMUT_STEM-blurred.$GAMUT_EXT"; magick "$GAMUT_FILE" -region "${GAMUT_REGION_WIDTH}x${GAMUT_REGION_HEIGHT}+${GAMUT_REGION_X}+${GAMUT_REGION_Y}" -blur "0x$GAMUT_INPUT_RADIUS" "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+[command.blur]
+label = "Blur region"
+needs = "region"
+input = [{ name = "radius", label = "Radius", kind = "slider", min = 1, max = 50, default = 12 }]
+run = '''
+out="$GAMUT_DIR/$GAMUT_STEM-blurred.$GAMUT_EXT"
+magick "$GAMUT_FILE" \
+  -region "${GAMUT_REGION_WIDTH}x${GAMUT_REGION_HEIGHT}+${GAMUT_REGION_X}+${GAMUT_REGION_Y}" \
+  -blur "0x$GAMUT_INPUT_RADIUS" "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+'''
 ```
 
 Sign the picture in its lower right corner. `-auto-orient` first, since the
 corner is the one you see:
 
 ```
-command.sign.label = Watermark
-command.sign.input.text = string © Your Name
-command.sign.input.text.label = Text
-command.sign.run = out="$GAMUT_DIR/$GAMUT_STEM-signed.jpg"; magick "$GAMUT_FILE" -auto-orient -gravity southeast -pointsize 48 -fill "rgba(255,255,255,0.6)" -annotate +32+32 "$GAMUT_INPUT_TEXT" "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+[command.sign]
+label = "Watermark"
+input = [{ name = "text", label = "Text", kind = "string", default = "© Your Name" }]
+run = '''
+out="$GAMUT_DIR/$GAMUT_STEM-signed.jpg"
+magick "$GAMUT_FILE" -auto-orient -gravity southeast -pointsize 48 \
+  -fill "rgba(255,255,255,0.6)" -annotate +32+32 "$GAMUT_INPUT_TEXT" "$out" \
+  && echo "open = $out" >> "$GAMUT_RESULT"
+'''
 ```
 
 Save exactly what is on screen, exposure and false color included:
 
 ```
-command.snapshot.label = Save as shown
-command.snapshot.shown = true
-command.snapshot.run = cp "$GAMUT_SHOWN" "$GAMUT_DIR/$GAMUT_STEM-shown.png" && echo "message = Saved $GAMUT_STEM-shown.png" >> "$GAMUT_RESULT"
+[command.snapshot]
+label = "Save as shown"
+shown = true
+run = 'cp "$GAMUT_SHOWN" "$GAMUT_DIR/$GAMUT_STEM-shown.png" && echo "message = Saved $GAMUT_STEM-shown.png" >> "$GAMUT_RESULT"'
 ```
 
 Open where a photo was taken in OpenStreetMap (`open` in place of
 `xdg-open` on a Mac):
 
 ```
-command.osm.label = Open in OpenStreetMap
-command.osm.needs = location
-command.osm.run = xdg-open "https://www.openstreetmap.org/?mlat=$GAMUT_LAT&mlon=$GAMUT_LNG#map=17/$GAMUT_LAT/$GAMUT_LNG"
+[command.osm]
+label = "Open in OpenStreetMap"
+needs = "location"
+run = 'xdg-open "https://www.openstreetmap.org/?mlat=$GAMUT_LAT&mlon=$GAMUT_LNG#map=17/$GAMUT_LAT/$GAMUT_LNG"'
 ```
 
 Say what place that is, by asking OpenStreetMap's search. This sends the
 location over the network:
 
 ```
-command.where.label = What place is this?
-command.where.needs = location
-command.where.run = curl -sf -A gamut "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$GAMUT_LAT&lon=$GAMUT_LNG" | jq -r '"message = " + .display_name' >> "$GAMUT_RESULT"
+[command.where]
+label = "What place is this?"
+needs = "location"
+run = '''
+curl -sf -A gamut "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$GAMUT_LAT&lon=$GAMUT_LNG" \
+  | jq -r '"message = " + .display_name' >> "$GAMUT_RESULT"
+'''
 ```
 
 Read the text in the region into the Output tab:
 
 ```
-command.ocr.label = Read text
-command.ocr.needs = region
-command.ocr.run = magick "$GAMUT_FILE" -crop "${GAMUT_REGION_WIDTH}x${GAMUT_REGION_HEIGHT}+${GAMUT_REGION_X}+${GAMUT_REGION_Y}" png:- | tesseract - -
+[command.ocr]
+label = "Read text"
+needs = "region"
+run = 'magick "$GAMUT_FILE" -crop "${GAMUT_REGION_WIDTH}x${GAMUT_REGION_HEIGHT}+${GAMUT_REGION_X}+${GAMUT_REGION_Y}" png:- | tesseract - -'
 ```
 
 List every GPS tag in the Output tab:
 
 ```
-command.gps.label = GPS tags
-command.gps.run = exiftool -a -G1 -gps:all "$GAMUT_FILE"
+[command.gps]
+label = "GPS tags"
+run = 'exiftool -a -G1 -gps:all "$GAMUT_FILE"'
 ```
 
 Copy the photo into a folder for the day, never over one already there:
 
 ```
-command.pick.label = Copy to today's picks
-command.pick.run = d="$HOME/Pictures/picks/$(date +%F)"; mkdir -p "$d" && cp -n "$GAMUT_FILE" "$d/" && echo "message = Copied to $d" >> "$GAMUT_RESULT"
+[command.pick]
+label = "Copy to today's picks"
+run = '''
+d="$HOME/Pictures/picks/$(date +%F)"
+mkdir -p "$d" && cp -n "$GAMUT_FILE" "$d/" && echo "message = Copied to $d" >> "$GAMUT_RESULT"
+'''
 ```
 
 Ask first before something that cannot be undone:
 
 ```
-command.publish.label = Publish
-command.publish.confirm = true
-command.publish.run = rsync -a "$GAMUT_FILE" example.com:/srv/photos/
+[command.publish]
+label = "Publish"
+confirm = true
+run = 'rsync -a "$GAMUT_FILE" example.com:/srv/photos/'
 ```
 
 A longer command is better as a script of its own, named by `run`.

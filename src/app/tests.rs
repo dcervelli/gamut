@@ -5362,15 +5362,9 @@ fn the_horizon_grid_takes_a_heading_alone() {
     assert_eq!(app.panels.horizon_step, 10.0);
 }
 
-/// The commands `text`'s `command.` lines define, which must all read.
+/// The commands `text`'s `[command.…]` tables define, which must all read.
 fn commands_of(text: &str) -> Vec<crate::commands::Command> {
-    let lines: Vec<(usize, &str, &str)> = crate::settings::lines(text)
-        .filter_map(|(number, line)| {
-            let (name, value) = line?;
-            Some((number, name.strip_prefix("command.")?, value))
-        })
-        .collect();
-    let (commands, problems) = crate::commands::parse(&lines);
+    let (commands, problems) = crate::commands::parsed(text);
     assert_eq!(problems, Vec::new());
     commands
 }
@@ -5417,8 +5411,9 @@ fn a_command_runs_in_the_shell_and_its_result_file_is_followed() {
     write_png(&dir, "b.png", 6, 2);
     let received = with_commands(
         &mut app,
-        "command.make.label = Make\n\
-         command.make.run = printf 'open = b.png\\nmessage = Made it\\n' >> \"$GAMUT_RESULT\"; echo 'Total = 5'\n",
+        r#"command.make.label = "Make"
+command.make.run = "printf 'open = b.png\\nmessage = Made it\\n' >> \"$GAMUT_RESULT\"; echo 'Total = 5'"
+"#,
     );
     let slot = ui::commands::Slot {
         index: 0,
@@ -5451,7 +5446,7 @@ fn a_line_of_output_is_never_a_directive() {
     write_png(&dir, "b.png", 6, 2);
     let received = with_commands(
         &mut app,
-        "command.echo.run = echo 'open = b.png'; echo 'message = gotcha'\n",
+        "command.echo.run = \"echo 'open = b.png'; echo 'message = gotcha'\"\n",
     );
     let _ = app.perform(input::Action::Command(0));
     finish(&mut app, &received);
@@ -5467,10 +5462,11 @@ fn a_failed_command_says_its_first_error_line() {
     let (mut app, _dir) = app_over("command-failed", &[("a.png", 4, 3)]);
     let received = with_commands(
         &mut app,
-        "command.fail.label = Fail\n\
-         command.fail.run = echo; echo '  no such tool  ' >&2; exit 2\n\
-         command.own.label = Own\n\
-         command.own.run = echo 'error = The map is down' >> \"$GAMUT_RESULT\"; exit 1\n",
+        r#"command.fail.label = "Fail"
+command.fail.run = "echo; echo '  no such tool  ' >&2; exit 2"
+command.own.label = "Own"
+command.own.run = "echo 'error = The map is down' >> \"$GAMUT_RESULT\"; exit 1"
+"#,
     );
     let _ = app.perform(input::Action::Command(0));
     finish(&mut app, &received);
@@ -5492,12 +5488,12 @@ fn a_command_is_dead_without_what_it_needs() {
     let (mut app, _dir) = app_over("command-needs", &[("a.png", 8, 6)]);
     let _ = with_commands(
         &mut app,
-        "command.r.run = true\n\
-         command.r.needs = region\n\
-         command.l.run = true\n\
-         command.l.needs = location\n\
-         command.g.run = true\n\
-         command.g.needs = georeference\n",
+        "command.r.run = \"true\"\n\
+         command.r.needs = \"region\"\n\
+         command.l.run = \"true\"\n\
+         command.l.needs = \"location\"\n\
+         command.g.run = \"true\"\n\
+         command.g.needs = \"georeference\"\n",
     );
     let dead = |app: &App, index, needs| {
         ui::tooltip::disabled(
@@ -5528,7 +5524,7 @@ fn a_command_is_dead_without_what_it_needs() {
     let mut empty = opened_on_nothing();
     let received = with_commands(
         &mut empty,
-        "command.n.run = true\ncommand.n.needs = none\ncommand.f.run = true\n",
+        "command.n.run = \"true\"\ncommand.n.needs = \"none\"\ncommand.f.run = \"true\"\n",
     );
     assert_eq!(
         dead(&empty, 1, Needs::File),
@@ -5611,12 +5607,15 @@ fn a_command_with_inputs_asks_first_and_remembers_its_answers() {
     let (mut app, _dir) = app_over("command-dialog", &[("a.png", 4, 3)]);
     let received = with_commands(
         &mut app,
-        "command.ask.run = echo \"$GAMUT_INPUT_SIZE $GAMUT_INPUT_MODE $GAMUT_INPUT_ON $GAMUT_INPUT_GAIN $GAMUT_INPUT_NOTE\"\n\
-         command.ask.input.size = number 1 10 3\n\
-         command.ask.input.mode = radio fast slow = slow\n\
-         command.ask.input.on = checkbox\n\
-         command.ask.input.gain = slider 0 1 0.5 0.1\n\
-         command.ask.input.note = string hello there\n",
+        r#"command.ask.run = 'echo "$GAMUT_INPUT_SIZE $GAMUT_INPUT_MODE $GAMUT_INPUT_ON $GAMUT_INPUT_GAIN $GAMUT_INPUT_NOTE"'
+command.ask.input = [
+  { name = "size", kind = "number", min = 1, max = 10, default = 3 },
+  { name = "mode", kind = "radio", choices = ["fast", "slow"], default = "slow" },
+  { name = "on", kind = "checkbox" },
+  { name = "gain", kind = "slider", min = 0, max = 1, default = 0.5, step = 0.1 },
+  { name = "note", kind = "string", default = "hello there" },
+]
+"#,
     );
     let _ = app.perform(input::Action::Command(0));
     assert!(!app.commands.running(), "it asks first");
@@ -5672,7 +5671,7 @@ fn a_command_with_inputs_asks_first_and_remembers_its_answers() {
     );
     assert_eq!(effect, Effect::Nothing);
     let config = Config {
-        commands: commands_of("command.ask.run = true\n"),
+        commands: commands_of("command.ask.run = \"true\"\n"),
         ..Config::default()
     };
     let _ = app.reconfigure(config, None);
@@ -5686,7 +5685,7 @@ fn a_confirm_command_asks_with_no_rows() {
     let (mut app, _dir) = app_over("command-confirm", &[("a.png", 4, 3)]);
     let received = with_commands(
         &mut app,
-        "command.sure.run = true\ncommand.sure.confirm = true\n",
+        "command.sure.run = \"true\"\ncommand.sure.confirm = true\n",
     );
     let _ = app.perform(input::Action::Command(0));
     let input = app.command_input().expect("it asks");
@@ -5706,7 +5705,7 @@ fn a_run_is_stopped_from_its_message() {
     let (mut app, _dir) = app_over("command-stop", &[("a.png", 4, 3)]);
     let received = with_commands(
         &mut app,
-        "command.wait.label = Wait\ncommand.wait.run = sleep 30\n",
+        "command.wait.label = \"Wait\"\ncommand.wait.run = \"sleep 30\"\n",
     );
     let started = Instant::now();
     let _ = app.perform(input::Action::Command(0));
@@ -5761,8 +5760,9 @@ fn the_picture_as_shown_is_handed_to_the_script_and_taken_away() {
     let _ = app.perform(input::Action::TurnRight);
     let received = with_commands(
         &mut app,
-        "command.copy.run = cp \"$GAMUT_SHOWN\" copied.png; echo \"$GAMUT_SHOWN\"\n\
-         command.copy.shown = true\n",
+        r#"command.copy.run = 'cp "$GAMUT_SHOWN" copied.png; echo "$GAMUT_SHOWN"'
+command.copy.shown = true
+"#,
     );
     let _ = app.perform(input::Action::Command(0));
     finish(&mut app, &received);

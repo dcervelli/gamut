@@ -2,28 +2,35 @@
 //! the user writes, and the state it keeps for itself between runs.
 //!
 //! The two are different files because they are written by different hands.
-//! The configuration, `$XDG_CONFIG_HOME/gamut/config`, is the user's: how
-//! the window should open every time. The program only reads it, and a
+//! The configuration, `$XDG_CONFIG_HOME/gamut/config.toml`, is the user's:
+//! how the window should open every time. The program only reads it, and a
 //! toggle pressed in the window leaves it alone. The state,
 //! `$XDG_STATE_HOME/gamut/state`, is the program's: what was left where it
 //! was set by hand — the file list's width where it was dragged, the
 //! loupe's magnification where the wheel left it, how large the interface
-//! was made, the order its menu put
-//! the list in, how the pointer's readout was last written — written when
-//! the window
-//! closes, and nothing lost when it is deleted.
+//! was made, the order its menu put the list in, how the pointer's readout
+//! was last written — written when the window closes, and nothing lost when
+//! it is deleted.
 //!
-//! Both are lines of `name = value`, with `#` starting a comment. The
-//! configuration's names are its settings, and beside them every key's
-//! dotted name under `keys.` and every gesture's slot under `gesture.`. A missing
-//! file is every default, and none is ever written for the user: a line
-//! written out on their behalf would hold them to today's default after it
-//! changed. [`Config::template`] is what `--print-config` prints instead —
-//! every setting at its default, commented out — and what [`edit`] writes
-//! where it is asked to open a file that is not there, which holds nobody
-//! to anything for the same reason. A line the configuration cannot use is said on
-//! the terminal and in the window, and skipped, the rest still taken; the state file is ours,
-//! so a line in it that does not read is only dropped.
+//! The configuration is TOML — see [`document`] for how it is read. Its
+//! names are its settings, and beside them every key's dotted name under
+//! `keys.`, every gesture's slot under `gesture.`, and a table under
+//! `command.` for each command. A missing file is every default, and none
+//! is ever written for the user: a line written out on their behalf would
+//! hold them to today's default after it changed. [`Config::template`] is
+//! what `--print-config` prints instead — every setting at its default,
+//! commented out — and what [`edit`] writes where it is asked to open a file
+//! that is not there, which holds nobody to anything for the same reason.
+//! The one file written for them is a configuration in the old format,
+//! `config`, rewritten once as `config.toml` — see [`legacy`]. A line the
+//! configuration cannot use is said on the terminal and in the window, and
+//! skipped, the rest still taken.
+//!
+//! The state is lines of `name = value`, with `#` starting a comment, and
+//! ours, so a line in it that does not read is only dropped.
+
+pub(crate) mod document;
+mod legacy;
 
 use std::fs;
 use std::io::{ErrorKind, Write as _};
@@ -39,6 +46,7 @@ use crate::image::geo::Corners;
 use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
 use crate::ui::{attitude, filmstrip, loupe, scale};
 use crate::{PROGRAM, shown_path, xdg};
+use document::{Lines, Value, shown};
 
 /// The configuration: which panels the window opens with, and what the keys
 /// and the mouse do. A
@@ -100,12 +108,30 @@ impl Default for Config {
 struct Setting {
     name: &'static str,
     words: &'static str,
-    /// The value as the file writes it.
-    get: fn(&Config) -> String,
+    get: fn(&Config) -> Plain,
     /// Sets the field from the file's value, or says what is wrong with the
     /// value — after the setting's name, which [`Config::parse`] puts in
     /// front.
-    set: fn(&mut Config, &str) -> Result<(), String>,
+    set: fn(&mut Config, &Value) -> Result<(), String>,
+}
+
+/// A setting's value, of one of the three shapes a setting has.
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) enum Plain {
+    Flag(bool),
+    Whole(usize),
+    Text(String),
+}
+
+impl Plain {
+    /// As the file writes it.
+    pub(crate) fn written(&self) -> String {
+        match self {
+            Plain::Flag(on) => on.to_string(),
+            Plain::Whole(number) => number.to_string(),
+            Plain::Text(text) => document::string(text),
+        }
+    }
 }
 
 /// Every setting the configuration file takes, in the order the template
@@ -115,56 +141,60 @@ const SETTINGS: [Setting; 10] = [
     Setting {
         name: "show_ui",
         words: "The panels around the picture.",
-        get: |config| config.show_ui.to_string(),
+        get: |config| Plain::Flag(config.show_ui),
         set: |config, value| flag(&mut config.show_ui, value),
     },
     Setting {
         name: "show_minimap",
         words: "The minimap, while the picture is larger than the window.",
-        get: |config| config.show_minimap.to_string(),
+        get: |config| Plain::Flag(config.show_minimap),
         set: |config, value| flag(&mut config.show_minimap, value),
     },
     Setting {
         name: "show_filmstrip",
         words: "The file list down the left, while there is more than one file.",
-        get: |config| config.show_filmstrip.to_string(),
+        get: |config| Plain::Flag(config.show_filmstrip),
         set: |config, value| flag(&mut config.show_filmstrip, value),
     },
     Setting {
         name: "show_histogram",
         words: "The histogram, in the side panel; it wins over show_info where both are on.",
-        get: |config| config.show_histogram.to_string(),
+        get: |config| Plain::Flag(config.show_histogram),
         set: |config, value| flag(&mut config.show_histogram, value),
     },
     Setting {
         name: "show_info",
         words: "The file information, in the side panel.",
-        get: |config| config.show_info.to_string(),
+        get: |config| Plain::Flag(config.show_info),
         set: |config, value| flag(&mut config.show_info, value),
     },
     Setting {
         name: "browse_folder",
         words: "A single file opened alone steps on through the other images in its folder.",
-        get: |config| config.browse_folder.to_string(),
+        get: |config| Plain::Flag(config.browse_folder),
         set: |config, value| flag(&mut config.browse_folder, value),
     },
     Setting {
         name: "max_files",
         words: "How many images a folder and its subfolders may add to the list before the search for more stops.",
-        get: |config| config.max_files.to_string(),
-        set: |config, value| match value.parse::<usize>() {
-            Ok(count) if count > 0 => {
+        get: |config| Plain::Whole(config.max_files),
+        set: |config, value| match document::whole(value).map(usize::try_from) {
+            Some(Ok(count)) if count > 0 => {
                 config.max_files = count;
                 Ok(())
             }
-            _ => Err(format!("is a whole number above zero, not `{value}`")),
+            _ => Err(format!(
+                "is a whole number above zero, not {}",
+                shown(value)
+            )),
         },
     },
     Setting {
         name: "open_map_link",
         words: "The web page the map buttons in the info panel's Location and Georeference sections open: {lat} and {lng} are where the picture was taken, or the middle of what it covers, in degrees.",
-        get: |config| config.open_map_link.clone(),
+        get: |config| Plain::Text(config.open_map_link.clone()),
         set: |config, value| {
+            let value = text(value)?;
             // A link without both would open the same place for every
             // picture, or nowhere.
             if !(value.contains("{lat}") && value.contains("{lng}")) {
@@ -177,8 +207,9 @@ const SETTINGS: [Setting; 10] = [
     Setting {
         name: "open_map_bounds_link",
         words: "The web page the corners button in the info panel's Georeference section opens: {lat_ul} and {lng_ul}, {lat_ur} and {lng_ur}, {lat_lr} and {lng_lr}, and {lat_ll} and {lng_ll} are the picture's upper left, upper right, lower right and lower left corners, in degrees.",
-        get: |config| config.open_map_bounds_link.clone(),
+        get: |config| Plain::Text(config.open_map_bounds_link.clone()),
         set: |config, value| {
+            let value = text(value)?;
             // As with the map link: one with no latitude or no longitude in
             // it would open the same place for every picture. Not every
             // corner, since a box can be named by two of them.
@@ -193,8 +224,9 @@ const SETTINGS: [Setting; 10] = [
     Setting {
         name: "exiftool",
         words: "The program the info panel's Raw Data tab reads every tag with: a name looked for on the PATH, or a path.",
-        get: |config| config.exiftool.clone(),
+        get: |config| Plain::Text(config.exiftool.clone()),
         set: |config, value| {
+            let value = text(value)?;
             if value.is_empty() {
                 return Err("needs a program name or a path".to_string());
             }
@@ -208,13 +240,15 @@ const SETTINGS: [Setting; 10] = [
 pub const MAX_FILES: usize = 10_000;
 
 /// A setting that is on or off, as the file writes one.
-fn flag(field: &mut bool, value: &str) -> Result<(), String> {
-    *field = match value {
-        "true" => true,
-        "false" => false,
-        _ => return Err(format!("is true or false, not `{value}`")),
-    };
+fn flag(field: &mut bool, value: &Value) -> Result<(), String> {
+    *field =
+        document::flag(value).ok_or_else(|| format!("is true or false, not {}", shown(value)))?;
     Ok(())
+}
+
+/// A setting that is words, as the file writes them.
+fn text<'a>(value: &'a Value) -> Result<&'a str, String> {
+    document::text(value).ok_or_else(|| format!("is a string, in quotes, not {}", shown(value)))
 }
 
 /// Where the map button goes unless the configuration says otherwise.
@@ -283,12 +317,7 @@ impl Config {
     /// and changing its value is the whole of editing it, and a line left
     /// commented follows the default wherever it goes.
     pub fn template() -> String {
-        let mut text = format!(
-            "# {PROGRAM}'s configuration: how the window opens, and what the keys and\n\
-             # the mouse do. Each setting is shown at its default, commented out;\n\
-             # take the # off a line to change it. --histogram, --info,\n\
-             # --no-minimap and --alone win over what is set here.\n"
-        );
+        let mut text = Self::header();
         let config = Self::default();
         for setting in &SETTINGS {
             // Which key hides them, as the keys below have it.
@@ -302,7 +331,7 @@ impl Config {
             text.push_str(&format!(
                 "\n# {words}\n# {} = {}\n",
                 setting.name,
-                (setting.get)(&config)
+                (setting.get)(&config).written()
             ));
         }
         text.push_str(&config.keys.template());
@@ -311,97 +340,170 @@ impl Config {
         text
     }
 
-    /// The configuration file, read, and a word for the window about what
-    /// it could not use, each thing of which is said on the terminal too.
-    /// No file, or no directory to look for one in, is every default, and
-    /// nothing to say.
-    pub fn load() -> (Self, Option<String>) {
-        let Some(path) = config_path() else {
-            return (Self::default(), None);
-        };
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == ErrorKind::NotFound => return (Self::default(), None),
-            Err(error) => {
-                eprintln!("{PROGRAM}: reading {}: {error}", shown_path(&path));
-                let said = format!("The configuration could not be read: {error}");
-                return (Self::default(), Some(said));
-            }
-        };
-        let (config, problems) = Self::parse(&text);
-        for (line, problem) in &problems {
-            eprintln!("{PROGRAM}: {} line {line}: {problem}", shown_path(&path));
-        }
-        (config, complaint(&problems))
+    /// The words the template opens with.
+    fn header() -> String {
+        format!(
+            "# {PROGRAM}'s configuration, in TOML: how the window opens, and what the\n\
+             # keys and the mouse do. Each setting is shown at its default, commented\n\
+             # out; take the # off a line to change it. Words go in quotes. --histogram,\n\
+             # --info, --no-minimap and --alone win over what is set here.\n"
+        )
     }
 
-    /// `text` as a configuration, and each line it could not use, by
-    /// number, with what was wrong with it. A setting written twice is
-    /// taken from the later line; so is a chord two lines give two names in
-    /// one context, which is said.
+    /// The configuration file, read — where there is none yet but there is
+    /// one in the old format, that one rewritten as TOML first — with what
+    /// the window should say about it, each thing of which is said on the
+    /// terminal too. No file, or no directory to look for one in, is every
+    /// default, and nothing to say.
+    pub fn load() -> Loaded {
+        let Some(path) = config_path() else {
+            return Loaded::from(Self::default());
+        };
+        match fs::read_to_string(&path) {
+            Ok(text) => return Self::read(&text, &path, |line| line),
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Loaded::unread(&path, &error),
+        }
+        let Some(old) = legacy_path() else {
+            return Loaded::from(Self::default());
+        };
+        let text = match fs::read_to_string(&old) {
+            Ok(text) => text,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Loaded::from(Self::default());
+            }
+            Err(error) => return Loaded::unread(&old, &error),
+        };
+        let rewritten = legacy::rewrite(&text, &old);
+        match write_new(&path, &rewritten.text) {
+            Ok(()) => {
+                eprintln!(
+                    "{PROGRAM}: rewrote {} as {}, which is read from now on; the old file is \
+                     left as it was",
+                    shown_path(&old),
+                    shown_path(&path)
+                );
+                let loaded = Self::read(&rewritten.text, &path, |line| line);
+                Loaded {
+                    rewrite: Some(Rewrite::Written),
+                    ..loaded
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "{PROGRAM}: {error:#}; reading {} as it would have been rewritten",
+                    shown_path(&old)
+                );
+                // Said against the file the user has, line for line.
+                let loaded = Self::read(&rewritten.text, &old, |line| rewritten.origin(line));
+                Loaded {
+                    rewrite: Some(Rewrite::Unwritten),
+                    ..loaded
+                }
+            }
+        }
+    }
+
+    /// `text` as a configuration, its problems said on the terminal against
+    /// `path` at the line `origin` makes of each.
+    fn read(text: &str, path: &Path, origin: impl Fn(usize) -> usize) -> Loaded {
+        let (config, problems) = Self::parse(text);
+        let problems: Vec<(usize, String)> = problems
+            .into_iter()
+            .map(|(line, problem)| (origin(line), problem))
+            .collect();
+        for (line, problem) in &problems {
+            eprintln!("{PROGRAM}: {} line {line}: {problem}", shown_path(path));
+        }
+        Loaded {
+            config,
+            complaint: complaint(&problems),
+            rewrite: None,
+        }
+    }
+
+    /// `text` as a configuration, and each thing in it that could not be
+    /// used, by line, with what was wrong with it. A chord two lines give two
+    /// names in one context goes to the later, which is said.
     fn parse(text: &str) -> (Self, Vec<(usize, String)>) {
         let mut config = Self::default();
-        // The commands first, wherever their lines are, so that a `keys.`
-        // or a gesture's line can name one before the file has defined it.
-        let command_lines: Vec<(usize, &str, &str)> = lines(text)
-            .filter_map(|(number, line)| {
-                let (name, value) = line?;
-                Some((number, name.strip_prefix("command.")?, value))
-            })
-            .collect();
-        let (commands, mut problems) = commands::parse(&command_lines);
-        for (index, command) in commands.iter().enumerate() {
-            config
-                .keys
-                .add_extra(&command.key_name(), &command.label, Action::Command(index));
+        let lines = Lines::new(text);
+        let (clean, mut problems) = document::readable(text);
+        let root = document::table(&clean);
+        let root = root.get_ref();
+        // The commands first, wherever their tables are, so that a `keys.`
+        // or a gesture's line can name one the file defines further down.
+        if let Some((key, value)) = root.get_key_value("command") {
+            match value.get_ref() {
+                Value::Table(table) => {
+                    let (commands, said) = commands::parse(table, &lines);
+                    problems.extend(said);
+                    for (index, command) in commands.iter().enumerate() {
+                        config.keys.add_extra(
+                            &command.key_name(),
+                            &command.label,
+                            Action::Command(index),
+                        );
+                    }
+                    config.commands = commands;
+                }
+                other => problems.push((
+                    lines.of(key.span()),
+                    format!("command is a table of commands, not {}", shown(other)),
+                )),
+            }
         }
-        config.commands = commands;
         // Which line set each key's name, for saying which a later line
         // took a chord from.
         let mut set_on: Vec<(String, usize)> = Vec::new();
-        for (number, line) in lines(text) {
-            let Some((name, value)) = line else {
-                problems.push((number, "expected `name = value`".to_string()));
-                continue;
-            };
-            if let Some(key) = name.strip_prefix("keys.") {
-                config.parse_keys(key, value, number, &mut set_on, &mut problems);
-                continue;
-            }
-            if let Some(slot) = name.strip_prefix("gesture.") {
-                if let Err(problem) = config.parse_gesture(slot, value) {
-                    problems.push((number, problem));
-                }
-                continue;
-            }
-            if name.starts_with("command.") {
-                continue;
-            }
-            match SETTINGS.iter().find(|setting| setting.name == name) {
-                Some(setting) => {
-                    if let Err(problem) = (setting.set)(&mut config, value) {
-                        problems.push((number, format!("{name} {problem}")));
+        for (key, value) in root.iter() {
+            let name: &str = key.get_ref();
+            let line = lines.of(key.span());
+            match (name, value.get_ref()) {
+                ("command", _) => {}
+                ("keys", Value::Table(table)) => {
+                    for (name, value) in document::leaves(table) {
+                        let line = lines.of(value.span());
+                        config.parse_keys(&name, value.get_ref(), line, &mut set_on, &mut problems);
                     }
                 }
-                // Remembered in the state file now, as the readout's menu
-                // leaves them; a line written for an older version is
-                // passed over rather than called a mistake.
-                None if RETIRED.contains(&name) => {}
-                None => problems.push((number, format!("unknown setting `{name}`"))),
+                ("gesture", Value::Table(table)) => {
+                    for (name, value) in document::leaves(table) {
+                        if let Err(problem) = config.parse_gesture(&name, value.get_ref()) {
+                            problems.push((lines.of(value.span()), problem));
+                        }
+                    }
+                }
+                ("keys" | "gesture", other) => problems.push((
+                    line,
+                    format!("{name} is a table, {name}.<name> = …, not {}", shown(other)),
+                )),
+                (_, value) => match SETTINGS.iter().find(|setting| setting.name == name) {
+                    Some(setting) => {
+                        if let Err(problem) = (setting.set)(&mut config, value) {
+                            problems.push((line, format!("{name} {problem}")));
+                        }
+                    }
+                    // Remembered in the state file now, as the readout's
+                    // menu leaves them; a line written for an older version
+                    // is passed over rather than called a mistake.
+                    None if RETIRED.contains(&name) => {}
+                    None => problems.push((line, format!("unknown setting `{name}`"))),
+                },
             }
         }
         problems.sort_by_key(|(number, _)| *number);
         (config, problems)
     }
 
-    /// A `keys.` line: `name` bound to the chords in `value`, whitespace
-    /// between them. A chord that does not read is said and left out, the
-    /// rest still bound; a chord taken from a name an earlier line set is
-    /// said with both lines.
+    /// A `keys.` line: `name` bound to the chords in `value` — a string with
+    /// whitespace between them, or an array of them. A chord that does not
+    /// read is said and left out, the rest still bound; a chord taken from a
+    /// name an earlier line set is said with both lines.
     fn parse_keys(
         &mut self,
         name: &str,
-        value: &str,
+        value: &Value,
         number: usize,
         set_on: &mut Vec<(String, usize)>,
         problems: &mut Vec<(usize, String)>,
@@ -409,13 +511,34 @@ impl Config {
         if RETIRED_KEYS.contains(&name) {
             return;
         }
+        let tokens: Vec<&str> = match value {
+            Value::String(text) => text.split_whitespace().collect(),
+            Value::Array(items) => match items
+                .iter()
+                .map(|item| document::text(item.get_ref()))
+                .collect::<Option<Vec<&str>>>()
+            {
+                Some(tokens) => tokens,
+                None => {
+                    problems.push((number, format!("keys.{name} holds chords, in quotes")));
+                    return;
+                }
+            },
+            other => {
+                problems.push((
+                    number,
+                    format!("keys.{name} is its chords in quotes, not {}", shown(other)),
+                ));
+                return;
+            }
+        };
         let mut chords = Vec::new();
-        let mut tokens = Vec::new();
-        for token in value.split_whitespace() {
+        let mut read = Vec::new();
+        for token in tokens {
             match Chord::read(token) {
                 Ok(chord) => {
                     chords.push(chord);
-                    tokens.push(token);
+                    read.push(token);
                 }
                 Err(problem) => problems.push((number, problem)),
             }
@@ -429,7 +552,7 @@ impl Config {
                     };
                     let taken: Vec<&str> = chords
                         .iter()
-                        .zip(&tokens)
+                        .zip(&read)
                         .filter(|(chord, _)| before.chords_of(&other).contains(chord))
                         .map(|(_, token)| *token)
                         .collect();
@@ -449,9 +572,15 @@ impl Config {
     }
 
     /// A `gesture.` line: the slot `name` given the behavior `value`.
-    fn parse_gesture(&mut self, name: &str, value: &str) -> Result<(), String> {
+    fn parse_gesture(&mut self, name: &str, value: &Value) -> Result<(), String> {
         let slot = Slot::read(name)?;
-        let behavior = Behavior::read(&slot, value)?;
+        let word = document::text(value).ok_or_else(|| {
+            format!(
+                "gesture.{name} is a behavior in quotes, not {}",
+                shown(value)
+            )
+        })?;
+        let behavior = Behavior::read(&slot, word)?;
         if let Behavior::Click(key) = &behavior
             && self.keys.action_named(key).is_none()
         {
@@ -460,6 +589,56 @@ impl Config {
         self.gestures.set(slot, behavior);
         Ok(())
     }
+}
+
+/// What reading the configuration came to.
+pub struct Loaded {
+    pub config: Config,
+    /// What the window says about what the file got wrong: the first thing,
+    /// and how many more, the terminal having the whole of each.
+    pub complaint: Option<String>,
+    /// Whether a file in the old format was found in place of one in TOML.
+    pub rewrite: Option<Rewrite>,
+}
+
+impl From<Config> for Loaded {
+    fn from(config: Config) -> Self {
+        Self {
+            config,
+            complaint: None,
+            rewrite: None,
+        }
+    }
+}
+
+impl Loaded {
+    /// Every default, the file at `path` being there and unreadable.
+    fn unread(path: &Path, error: &std::io::Error) -> Self {
+        eprintln!("{PROGRAM}: reading {}: {error}", shown_path(path));
+        Self {
+            complaint: Some(format!("The configuration could not be read: {error}")),
+            ..Self::from(Config::default())
+        }
+    }
+}
+
+/// What became of a configuration file in the old format.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Rewrite {
+    /// Rewritten as TOML beside it, which is read from now on.
+    Written,
+    /// Read as it would have been rewritten, the new file not being
+    /// writable; it is read so again each time.
+    Unwritten,
+}
+
+/// Whether `name` is something the top of the file holds: a setting, a
+/// retired one, or one of the tables of keys, gestures and commands. What
+/// lets a command's table say that a line written below it belongs above.
+pub(crate) fn top_level(name: &str) -> bool {
+    matches!(name, "keys" | "gesture" | "command")
+        || RETIRED.contains(&name)
+        || SETTINGS.iter().any(|setting| setting.name == name)
 }
 
 /// What the program keeps for itself from one run to the next.
@@ -591,21 +770,27 @@ const KEPT: [Kept; 12] = [
         name: "camera_jpeg",
         get: |state| state.camera_jpeg.to_string(),
         set: |state, value| {
-            let _ = flag(&mut state.camera_jpeg, value);
+            if let Some(on) = on(value) {
+                state.camera_jpeg = on;
+            }
         },
     },
     Kept {
         name: "include_subfolders",
         get: |state| state.include_subfolders.to_string(),
         set: |state, value| {
-            let _ = flag(&mut state.include_subfolders, value);
+            if let Some(on) = on(value) {
+                state.include_subfolders = on;
+            }
         },
     },
     Kept {
         name: "profile",
         get: |state| state.profile.to_string(),
         set: |state, value| {
-            let _ = flag(&mut state.profile, value);
+            if let Some(on) = on(value) {
+                state.profile = on;
+            }
         },
     },
     Kept {
@@ -770,6 +955,12 @@ pub fn edit() -> Result<()> {
 
 /// Where the configuration file is, whether or not there is one.
 pub fn config_path() -> Option<PathBuf> {
+    Some(xdg::config_home()?.join(PROGRAM).join("config.toml"))
+}
+
+/// Where the configuration file was before it was TOML, which is read only
+/// to be rewritten — see [`legacy`].
+fn legacy_path() -> Option<PathBuf> {
     Some(xdg::config_home()?.join(PROGRAM).join("config"))
 }
 
@@ -780,38 +971,62 @@ fn state_path() -> Option<PathBuf> {
 /// The lines of `text` that say something, numbered from one, each as its
 /// name and value with the space around them taken off and the quotes
 /// around a whole value taken off too, or `None` for a line with no `=` in
-/// it. Blank lines and comments are left out.
+/// it. Blank lines and comments are left out. How the state file and a
+/// command's result file are read, and the configuration file was.
+pub(crate) fn lines(text: &str) -> impl Iterator<Item = (usize, Option<(&str, &str)>)> {
+    text.lines().enumerate().filter_map(|(index, line)| {
+        let line = uncommented(line).0.trim();
+        if line.is_empty() {
+            return None;
+        }
+        Some((index + 1, pair(line)))
+    })
+}
+
+/// `line` cut where its comment starts: what comes before, and the comment
+/// with the space before it.
 ///
 /// A comment starts at a `#` that begins the line or follows a space: a
 /// web address holds `#` inside itself, as the default map link does, and
 /// is not cut short there.
-pub(crate) fn lines(text: &str) -> impl Iterator<Item = (usize, Option<(&str, &str)>)> {
-    text.lines().enumerate().filter_map(|(index, line)| {
-        let comment = line.char_indices().find(|&(at, c)| {
-            c == '#'
-                && line[..at]
-                    .chars()
-                    .next_back()
-                    .is_none_or(char::is_whitespace)
-        });
-        let line = comment.map_or(line, |(at, _)| &line[..at]).trim();
-        if line.is_empty() {
-            return None;
-        }
-        let pair = line.split_once('=').map(|(name, value)| {
-            let value = value.trim();
-            // A pair around the whole value, and only that: a command's
-            // line of the shell may begin and end with quotes of its own,
-            // `"$HOME/bin/x" "$GAMUT_FILE"`, which are not a pair.
-            let value = value
-                .strip_prefix('"')
-                .and_then(|value| value.strip_suffix('"'))
-                .filter(|inside| !inside.contains('"'))
-                .unwrap_or(value);
-            (name.trim(), value)
-        });
-        Some((index + 1, pair))
+fn uncommented(line: &str) -> (&str, &str) {
+    let comment = line.char_indices().find(|&(at, c)| {
+        c == '#'
+            && line[..at]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace)
+    });
+    let cut = comment.map_or(line.len(), |(at, _)| {
+        at - (line[..at].len() - line[..at].trim_end().len())
+    });
+    line.split_at(cut)
+}
+
+/// A line with no comment as its name and value, or `None` where it has no
+/// `=`.
+fn pair(line: &str) -> Option<(&str, &str)> {
+    line.split_once('=').map(|(name, value)| {
+        let value = value.trim();
+        // A pair around the whole value, and only that: a command's
+        // line of the shell may begin and end with quotes of its own,
+        // `"$HOME/bin/x" "$GAMUT_FILE"`, which are not a pair.
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .filter(|inside| !inside.contains('"'))
+            .unwrap_or(value);
+        (name.trim(), value)
     })
+}
+
+/// A word of the state file that is on or off.
+fn on(value: &str) -> Option<bool> {
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
 }
 
 /// `contents` written to `path` by way of a temporary name beside it, so
@@ -826,6 +1041,25 @@ fn write(path: &Path, contents: &str) -> Result<()> {
         .and_then(|()| {
             fs::rename(&temporary, path)
                 .with_context(|| format!("moving the state to {}", shown_path(path)))
+        });
+    if written.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    written
+}
+
+/// `contents` written whole to `path`, where nothing is there yet: by way of
+/// a temporary name beside it, moved into place by a rename that refuses
+/// rather than replace a file that arrived in the meantime — a second
+/// window rewriting the same old file, say.
+fn write_new(path: &Path, contents: &str) -> Result<()> {
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    let written = fs::File::create(&temporary)
+        .and_then(|mut file| file.write_all(contents.as_bytes()))
+        .with_context(|| format!("writing {}", shown_path(&temporary)))
+        .and_then(|()| {
+            crate::no_replace::rename_no_replace(&temporary, path)
+                .with_context(|| format!("writing {}", shown_path(path)))
         });
     if written.is_err() {
         let _ = fs::remove_file(&temporary);
@@ -852,7 +1086,7 @@ mod tests {
              show_minimap=false   # it gets in the way\n\
              show_histogram = true\n\
              log_counts = true\n\
-             keys.interface.log-counts = y\n",
+             keys.interface.log-counts = \"y\"\n",
         );
         // `log_counts` and its key are retired, and passed over rather than
         // called mistakes.
@@ -871,11 +1105,13 @@ mod tests {
     #[test]
     fn a_line_the_configuration_cannot_use_is_skipped_and_said() {
         let (config, problems) = Config::parse(
-            "show_info = yes\n\
-             show_ui = maybe\n\
+            "show_info = \"yes\"\n\
+             show_ui = 3\n\
              show_grid = true\n\
              show_filmstrip\n\
-             show_histogram = true\n",
+             show_histogram = true\n\
+             max_files = 0\n\
+             exiftool = false\n",
         );
         assert_eq!(
             config,
@@ -885,7 +1121,8 @@ mod tests {
             }
         );
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
-        assert_eq!(lines, [1, 2, 3, 4]);
+        assert_eq!(lines, [1, 2, 3, 4, 6, 7], "{problems:?}");
+        assert_eq!(problems[0].1, "show_info is true or false, not \"yes\"");
     }
 
     /// The window is told the first line the configuration could not use,
@@ -894,7 +1131,7 @@ mod tests {
     fn the_window_is_told_the_first_problem_and_how_many_more() {
         let (_, problems) = Config::parse(
             "show_info = true\n\
-             keys.zoom.fit = space Double-click\n\
+             keys.zoom.fit = \"space Double-click\"\n\
              show_grid = true\n",
         );
         assert_eq!(
@@ -920,9 +1157,7 @@ mod tests {
             // An indented line is an example, not a setting at its default:
             // the commands' block.
             .filter(|line| !line.starts_with(char::is_whitespace))
-            // A name with no chord by default is written with nothing after
-            // its `=`.
-            .filter(|line| line.contains(" = ") || line.ends_with(" ="))
+            .filter(|line| line.contains(" = "))
             .map(|line| format!("{line}\n"))
             .collect();
         // Every setting, every key's name and every gesture's slot.
@@ -956,12 +1191,13 @@ mod tests {
     #[test]
     fn a_keys_line_binds_its_name() {
         let (config, problems) = Config::parse(
-            "keys.files.undo = ctrl+e\n\
-             keys.region.move.left = h\n\
-             keys.interface.dismiss =\n\
-             keys.nope = a\n\
-             keys.files.rename = f2 shift+.\n\
-             keys.interface.grid = ctrl+e\n",
+            "keys.files.undo = \"ctrl+e\"\n\
+             keys.region.move.left = [\"h\"]\n\
+             keys.interface.dismiss = \"\"\n\
+             keys.nope = \"a\"\n\
+             keys.files.rename = \"f2 shift+.\"\n\
+             keys.interface.grid = \"ctrl+e\"\n\
+             keys.interface.toggle = 3\n",
         );
         assert_eq!(config.keys.spelled("files.undo"), "");
         assert_eq!(
@@ -978,7 +1214,7 @@ mod tests {
         assert_eq!(config.keys.spelled("interface.dismiss"), "");
         assert_eq!(config.keys.spelled("files.rename"), "F2");
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
-        assert_eq!(lines, [4, 5, 6], "{problems:?}");
+        assert_eq!(lines, [4, 5, 6, 7], "{problems:?}");
         assert_eq!(
             problems[2].1,
             "`ctrl+e` was files.undo on line 1; interface.grid takes it"
@@ -990,14 +1226,16 @@ mod tests {
     #[test]
     fn a_keys_line_binds_a_command_wherever_it_sits() {
         let (config, problems) = Config::parse(
-            "keys.command.redact = ctrl+shift+r\n\
-             gesture.image.middle.click = command.redact\n\
-             command.redact.label = Redact\n\
-             command.redact.run = ~/bin/redact.sh\n\
-             keys.command.nope = a\n",
+            "keys.command.redact = \"ctrl+shift+r\"\n\
+             gesture.image.middle.click = \"command.redact\"\n\
+             keys.command.nope = \"a\"\n\
+             \n\
+             [command.redact]\n\
+             label = \"Redact\"\n\
+             run = \"~/bin/redact.sh\"\n",
         );
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
-        assert_eq!(lines, [5], "{problems:?}");
+        assert_eq!(lines, [3], "{problems:?}");
         assert_eq!(config.commands.len(), 1);
         assert_eq!(
             config.keys.action_named("command.redact"),
@@ -1016,12 +1254,12 @@ mod tests {
     fn a_gesture_line_sets_its_slot() {
         use crate::gestures::{Button, HoldAction, Kind, Mods, Surface};
         let (config, problems) = Config::parse(
-            "gesture.image.middle.hold = loupe\n\
-             gesture.image.wheel = none\n\
-             gesture.image.left.drag = loupe\n\
-             gesture.desk.left.drag = pan\n\
-             gesture.image.middle.click = files.nope\n\
-             gesture.image.middle.click = interface.grid\n",
+            "gesture.image.middle.hold = \"loupe\"\n\
+             gesture.image.wheel = \"none\"\n\
+             gesture.image.left.drag = \"loupe\"\n\
+             gesture.desk.left.drag = \"pan\"\n\
+             gesture.image.\"ctrl+middle\".click = \"files.nope\"\n\
+             gesture.image.middle.click = \"interface.grid\"\n",
         );
         assert_eq!(
             config
@@ -1069,7 +1307,7 @@ mod tests {
         };
         let text: String = SETTINGS
             .iter()
-            .map(|setting| format!("{} = {}\n", setting.name, (setting.get)(&changed)))
+            .map(|setting| format!("{} = {}\n", setting.name, (setting.get)(&changed).written()))
             .collect();
         assert_eq!(Config::parse(&text), (changed, Vec::new()));
     }
@@ -1082,13 +1320,15 @@ mod tests {
             map_link(OPEN_MAP_LINK, [-44.68202, 169.161956]),
             "https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B169.161956%2C-44.682020%5D%7D%7D"
         );
-        let (config, problems) = Config::parse("open_map_link = https://example.com/?q={lat}\n");
+        let (config, problems) =
+            Config::parse("open_map_link = \"https://example.com/?q={lat}\"\n");
         assert_eq!(config.open_map_link, OPEN_MAP_LINK);
         assert_eq!(problems.len(), 1, "{problems:?}");
         // The default's `#` is part of the address, not a comment; one
-        // after a space is.
-        let (config, problems) =
-            Config::parse(&format!("open_map_link = {OPEN_MAP_LINK}  # the default\n"));
+        // after it is.
+        let (config, problems) = Config::parse(&format!(
+            "open_map_link = \"{OPEN_MAP_LINK}\"  # the default\n"
+        ));
         assert_eq!(config.open_map_link, OPEN_MAP_LINK);
         assert!(problems.is_empty(), "{problems:?}");
     }
@@ -1110,7 +1350,7 @@ mod tests {
         );
         // Two corners are enough to name a box by.
         let bbox = "https://example.com/?bbox={lng_ll},{lat_ll},{lng_ur},{lat_ur}";
-        let (config, problems) = Config::parse(&format!("open_map_bounds_link = {bbox}\n"));
+        let (config, problems) = Config::parse(&format!("open_map_bounds_link = \"{bbox}\"\n"));
         assert_eq!(config.open_map_bounds_link, bbox);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
@@ -1118,11 +1358,11 @@ mod tests {
             "https://example.com/?bbox=5.950000,47.609000,6.050000,47.809000"
         );
         let (config, problems) =
-            Config::parse("open_map_bounds_link = https://example.com/?{lat_ul},{lat_lr}\n");
+            Config::parse("open_map_bounds_link = \"https://example.com/?{lat_ul},{lat_lr}\"\n");
         assert_eq!(config.open_map_bounds_link, OPEN_MAP_BOUNDS_LINK);
         assert_eq!(problems.len(), 1, "{problems:?}");
         let (config, problems) = Config::parse(&format!(
-            "open_map_bounds_link = {OPEN_MAP_BOUNDS_LINK}  # the default\n"
+            "open_map_bounds_link = \"{OPEN_MAP_BOUNDS_LINK}\"  # the default\n"
         ));
         assert_eq!(config.open_map_bounds_link, OPEN_MAP_BOUNDS_LINK);
         assert!(problems.is_empty(), "{problems:?}");
@@ -1130,12 +1370,31 @@ mod tests {
 
     /// exiftool is found by the name or path given, and a setting naming
     /// nothing is a problem, the default standing.
+    /// Every command the settings page shows reads as the page says, so
+    /// that what a reader copies from it works.
+    #[test]
+    fn the_documented_commands_read() {
+        let page = include_str!("../../user-docs/SETTINGS.md");
+        let blocks: Vec<&str> = page
+            .split("```")
+            .skip(1)
+            .step_by(2)
+            .filter(|block| block.contains("[command."))
+            .collect();
+        assert!(blocks.len() >= 10, "{}", blocks.len());
+        for block in blocks {
+            let (config, problems) = Config::parse(block);
+            assert_eq!(problems, Vec::new(), "{block}");
+            assert_eq!(config.commands.len(), 1, "{block}");
+        }
+    }
+
     #[test]
     fn exiftool_needs_a_name() {
-        let (config, problems) = Config::parse("exiftool = \n");
+        let (config, problems) = Config::parse("exiftool = \"\"\n");
         assert_eq!(config.exiftool, "exiftool");
         assert_eq!(problems.len(), 1, "{problems:?}");
-        let (config, problems) = Config::parse("exiftool = /usr/bin/vendor_perl/exiftool\n");
+        let (config, problems) = Config::parse("exiftool = \"/usr/bin/vendor_perl/exiftool\"\n");
         assert_eq!(config.exiftool, "/usr/bin/vendor_perl/exiftool");
         assert!(problems.is_empty(), "{problems:?}");
     }
@@ -1167,9 +1426,9 @@ mod tests {
     #[test]
     fn a_retired_setting_is_passed_over() {
         let (config, problems) = Config::parse(
-            "pixel_format = decimal\n\
-             coordinate_format = geographic\n\
-             geographic_format = nonsense\n\
+            "pixel_format = \"decimal\"\n\
+             coordinate_format = \"geographic\"\n\
+             geographic_format = 3\n\
              show_info = true\n",
         );
         assert_eq!(problems, Vec::new());

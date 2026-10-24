@@ -36,7 +36,7 @@ Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 | `⌘Z` | Undo | `files.undo` |
 | `⌘E` | Export the picture as shown | `files.export` |
 | `⇧⌘M` | Open a map of where the picture was taken | `files.map` |
-| `⌃⇧⌘M` | Open a map of the area a georeferenced picture covers | `files.map.bounds` |
+| `⌃⇧⌘M` | Open a map of the area a georeferenced picture covers | `files.map-bounds` |
 | `;`, `⌘L` | Turn the picture a quarter counterclockwise | `display.turn.left` |
 | `'`, `⌘R` | Turn the picture a quarter clockwise | `display.turn.right` |
 | `⌘C` | Copy the image, or the region, as displayed | `clipboard.image` |
@@ -73,7 +73,7 @@ configuration file in the application that opens plain text — see
 | Key | What it does | Name |
 | --- | --- | --- |
 | `1`, `0` | Actual size, one image pixel per screen pixel | `zoom.100` |
-| Double-click | Actual size, or back to the whole image from actual size | `zoom.100.toggle` |
+| Double-click | Actual size, or back to the whole image from actual size | `zoom.toggle` |
 | `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% | `zoom.200`, `zoom.400`, `zoom.800`, `zoom.1600` |
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% | `zoom.50`, `zoom.25`, `zoom.10` |
 | `+`, `=` | Zoom in one step, a factor of 1.25 | `zoom.in` |
@@ -105,7 +105,7 @@ The two fits center the picture whatever the pointer is over. A zoom to the
 zoom you are already at moves the detail under the pointer to the middle of
 the window instead: `1` at actual size goes to what the pointer is on. A
 double-click at actual size shows the whole image again, so a double-click
-in and a double-click out is a quick look at the pixels. `zoom.100.toggle`
+in and a double-click out is a quick look at the pixels. `zoom.toggle`
 has no key by default; bind one to it to do the same from the keyboard.
 
 Zooming leaves fit mode; panning does not, so `Space` and then `Shift`+Down scrolls
@@ -143,7 +143,7 @@ on screen, since there is then nowhere to pan to.
 | `Ctrl+Z` | Undo the last rename, deletion or removal | `files.undo` |
 | `Ctrl+E` | Export the picture as shown to a new JPG or PNG | `files.export` |
 | `Ctrl+Shift+M` | Open map of image location in browser, for a picture that records its location | `files.map` |
-| `Ctrl+Alt+Shift+M` | Open map of image bounds in browser, for a picture placed in latitude and longitude | `files.map.bounds` |
+| `Ctrl+Alt+Shift+M` | Open map of image bounds in browser, for a picture placed in latitude and longitude | `files.map-bounds` |
 
 A file you have already looked at comes back exactly as you left it: the same
 pan and zoom, the same turn, the same window and exposure, the same tone curve

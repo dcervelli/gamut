@@ -15,6 +15,8 @@
 
 use std::fmt::Write as _;
 
+use crate::settings::document::{key, string};
+
 pub use winit::keyboard::ModifiersState as Mods;
 
 /// The modifiers, in the order a chord or a slot writes them, each with the
@@ -735,7 +737,7 @@ impl Gestures {
                 ),
                 (
                     image(Button::Left, Kind::DoubleClick),
-                    Behavior::Click("zoom.100.toggle".to_string()),
+                    Behavior::Click("zoom.toggle".to_string()),
                 ),
                 (
                     image(Button::Back, Kind::Click),
@@ -888,7 +890,7 @@ impl Gestures {
     /// grammar and the words each kind takes.
     pub fn template(&self) -> String {
         let mut text = String::from(
-            "\n# Gestures: each gesture.<surface>.<input> takes one behavior.\n\
+            "\n# Gestures: each gesture.<surface>.<input> takes one behavior, in quotes.\n\
              # A surface is image or minimap. An input is [mods+]<button>.<kind>, the kind\n\
              # drag, hold, click or double-click and the button left, middle, right, back\n\
              # or forward; or [mods+][button+]wheel for the wheel turned with a button\n\
@@ -904,7 +906,12 @@ impl Gestures {
              # zoom.fit's key held zooms to a box.\n",
         );
         for (slot, behavior) in &self.slots {
-            let _ = writeln!(text, "# gesture.{} = {}", slot.token(), behavior.word());
+            let _ = writeln!(
+                text,
+                "# {} = {}",
+                key(&format!("gesture.{}", slot.token())),
+                string(&behavior.word())
+            );
         }
         text
     }
@@ -913,6 +920,20 @@ impl Gestures {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each slot the template writes, by its name below `gesture.`, and its
+    /// behavior's word.
+    fn template_lines(template: &str) -> Vec<(String, String)> {
+        template
+            .lines()
+            .filter_map(|line| line.strip_prefix("# "))
+            .filter(|line| line.starts_with("gesture."))
+            .map(|line| {
+                let (name, word) = crate::settings::document::single(line);
+                (name["gesture.".len()..].to_string(), word)
+            })
+            .collect()
+    }
 
     #[test]
     fn a_slot_reads_back_what_it_writes() {
@@ -1005,13 +1026,9 @@ mod tests {
         );
         let template = mac.template();
         let mut read = Gestures { slots: Vec::new() };
-        for line in template
-            .lines()
-            .filter_map(|line| line.strip_prefix("# gesture."))
-        {
-            let (name, word) = line.split_once(" = ").expect("name = value");
-            let slot = Slot::read(name).unwrap();
-            read.set(slot, Behavior::read(&slot, word).unwrap());
+        for (name, word) in template_lines(&template) {
+            let slot = Slot::read(&name).unwrap();
+            read.set(slot, Behavior::read(&slot, &word).unwrap());
         }
         assert_eq!(read, mac);
     }
@@ -1156,7 +1173,7 @@ mod tests {
                 Button::Left,
                 Kind::DoubleClick
             ),
-            Some("zoom.100.toggle")
+            Some("zoom.toggle")
         );
         assert_eq!(
             gestures.click(Surface::Image, Mods::empty(), Button::Left, Kind::Click),
@@ -1170,13 +1187,9 @@ mod tests {
     fn the_template_lists_every_default() {
         let template = Gestures::default().template();
         let mut gestures = Gestures { slots: Vec::new() };
-        for line in template
-            .lines()
-            .filter_map(|line| line.strip_prefix("# gesture."))
-        {
-            let (name, word) = line.split_once(" = ").expect("name = value");
-            let slot = Slot::read(name).unwrap();
-            gestures.set(slot, Behavior::read(&slot, word).unwrap());
+        for (name, word) in template_lines(&template) {
+            let slot = Slot::read(&name).unwrap();
+            gestures.set(slot, Behavior::read(&slot, &word).unwrap());
         }
         assert_eq!(gestures, Gestures::default());
     }

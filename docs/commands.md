@@ -9,7 +9,7 @@ every variable and directive, are in
 why it is built as it is.
 
 Three files hold it, split along the tree's layers. `src/commands.rs` is the
-grammar of the `command.` lines, the result file's directives and the run
+reading of the `[command.<name>]` tables, the result file's directives and the run
 itself, as `src/exiftool.rs` is for exiftool: it knows nothing of the
 application. `src/app/commands.rs` is the application's side: the set in
 force, the one run in flight, the dialog's values, each file's last output,
@@ -19,15 +19,15 @@ Output tab.
 
 ## Read from the configuration file
 
-A command is several lines, `command.<name>.<field> = value`, because the
-file is flat `name = value` lines with no sections or lists, and a second
-format for one feature would be a second parser and a second file to watch.
-`Config::parse` reads the `command.` lines in a pass of their own before the
-rest, so that `keys.command.redact` and `gesture.image.middle.click =
-command.redact` work wherever they sit in the file; the commands are in the
-order each is first named, which is the menu's order and the index
-`Action::Command` and `Control::RunCommand` carry. A field written twice is
-the later line's, as a setting is.
+A command is a TOML table, `[command.<name>]`, and its inputs an array of
+tables under it — see [the configuration file](configuration.md) for how
+the file is read. `Config::parse` reads the `command` table before the rest,
+so that `keys.command.redact` and `gesture.image.middle.click =
+"command.redact"` work wherever they sit in the file; the commands are in the
+file's order, which is the menu's order and the index `Action::Command` and
+`Control::RunCommand` carry. An input's kind and its range are checked by
+`Kind::number`, `Kind::radio` and `Kind::slider` in `src/ui/commands.rs`,
+which the old format's grammar is read through too when a file is rewritten.
 
 The keymap is a table of `&'static` rows, so the names a file makes are
 held beside it: `Keymap::add_extra` makes `command.<name>` a plain name, in
@@ -36,11 +36,6 @@ names and the extras alike, so a command's key is taken from whichever name
 held it, and the other way round, as between any two names. `help_of`
 answers with a `Cow`, and the help popup's `Row::does` is one, since an
 extra's words are the file's.
-
-The lexer strips a pair of quotes only around a whole value with no other
-quote inside it: a line of the shell like `"$HOME/bin/x" "$GAMUT_FILE"`
-begins and ends with quotes that are not a pair. A `#` after a space is
-still a comment, as everywhere in the file.
 
 ## The environment, and why not the command line
 

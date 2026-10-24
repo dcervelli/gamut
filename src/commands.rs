@@ -1,5 +1,5 @@
 //! The commands the configuration file defines: what each one is, read from
-//! its `command.<name>.*` lines, and running one — a line of the shell, run
+//! its `[command.<name>]` table, and running one — a line of the shell, run
 //! on a thread of its own with the window's state in its environment, its
 //! output captured, and what it asks the window to do read back from a file
 //! it was given.
@@ -23,13 +23,14 @@ use std::process::{Command as Process, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::ui::commands::{Kind, Needs};
+use crate::settings::document::{self, Lines, Table, Value, shown};
+use crate::ui::commands::{KINDS, Kind, Needs};
 use crate::{PROGRAM, xdg};
 
 /// One command, as the configuration file defines it.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Command {
-    /// What follows `command.` on its lines, and what its key is bound by:
+    /// What its table is named, `[command.<name>]`, and what its key is bound by:
     /// `keys.command.<name>`.
     pub name: String,
     /// What the menu, the help and the window's messages call it.
@@ -41,7 +42,7 @@ pub struct Command {
     pub confirm: bool,
     /// Whether the picture as shown is written out for it to read.
     pub shown: bool,
-    /// What its dialog asks for, in the order the file first names each.
+    /// What its dialog asks for, in the order the file lists them.
     pub inputs: Vec<Input>,
 }
 
@@ -60,7 +61,7 @@ impl Command {
 /// One input of a command's dialog.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Input {
-    /// What follows `input.`, and what the script reads it as, upper case:
+    /// Its `name`, and what the script reads it as, upper case:
     /// `GAMUT_INPUT_<NAME>`.
     pub name: String,
     pub label: String,
@@ -68,7 +69,7 @@ pub struct Input {
 }
 
 /// Whether `name` is a command's name: lower-case letters, digits, `_` and
-/// `-`.
+/// `-`, which TOML takes as a bare key.
 fn command_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -85,195 +86,319 @@ fn input_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// A command as it is read, before the file is over.
-struct Partial {
-    name: String,
-    /// The line it first appears on, which a missing `run` is said on.
-    first: usize,
-    label: Option<String>,
-    run: Option<String>,
-    needs: Needs,
-    confirm: bool,
-    shown: bool,
-    inputs: Vec<PartialInput>,
-}
+/// What a command's table takes.
+const FIELDS: &str = "label, run, needs, confirm, shown or input";
 
-struct PartialInput {
-    name: String,
-    first: usize,
-    label: Option<String>,
-    kind: Option<Kind>,
-    /// Whether a kind was written and refused, which has been said once.
-    refused: bool,
-}
+/// A problem, and the line it is said on.
+type Problem = (usize, String);
 
-/// The commands that `lines` define — each the line's number, its name with
-/// `command.` taken off, and its value — in the order each is first named,
-/// and each line that could not be used, with what was wrong with it. A
-/// field written twice is taken from the later line, as a setting is.
-pub fn parse(lines: &[(usize, &str, &str)]) -> (Vec<Command>, Vec<(usize, String)>) {
-    let mut partials: Vec<Partial> = Vec::new();
+/// The commands the file's `command` table defines, in the order the file
+/// writes them, and each thing in it that could not be used, by line. A
+/// command with no `run` is left out, and so is an input that does not
+/// read; the rest of each is taken.
+pub fn parse(table: &Table, lines: &Lines) -> (Vec<Command>, Vec<Problem>) {
+    let mut commands = Vec::new();
     let mut problems = Vec::new();
-    for &(number, rest, value) in lines {
-        let Some((name, field)) = rest.split_once('.') else {
-            problems.push((
-                number,
-                format!(
-                    "command.{rest} names no field: label, run, needs, confirm, shown or input"
-                ),
-            ));
-            continue;
-        };
+    for (key, value) in table.iter() {
+        let name: &str = key.get_ref();
+        let line = lines.of(key.span());
         if !command_name(name) {
             problems.push((
-                number,
+                line,
                 format!("`{name}` is not a command's name: a-z, 0-9, _ and - only"),
             ));
             continue;
         }
-        let at = match partials.iter().position(|partial| partial.name == name) {
-            Some(at) => at,
-            None => {
-                partials.push(Partial {
-                    name: name.to_string(),
-                    first: number,
-                    label: None,
-                    run: None,
-                    needs: Needs::default(),
-                    confirm: false,
-                    shown: false,
-                    inputs: Vec::new(),
-                });
-                partials.len() - 1
-            }
-        };
-        let partial = &mut partials[at];
-        let flag = |value: &str| match value {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            _ => Err(format!(
-                "command.{name}.{field} is true or false, not `{value}`"
-            )),
-        };
-        let outcome = match field {
-            "label" if value.is_empty() => Err(format!("command.{name}.label is empty")),
-            "label" => {
-                partial.label = Some(value.to_string());
-                Ok(())
-            }
-            "run" if value.is_empty() => Err(format!("command.{name}.run is empty")),
-            "run" => {
-                partial.run = Some(value.to_string());
-                Ok(())
-            }
-            "needs" => Needs::read(value)
-                .map(|needs| partial.needs = needs)
-                .map_err(|problem| format!("command.{name} {problem}")),
-            "confirm" => flag(value).map(|on| partial.confirm = on),
-            "shown" => flag(value).map(|on| partial.shown = on),
-            input => match input.strip_prefix("input.") {
-                None => Err(format!(
-                    "unknown field `{input}` of command.{name}: label, run, needs, confirm, \
-                     shown or input"
-                )),
-                Some(input) => read_input(partial, number, name, input, value),
-            },
-        };
-        if let Err(problem) = outcome {
-            problems.push((number, problem));
-        }
-    }
-    let mut commands = Vec::new();
-    for partial in partials {
-        let Some(run) = partial.run else {
+        let Value::Table(fields) = value.get_ref() else {
             problems.push((
-                partial.first,
-                format!("command.{} has no run line", partial.name),
+                line,
+                format!(
+                    "command.{name} is a table of its fields, [command.{name}], not {}",
+                    shown(value.get_ref())
+                ),
             ));
             continue;
         };
-        let mut inputs = Vec::new();
-        for input in partial.inputs {
-            match input.kind {
-                Some(kind) => inputs.push(Input {
-                    label: input.label.unwrap_or_else(|| input.name.clone()),
-                    name: input.name,
-                    kind,
-                }),
-                None if input.refused => {}
-                None => problems.push((
-                    input.first,
-                    format!(
-                        "command.{}.input.{} has no kind: string, number, checkbox, radio or \
-                         slider",
-                        partial.name, input.name
-                    ),
-                )),
-            }
+        if let Some(command) = read_command(name, line, fields, lines, &mut problems) {
+            commands.push(command);
         }
-        commands.push(Command {
-            label: partial.label.unwrap_or_else(|| partial.name.clone()),
-            name: partial.name,
-            run,
-            needs: partial.needs,
-            confirm: partial.confirm,
-            shown: partial.shown,
-            inputs,
-        });
     }
-    problems.sort_by_key(|(number, _)| *number);
+    problems.sort_by_key(|(line, _)| *line);
     (commands, problems)
 }
 
-/// A `command.<name>.input.` line: `input` is what follows `input.`, its
-/// name alone for the kind or with `.label` after it for its words.
-fn read_input(
-    partial: &mut Partial,
-    number: usize,
+/// One command, from its table; `line` is where it is first named, which a
+/// missing `run` is said on.
+fn read_command(
     name: &str,
-    input: &str,
-    value: &str,
-) -> Result<(), String> {
-    let (input, label) = match input.split_once('.') {
-        Some((input, "label")) => (input, true),
-        Some((input, other)) => {
-            return Err(format!(
-                "unknown field `{other}` of command.{name}.input.{input}: only label"
+    line: usize,
+    fields: &Table,
+    lines: &Lines,
+    problems: &mut Vec<Problem>,
+) -> Option<Command> {
+    let mut command = Command {
+        name: name.to_string(),
+        label: name.to_string(),
+        run: String::new(),
+        needs: Needs::default(),
+        confirm: false,
+        shown: false,
+        inputs: Vec::new(),
+    };
+    let mut run = None;
+    for (key, value) in fields.iter() {
+        let field: &str = key.get_ref();
+        let at = lines.of(value.span());
+        let value = value.get_ref();
+        let words = |value: &Value| match document::text(value) {
+            Some("") => Err(format!("command.{name}.{field} is empty")),
+            Some(words) => Ok(words.to_string()),
+            None => Err(format!(
+                "command.{name}.{field} is a string, not {}",
+                shown(value)
+            )),
+        };
+        let flag = |value: &Value| {
+            document::flag(value).ok_or_else(|| {
+                format!(
+                    "command.{name}.{field} is true or false, not {}",
+                    shown(value)
+                )
+            })
+        };
+        let outcome = match field {
+            "label" => words(value).map(|label| command.label = label),
+            "run" => words(value).map(|line| run = Some(line)),
+            "needs" => words(value).and_then(|word| {
+                Needs::read(&word)
+                    .map(|needs| command.needs = needs)
+                    .map_err(|problem| format!("command.{name} {problem}"))
+            }),
+            "confirm" => flag(value).map(|on| command.confirm = on),
+            "shown" => flag(value).map(|on| command.shown = on),
+            "input" => {
+                command.inputs = read_inputs(name, at, value, lines, problems);
+                Ok(())
+            }
+            // Every line after a `[command.…]` header is that command's,
+            // so a setting written below one lands here.
+            other if crate::settings::top_level(other) => Err(format!(
+                "command.{name} has no field `{other}`: every line after \
+                 [command.{name}] is the command's, so a setting, a key or a \
+                 gesture goes above the first [command]"
+            )),
+            other => Err(format!(
+                "unknown field `{other}` of command.{name}: {FIELDS}"
+            )),
+        };
+        if let Err(problem) = outcome {
+            problems.push((at, problem));
+        }
+    }
+    let Some(run) = run else {
+        problems.push((line, format!("command.{name} has no run")));
+        return None;
+    };
+    Some(Command { run, ..command })
+}
+
+/// A command's inputs: an array of tables, written `[[command.<name>.input]]`
+/// or `input = [{ … }, …]`.
+fn read_inputs(
+    command: &str,
+    line: usize,
+    value: &Value,
+    lines: &Lines,
+    problems: &mut Vec<Problem>,
+) -> Vec<Input> {
+    let Value::Array(items) = value else {
+        problems.push((
+            line,
+            format!(
+                "command.{command}.input is a list of inputs, each \
+                 [[command.{command}.input]], not {}",
+                shown(value)
+            ),
+        ));
+        return Vec::new();
+    };
+    let mut inputs: Vec<Input> = Vec::new();
+    for item in items.iter() {
+        let at = lines.of(item.span());
+        let Value::Table(fields) = item.get_ref() else {
+            problems.push((
+                at,
+                format!(
+                    "an input of command.{command} is a table, not {}",
+                    shown(item.get_ref())
+                ),
+            ));
+            continue;
+        };
+        match read_input(command, at, fields, lines) {
+            Ok(input) if inputs.iter().any(|each| each.name == input.name) => problems.push((
+                at,
+                format!("command.{command} has two inputs named `{}`", input.name),
+            )),
+            Ok(input) => inputs.push(input),
+            Err(said) => problems.extend(said),
+        }
+    }
+    inputs
+}
+
+/// One input, from its table at `line`: its name, its words and its kind,
+/// and what that kind takes — or everything wrong with it.
+fn read_input(
+    command: &str,
+    line: usize,
+    fields: &Table,
+    lines: &Lines,
+) -> Result<Input, Vec<Problem>> {
+    let field = |key: &str| {
+        fields
+            .get(key)
+            .map(|value| (value.get_ref(), lines.of(value.span())))
+    };
+    let Some((named, at)) = field("name") else {
+        return Err(vec![(
+            line,
+            format!("an input of command.{command} has no name"),
+        )]);
+    };
+    let Some(name) = document::text(named).filter(|name| input_name(name)) else {
+        return Err(vec![(
+            at,
+            format!(
+                "{} is not an input's name: a-z, 0-9 and _ only",
+                shown(named)
+            ),
+        )]);
+    };
+    let said = |problem: String| format!("command.{command} input `{name}`: {problem}");
+    let mut problems = Vec::new();
+    let label = match field("label") {
+        None => name.to_string(),
+        Some((value, at)) => match document::text(value) {
+            Some(label) if !label.is_empty() => label.to_string(),
+            _ => {
+                problems.push((at, said(format!("label is words, not {}", shown(value)))));
+                name.to_string()
+            }
+        },
+    };
+    let kinds = format!(
+        "{} or {}",
+        KINDS[..KINDS.len() - 1].join(", "),
+        KINDS[KINDS.len() - 1]
+    );
+    let Some((kind, at)) = field("kind") else {
+        problems.push((line, said(format!("no kind: {kinds}"))));
+        return Err(problems);
+    };
+    let Some(word) = document::text(kind).filter(|word| KINDS.contains(word)) else {
+        problems.push((
+            at,
+            said(format!("{} is not a kind of input: {kinds}", shown(kind))),
+        ));
+        return Err(problems);
+    };
+    let takes: &[&str] = match word {
+        "number" => &["min", "max", "default"],
+        "radio" => &["choices", "default"],
+        "slider" => &["min", "max", "default", "step"],
+        _ => &["default"],
+    };
+    for (key, value) in fields.iter() {
+        let key: &str = key.get_ref();
+        if !["name", "label", "kind"].contains(&key) && !takes.contains(&key) {
+            problems.push((
+                lines.of(value.span()),
+                said(format!("a {word} takes {}, not {key}", takes.join(", "))),
             ));
         }
-        None => (input, false),
-    };
-    if !input_name(input) {
-        return Err(format!(
-            "`{input}` is not an input's name: a-z, 0-9 and _ only"
-        ));
     }
-    let at = match partial.inputs.iter().position(|each| each.name == input) {
-        Some(at) => at,
-        None => {
-            partial.inputs.push(PartialInput {
-                name: input.to_string(),
-                first: number,
-                label: None,
-                kind: None,
-                refused: false,
-            });
-            partial.inputs.len() - 1
+    match read_kind(word, &field, at) {
+        Ok(kind) if problems.is_empty() => Ok(Input {
+            name: name.to_string(),
+            label,
+            kind,
+        }),
+        Ok(_) => Err(problems),
+        Err((at, problem)) => {
+            problems.push((at, said(problem)));
+            Err(problems)
         }
-    };
-    let each = &mut partial.inputs[at];
-    if label {
-        each.label = Some(value.to_string());
-        return Ok(());
     }
-    match Kind::read(value) {
-        Ok(kind) => {
-            each.kind = Some(kind);
-            Ok(())
+}
+
+/// The kind `word` names, from the fields `field` finds; `line` is the
+/// kind's, which a problem with the whole is said on.
+fn read_kind<'v>(
+    word: &str,
+    field: &dyn Fn(&str) -> Option<(&'v Value<'v>, usize)>,
+    line: usize,
+) -> Result<Kind, Problem> {
+    let number = |key: &str| match field(key) {
+        None => Ok(None),
+        Some((value, at)) => document::number(value)
+            .map(Some)
+            .ok_or_else(|| (at, format!("{key} is a number, not {}", shown(value)))),
+    };
+    let words = |key: &str| match field(key) {
+        None => Ok(None),
+        Some((value, at)) => document::text(value)
+            .map(Some)
+            .ok_or_else(|| (at, format!("{key} is a string, not {}", shown(value)))),
+    };
+    let whole = |made: Result<Kind, String>| made.map_err(|problem| (line, problem));
+    match word {
+        "string" => Ok(Kind::Text {
+            default: words("default")?.unwrap_or_default().to_string(),
+        }),
+        "number" => {
+            let range = match (number("min")?, number("max")?) {
+                (Some(low), Some(high)) => Some((low, high)),
+                (None, None) => None,
+                _ => return Err((line, "min and max go together".into())),
+            };
+            whole(Kind::number(range, number("default")?))
         }
-        Err(problem) => {
-            each.refused = true;
-            Err(format!("command.{name}.input.{input}: {problem}"))
+        "checkbox" => match field("default") {
+            None => Ok(Kind::Checkbox { default: false }),
+            Some((value, at)) => document::flag(value)
+                .map(|default| Kind::Checkbox { default })
+                .ok_or_else(|| {
+                    (
+                        at,
+                        format!("default is true or false, not {}", shown(value)),
+                    )
+                }),
+        },
+        "radio" => {
+            let Some((value, at)) = field("choices") else {
+                return Err((line, "a radio needs its choices".into()));
+            };
+            let choices = match value {
+                Value::Array(items) => items
+                    .iter()
+                    .map(|item| document::text(item.get_ref()).map(str::to_string))
+                    .collect::<Option<Vec<String>>>(),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                (
+                    at,
+                    "choices is a list of strings: [\"png\", \"jpg\"]".into(),
+                )
+            })?;
+            whole(Kind::radio(choices, words("default")?))
+        }
+        _ => {
+            let (Some(low), Some(high)) = (number("min")?, number("max")?) else {
+                return Err((line, "a slider needs a min and a max".into()));
+            };
+            whole(Kind::slider(low, high, number("default")?, number("step")?))
         }
     }
 }
@@ -284,25 +409,28 @@ fn read_input(
 pub const TEMPLATE: &str = "\n\
 # Commands: a line of the shell, run with the file on screen and what is
 # marked on it in its environment, from the foot of the file menu or by a
-# key bound to keys.command.<name>. Every field but run may be left out;
-# needs is file, region, pointer, location, georeference or none. A
-# script asks the window to show an image it made, or to say something,
-# with open, message and error lines, written as this file's are, in the
-# file $GAMUT_RESULT names. What it prints is shown, never obeyed.
-#   command.redact.label = Redact region
-#   command.redact.run = ~/bin/redact.sh
-#   command.redact.needs = region
-#   command.redact.confirm = false
-#   command.redact.shown = false
-#   command.redact.input.blur = slider 1 50 10
-#   command.redact.input.blur.label = Blur radius
-#   command.redact.input.note = string Redacted
-#   command.redact.input.count = number 1 10 3
-#   command.redact.input.solid = checkbox true
-#   command.redact.input.format = radio png jpg webp = jpg
-#   keys.command.redact = ctrl+shift+r
+# key bound to keys.command.<name>. Each is a table, after every setting,
+# key and gesture, since every line after a [table] belongs to it. Every
+# field but run may be left out; needs is file, region, pointer, location,
+# georeference or none. An input is a string, number, checkbox, radio or
+# slider. A script asks the window to show an image it made, or to say
+# something, with open, message and error lines in the file $GAMUT_RESULT
+# names: the name, an equals sign, and the rest of the line, unquoted. What
+# it prints is shown, never obeyed.
+#   [command.redact]
+#   label = \"Redact region\"
+#   run = \"~/bin/redact.sh\"
+#   needs = \"region\"
+#   confirm = false
+#   shown = false
+#   input = [
+#     { name = \"blur\", label = \"Blur radius\", kind = \"slider\", min = 1, max = 50, default = 10 },
+#     { name = \"note\", kind = \"string\", default = \"Redacted\" },
+#     { name = \"count\", kind = \"number\", min = 1, max = 10, default = 3 },
+#     { name = \"solid\", kind = \"checkbox\", default = true },
+#     { name = \"format\", kind = \"radio\", choices = [\"png\", \"jpg\", \"webp\"], default = \"jpg\" },
+#   ]
 ";
-
 /// One thing the result file asks the window to do.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Directive {
@@ -313,8 +441,8 @@ pub enum Directive {
 }
 
 /// What the result file `text` asks for, line by line, and each line that
-/// does not read, by number. It is read as the configuration file is:
-/// `name = value`, `#` starting a comment.
+/// does not read, by number. It is read as the state file is: lines of
+/// `name = value`, `#` starting a comment, for a script to write with echo.
 pub fn directives(text: &str) -> (Vec<Directive>, Vec<(usize, String)>) {
     let mut asked = Vec::new();
     let mut problems = Vec::new();
@@ -687,39 +815,65 @@ pub fn run_on_thread(launch: Launch, stopper: Stopper, deliver: Deliver) {
     }
 }
 
+/// The commands a whole file defines, as the configuration reads them.
+#[cfg(test)]
+pub fn parsed(text: &str) -> (Vec<Command>, Vec<Problem>) {
+    let (clean, mut problems) = document::readable(text);
+    let root = document::table(&clean);
+    let lines = Lines::new(text);
+    let Some(Value::Table(table)) = root.get_ref().get("command").map(|v| v.get_ref()) else {
+        return (Vec::new(), problems);
+    };
+    let (commands, said) = parse(table, &lines);
+    problems.extend(said);
+    problems.sort_by_key(|(line, _)| *line);
+    (commands, problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn parsed(text: &str) -> (Vec<Command>, Vec<(usize, String)>) {
-        let lines: Vec<(usize, &str, &str)> = crate::settings::lines(text)
-            .filter_map(|(number, line)| {
-                let (name, value) = line?;
-                Some((number, name.strip_prefix("command.")?, value))
-            })
-            .collect();
-        parse(&lines)
-    }
-
-    /// A command's lines may come in any order and be spread through the
-    /// file; it is listed where it is first named, and its inputs where
-    /// each is.
+    /// Commands are listed in the order the file writes them, and their
+    /// inputs in the order each lists them, in either of TOML's ways of
+    /// writing an array of tables.
     #[test]
-    fn a_command_block_is_read_in_order_of_first_appearance() {
+    fn commands_and_inputs_are_read_in_the_files_order() {
         let (commands, problems) = parsed(
-            "command.b.run = echo b\n\
-             command.a.input.size = number 1 10 3\n\
-             command.a.run = ~/bin/a.sh\n\
-             command.a.label = Do A\n\
-             command.a.needs = region\n\
-             command.a.input.size.label = Size\n\
-             command.a.input.on = checkbox true\n\
-             command.b.confirm = true\n\
-             command.b.shown = true\n",
+            "[command.b]\n\
+             run = \"echo b\"\n\
+             confirm = true\n\
+             shown = true\n\
+             \n\
+             [command.a]\n\
+             run = \"~/bin/a.sh\"\n\
+             label = \"Do A\"\n\
+             needs = \"region\"\n\
+             \n\
+             [[command.a.input]]\n\
+             name = \"size\"\n\
+             label = \"Size\"\n\
+             kind = \"number\"\n\
+             min = 1\n\
+             max = 10\n\
+             default = 3\n\
+             \n\
+             [[command.a.input]]\n\
+             name = \"on\"\n\
+             kind = \"checkbox\"\n\
+             default = true\n\
+             \n\
+             [command.c]\n\
+             run = \"true\"\n\
+             input = [\n\
+               { name = \"gain\", kind = \"slider\", min = 0, max = 1, default = 0.5, step = 0.1 },\n\
+               { name = \"mode\", kind = \"radio\", choices = [\"fast\", \"slow\"], default = \"slow\" },\n\
+               { name = \"note\", kind = \"string\", default = \"hello\" },\n\
+             ]\n",
         );
         assert_eq!(problems, Vec::new());
         let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["b", "a"]);
+        assert_eq!(names, ["b", "a", "c"]);
         let a = &commands[1];
         assert_eq!(a.label, "Do A");
         assert_eq!(a.run, "~/bin/a.sh");
@@ -731,42 +885,95 @@ mod tests {
             .map(|i| (i.name.as_str(), i.label.as_str()))
             .collect();
         assert_eq!(inputs, [("size", "Size"), ("on", "on")]);
+        assert_eq!(
+            a.inputs[0].kind,
+            Kind::Number {
+                range: Some((1.0, 10.0)),
+                default: 3.0
+            }
+        );
+        assert_eq!(a.inputs[1].kind, Kind::Checkbox { default: true });
         let b = &commands[0];
         assert_eq!((b.label.as_str(), b.needs), ("b", Needs::File));
         assert!(b.confirm && b.shown && b.asks());
+        let c = &commands[2];
+        assert_eq!(
+            c.inputs.iter().map(|i| i.kind.clone()).collect::<Vec<_>>(),
+            [
+                Kind::Slider {
+                    low: 0.0,
+                    high: 1.0,
+                    default: 0.5,
+                    step: 0.1
+                },
+                Kind::Radio {
+                    choices: vec!["fast".into(), "slow".into()],
+                    default: 1
+                },
+                Kind::Text {
+                    default: "hello".into()
+                },
+            ]
+        );
     }
 
-    /// Each line that does not read is said on its own line, and a command
-    /// with no `run` on the line it first appeared on; the rest is taken.
+    /// Each thing that does not read is said on its own line, and a command
+    /// with no `run` on the line it is named on; the rest is taken.
     #[test]
-    fn a_bad_command_line_is_said_on_its_line() {
+    fn a_bad_command_field_is_said_on_its_line() {
         let (commands, problems) = parsed(
-            "command.Bad.run = x\n\
-             command.ok.colour = red\n\
-             command.ok.run = echo ok\n\
-             command.ok.input.my-size = number\n\
-             command.ok.input.size = dial\n\
-             command.norun.label = Nothing\n\
-             command.ok.needs = everything\n\
-             command.ok.confirm = maybe\n\
-             command.ok.input.w.label = Width\n\
-             command.alone = x\n",
+            "[command.Bad]\n\
+             run = \"x\"\n\
+             [command.ok]\n\
+             colour = \"red\"\n\
+             run = \"echo ok\"\n\
+             needs = \"everything\"\n\
+             confirm = \"maybe\"\n\
+             input = [\n\
+               { name = \"my-size\", kind = \"number\" },\n\
+               { name = \"size\", kind = \"dial\" },\n\
+               { name = \"w\", label = \"Width\" },\n\
+               { name = \"s\", kind = \"slider\", min = 5, max = 1 },\n\
+               { name = \"t\", kind = \"string\", step = 2 },\n\
+             ]\n\
+             [command.norun]\n\
+             label = \"Nothing\"\n",
         );
         let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["ok"]);
         assert_eq!(commands[0].inputs, Vec::new());
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
-        assert_eq!(lines, [1, 2, 4, 5, 6, 7, 8, 9, 10], "{problems:?}");
-        assert_eq!(problems[4].1, "command.norun has no run line");
+        assert_eq!(lines, [1, 4, 6, 7, 9, 10, 11, 12, 13, 15], "{problems:?}");
+        assert_eq!(problems[9].1, "command.norun has no run");
+        assert_eq!(
+            problems[8].1,
+            "command.ok input `t`: a string takes default, not step"
+        );
     }
 
-    /// A line of the shell that begins and ends with quotes of its own
-    /// keeps them; a value wholly in one pair loses the pair.
+    /// A setting, a key or a gesture written below a command's table is
+    /// read as the command's, and said as having been put there.
     #[test]
-    fn a_line_quoted_at_both_ends_keeps_its_quotes() {
+    fn a_setting_below_a_command_is_said_to_belong_above() {
         let (commands, problems) = parsed(
-            "command.a.run = \"$HOME/bin/a\" \"$GAMUT_FILE\"\n\
-             command.a.label = \"Quoted label\"\n",
+            "[command.redact]\n\
+             run = \"~/bin/redact.sh\"\n\
+             keys.command.redact = \"ctrl+shift+r\"\n\
+             show_info = true\n",
+        );
+        assert_eq!(commands.len(), 1);
+        let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
+        assert_eq!(lines, [3, 4], "{problems:?}");
+        assert!(problems[0].1.contains("goes above the first [command]"));
+    }
+
+    /// A line of the shell keeps every quote it was written with.
+    #[test]
+    fn a_line_of_the_shell_keeps_its_quotes() {
+        let (commands, problems) = parsed(
+            "[command.a]\n\
+             run = '\"$HOME/bin/a\" \"$GAMUT_FILE\"'\n\
+             label = \"Quoted label\"\n",
         );
         assert_eq!(problems, Vec::new());
         assert_eq!(commands[0].run, "\"$HOME/bin/a\" \"$GAMUT_FILE\"");
@@ -779,8 +986,8 @@ mod tests {
     fn the_template_example_is_a_command() {
         let example: String = TEMPLATE
             .lines()
-            .filter_map(|line| line.strip_prefix("#   command."))
-            .map(|line| format!("command.{line}\n"))
+            .filter_map(|line| line.strip_prefix("#   "))
+            .map(|line| format!("{line}\n"))
             .collect();
         let (commands, problems) = parsed(&example);
         assert_eq!(problems, Vec::new());
@@ -788,7 +995,7 @@ mod tests {
         assert_eq!(commands[0].inputs.len(), 5);
     }
 
-    /// The result file is read as the configuration is; a line it cannot
+    /// The result file is lines of `name = value`; a line it cannot
     /// use is said by number.
     #[test]
     fn a_result_file_is_read_as_directives_and_an_unknown_name_is_said() {

@@ -131,6 +131,7 @@ fn run() -> Result<ExitCode> {
         named,
         paste,
         complaint,
+        rewrite,
         options,
     } = args;
 
@@ -232,8 +233,12 @@ fn run() -> Result<ExitCode> {
     // Said last, so that it is the one up: a configuration that did not
     // take is why the window is not as it was asked to be, and whoever
     // started it from a launcher has no terminal to read.
-    if let Some(complaint) = complaint {
-        app.say(&complaint);
+    // What a configuration in the old format became is said where the
+    // file has nothing worse to say.
+    match (complaint, rewrite) {
+        (Some(complaint), _) => app.say(&complaint),
+        (None, Some(rewrite)) => app.rewrote(rewrite),
+        (None, None) => {}
     }
     event_loop.run_app(&mut app)?;
 

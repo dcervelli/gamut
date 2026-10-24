@@ -179,133 +179,64 @@ pub fn decimal(value: f64) -> String {
     }
 }
 
+/// The words an input's kind is written in, in the order they are offered.
+pub const KINDS: [&str; 5] = ["string", "number", "checkbox", "radio", "slider"];
+
 impl Kind {
-    /// An input as the configuration file writes it: its kind's word, and
-    /// what that kind takes after it, whitespace between.
-    pub fn read(value: &str) -> Result<Kind, String> {
-        let value = value.trim();
-        let (word, rest) = value
-            .split_once(char::is_whitespace)
-            .map_or((value, ""), |(word, rest)| (word, rest.trim()));
-        let tokens: Vec<&str> = rest.split_whitespace().collect();
-        let number = |token: &str| -> Result<f64, String> {
-            token
-                .parse::<f64>()
-                .ok()
-                .filter(|number| number.is_finite())
-                .ok_or_else(|| format!("`{token}` is not a number"))
-        };
-        match word {
-            "string" => Ok(Kind::Text {
-                default: rest.to_string(),
-            }),
-            "number" => {
-                let numbers = tokens
-                    .iter()
-                    .map(|token| number(token))
-                    .collect::<Result<Vec<f64>, String>>()?;
-                let (range, default) = match numbers[..] {
-                    [] => (None, 0.0),
-                    [default] => (None, default),
-                    [low, high] => (Some((low, high)), low),
-                    [low, high, default] => (Some((low, high)), default),
-                    _ => return Err("a number takes at most a least, a most and a default".into()),
-                };
-                if let Some((low, high)) = range {
-                    if low >= high {
-                        return Err(format!(
-                            "{} is not less than {}",
-                            decimal(low),
-                            decimal(high)
-                        ));
-                    }
-                    if !(low..=high).contains(&default) {
-                        return Err(format!(
-                            "the default {} is not between {} and {}",
-                            decimal(default),
-                            decimal(low),
-                            decimal(high)
-                        ));
-                    }
-                }
-                Ok(Kind::Number { range, default })
-            }
-            "checkbox" => match tokens[..] {
-                [] | ["false"] => Ok(Kind::Checkbox { default: false }),
-                ["true"] => Ok(Kind::Checkbox { default: true }),
-                _ => Err(format!("a checkbox is true or false, not `{rest}`")),
-            },
-            "radio" => {
-                let (choices, default) = match rest.split_once('=') {
-                    Some((choices, default)) => (choices, Some(default.trim())),
-                    None => (rest, None),
-                };
-                let choices: Vec<String> = choices.split_whitespace().map(str::to_string).collect();
-                if choices.len() < 2 {
-                    return Err("a radio needs at least two choices".into());
-                }
-                for (at, choice) in choices.iter().enumerate() {
-                    if choices[..at].contains(choice) {
-                        return Err(format!("the choice `{choice}` is there twice"));
-                    }
-                }
-                let default = match default {
-                    None => 0,
-                    Some(default) => choices
-                        .iter()
-                        .position(|choice| choice == default)
-                        .ok_or_else(|| format!("the default `{default}` is not a choice"))?,
-                };
-                Ok(Kind::Radio { choices, default })
-            }
-            "slider" => {
-                let numbers = tokens
-                    .iter()
-                    .map(|token| number(token))
-                    .collect::<Result<Vec<f64>, String>>()?;
-                let (low, high, default, step) = match numbers[..] {
-                    [low, high] => (low, high, None, None),
-                    [low, high, default] => (low, high, Some(default), None),
-                    [low, high, default, step] => (low, high, Some(default), Some(step)),
-                    _ => {
-                        return Err(
-                            "a slider takes a least and a most, then a default and a step".into(),
-                        );
-                    }
-                };
-                if low >= high {
-                    return Err(format!(
-                        "{} is not less than {}",
-                        decimal(low),
-                        decimal(high)
-                    ));
-                }
-                let default = default.unwrap_or(low);
-                if !(low..=high).contains(&default) {
-                    return Err(format!(
-                        "the default {} is not between {} and {}",
-                        decimal(default),
-                        decimal(low),
-                        decimal(high)
-                    ));
-                }
-                let whole = low.fract() == 0.0 && high.fract() == 0.0;
-                let step = step.unwrap_or(if whole { 1.0 } else { (high - low) / 100.0 });
-                if step <= 0.0 {
-                    return Err(format!("the step {} is not more than 0", decimal(step)));
-                }
-                Ok(Kind::Slider {
-                    low,
-                    high,
-                    default,
-                    step,
-                })
-            }
-            "" => Err("an input needs a kind: string, number, checkbox, radio or slider".into()),
-            other => Err(format!(
-                "`{other}` is not a kind of input: string, number, checkbox, radio or slider"
-            )),
+    /// A number, inside `range` where there is one: the default is the
+    /// least of the range where none is given, and 0 where there is no
+    /// range either.
+    pub fn number(range: Option<(f64, f64)>, default: Option<f64>) -> Result<Kind, String> {
+        let default = default.unwrap_or(range.map_or(0.0, |(low, _)| low));
+        if let Some((low, high)) = range {
+            between(low, high, default)?;
         }
+        Ok(Kind::Number { range, default })
+    }
+
+    /// A choice of two or more words, none twice; the default the first
+    /// where none is given.
+    pub fn radio(choices: Vec<String>, default: Option<&str>) -> Result<Kind, String> {
+        if choices.len() < 2 {
+            return Err("a radio needs at least two choices".into());
+        }
+        for (at, choice) in choices.iter().enumerate() {
+            if choices[..at].contains(choice) {
+                return Err(format!("the choice `{choice}` is there twice"));
+            }
+        }
+        let default = match default {
+            None => 0,
+            Some(default) => choices
+                .iter()
+                .position(|choice| choice == default)
+                .ok_or_else(|| format!("the default `{default}` is not a choice"))?,
+        };
+        Ok(Kind::Radio { choices, default })
+    }
+
+    /// A slider from `low` to `high`: the default the least where none is
+    /// given, and the step 1 between whole numbers or a hundredth of the
+    /// range otherwise.
+    pub fn slider(
+        low: f64,
+        high: f64,
+        default: Option<f64>,
+        step: Option<f64>,
+    ) -> Result<Kind, String> {
+        let default = default.unwrap_or(low);
+        between(low, high, default)?;
+        let whole = low.fract() == 0.0 && high.fract() == 0.0;
+        let step = step.unwrap_or(if whole { 1.0 } else { (high - low) / 100.0 });
+        if step <= 0.0 {
+            return Err(format!("the step {} is not more than 0", decimal(step)));
+        }
+        Ok(Kind::Slider {
+            low,
+            high,
+            default,
+            step,
+        })
     }
 
     /// What the input holds before anything is done to it.
@@ -372,6 +303,26 @@ impl Kind {
             (_, Value::Slider(value)) => decimal(*value),
         }
     }
+}
+
+/// That `low` is less than `high`, and `default` between them.
+fn between(low: f64, high: f64, default: f64) -> Result<(), String> {
+    if low >= high {
+        return Err(format!(
+            "{} is not less than {}",
+            decimal(low),
+            decimal(high)
+        ));
+    }
+    if !(low..=high).contains(&default) {
+        return Err(format!(
+            "the default {} is not between {} and {}",
+            decimal(default),
+            decimal(low),
+            decimal(high)
+        ));
+    }
+    Ok(())
 }
 
 /// What is wrong with a number typed into the dialog.
@@ -636,74 +587,33 @@ pub fn snap(value: f64, low: f64, high: f64, step: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// Each kind reads its own words, and says what is wrong with words it
-    /// cannot read.
+    /// Each kind refuses what it cannot be, and fills in what it was not
+    /// given.
     #[test]
-    fn every_kind_reads_its_grammar_and_refuses_what_it_cannot() {
+    fn every_kind_is_checked_and_filled_in() {
         assert_eq!(
-            Kind::read("string"),
-            Ok(Kind::Text {
-                default: String::new()
-            })
-        );
-        assert_eq!(
-            Kind::read("string  Draft, do not use "),
-            Ok(Kind::Text {
-                default: "Draft, do not use".into()
-            })
-        );
-        assert_eq!(
-            Kind::read("number"),
+            Kind::number(None, None),
             Ok(Kind::Number {
                 range: None,
                 default: 0.0
             })
         );
         assert_eq!(
-            Kind::read("number 7"),
-            Ok(Kind::Number {
-                range: None,
-                default: 7.0
-            })
-        );
-        assert_eq!(
-            Kind::read("number 1 10"),
+            Kind::number(Some((1.0, 10.0)), None),
             Ok(Kind::Number {
                 range: Some((1.0, 10.0)),
                 default: 1.0
             })
         );
         assert_eq!(
-            Kind::read("number 1 10 4"),
-            Ok(Kind::Number {
-                range: Some((1.0, 10.0)),
-                default: 4.0
-            })
-        );
-        assert_eq!(
-            Kind::read("checkbox true"),
-            Ok(Kind::Checkbox { default: true })
-        );
-        assert_eq!(
-            Kind::read("checkbox"),
-            Ok(Kind::Checkbox { default: false })
-        );
-        assert_eq!(
-            Kind::read("radio png jpg webp = jpg"),
+            Kind::radio(vec!["png".into(), "jpg".into()], Some("jpg")),
             Ok(Kind::Radio {
-                choices: vec!["png".into(), "jpg".into(), "webp".into()],
+                choices: vec!["png".into(), "jpg".into()],
                 default: 1
             })
         );
         assert_eq!(
-            Kind::read("radio png jpg"),
-            Ok(Kind::Radio {
-                choices: vec!["png".into(), "jpg".into()],
-                default: 0
-            })
-        );
-        assert_eq!(
-            Kind::read("slider 1 50 10"),
+            Kind::slider(1.0, 50.0, Some(10.0), None),
             Ok(Kind::Slider {
                 low: 1.0,
                 high: 50.0,
@@ -712,7 +622,7 @@ mod tests {
             })
         );
         assert_eq!(
-            Kind::read("slider 0 0.5"),
+            Kind::slider(0.0, 0.5, None, None),
             Ok(Kind::Slider {
                 low: 0.0,
                 high: 0.5,
@@ -720,31 +630,20 @@ mod tests {
                 step: 0.005
             })
         );
-        for refused in [
-            "",
-            "colour red",
-            "number ten",
-            "number 5 1",
-            "number 1 5 9",
-            "number 1 2 3 4",
-            "checkbox maybe",
-            "radio png",
-            "radio png png",
-            "radio png jpg = gif",
-            "slider 1",
-            "slider 1 5 9",
-            "slider 1 5 2 0",
-            "slider 1 5 2 1 1",
-        ] {
-            assert!(Kind::read(refused).is_err(), "{refused}");
-        }
+        assert!(Kind::number(Some((5.0, 1.0)), None).is_err());
+        assert!(Kind::number(Some((1.0, 5.0)), Some(9.0)).is_err());
+        assert!(Kind::radio(vec!["png".into()], None).is_err());
+        assert!(Kind::radio(vec!["png".into(), "png".into()], None).is_err());
+        assert!(Kind::radio(vec!["png".into(), "jpg".into()], Some("gif")).is_err());
+        assert!(Kind::slider(1.0, 5.0, Some(9.0), None).is_err());
+        assert!(Kind::slider(1.0, 5.0, Some(2.0), Some(0.0)).is_err());
     }
 
     /// A number is judged as typed, and every value is written for the
     /// environment as the script will read it.
     #[test]
     fn a_number_is_judged_and_every_value_written_for_the_script() {
-        let number = Kind::read("number 1 10").unwrap();
+        let number = Kind::number(Some((1.0, 10.0)), None).unwrap();
         assert_eq!(number.judge(&Value::Number("4".into())), None);
         assert_eq!(
             number.judge(&Value::Number("four".into())),
@@ -766,14 +665,14 @@ mod tests {
             "Between 1 and 10."
         );
         assert_eq!(number.environment(&Value::Number(" 4.50 ".into())), "4.5");
-        let radio = Kind::read("radio png jpg").unwrap();
+        let radio = Kind::radio(vec!["png".into(), "jpg".into()], None).unwrap();
         assert_eq!(radio.environment(&Value::Radio(1)), "jpg");
-        let slider = Kind::read("slider 0 1").unwrap();
+        let slider = Kind::slider(0.0, 1.0, None, None).unwrap();
         assert_eq!(slider.environment(&Value::Slider(0.25)), "0.25");
         assert!(slider.holds(&Value::Slider(1.0)));
         assert!(!slider.holds(&Value::Slider(2.0)));
         assert!(!slider.holds(&Value::Checkbox(true)));
-        let checkbox = Kind::read("checkbox").unwrap();
+        let checkbox = Kind::Checkbox { default: false };
         assert_eq!(checkbox.environment(&Value::Checkbox(true)), "true");
     }
 

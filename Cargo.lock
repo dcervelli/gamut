@@ -1023,6 +1023,7 @@ dependencies = [
  "skrifa",
  "tiff",
  "timeago",
+ "toml",
  "ultrahdr-rs",
  "wayland-client",
  "wayland-protocols",

@@ -38,6 +38,16 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The configuration file is TOML, `~/.config/gamut/config.toml`: words go
+  in quotes, a command is a `[command.<name>]` table, and a line of the
+  shell can hold a `#` or run over several lines. A configuration in the old
+  format, `~/.config/gamut/config`, is rewritten as `config.toml` the first
+  time the program starts, with your comments where you left them, and the
+  window says so; the old file is left as it was. `--print-config` and
+  `Ctrl+,` write the new format.
+- Two key names change, since TOML cannot hold a name and a longer one that
+  starts with it: `zoom.100.toggle` is `zoom.toggle`, and `files.map.bounds`
+  is `files.map-bounds`. The rewrite renames them.
 - The picture can be dragged past its edge, until the edge reaches the
   middle of the window, so an edge can be pulled out from under whatever is
   covering it. A fitted or small picture can be dragged that far too. The
