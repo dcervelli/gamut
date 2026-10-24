@@ -95,20 +95,27 @@ pub struct Thumb {
     pub copies: [egui::load::SizedTexture; 3],
 }
 
-/// Paints `thumb` fitted and centered in `slot` — the copy that covers
-/// `side` device pixels, drawn no larger than itself — or, with none held
-/// yet, the slot as an empty frame in the bar's own ground. What the
-/// chooser's rows and the file list's both put in their slot.
 /// The width of a hairline: the thinnest rule the interface draws, put on
 /// the device's grid by [`icon::Grid::line_width`] before it is drawn.
 pub(crate) const HAIRLINE: f32 = 1.0;
 
+/// How large the mark is that says no thumbnail is coming, at most: a
+/// button's icon, shrunk to a share of a narrower slot.
+const MISSING_MARK: f32 = 24.0;
+const MISSING_MARK_SHARE: f32 = 0.4;
+
+/// Paints `thumb` fitted and centered in `slot` — the copy that covers
+/// `side` device pixels, drawn no larger than itself — or, with none held
+/// yet, the slot as an empty frame in the bar's own ground, with a mark
+/// struck through at its middle where none is coming. What the chooser's
+/// rows and the file list's both put in their slot.
 fn thumb_in_slot(
     painter: &egui::Painter,
     grid: icon::Grid,
     slot: egui::Rect,
     side: f32,
     thumb: Option<&Thumb>,
+    missing: Option<crate::thumbnailer::Missing>,
     theme: &Theme,
 ) {
     match thumb {
@@ -134,6 +141,16 @@ fn thumb_in_slot(
                 HAIRLINE,
                 theme.border.into(),
             );
+            if missing.is_some() {
+                let budget = MISSING_MARK.min(slot.width().min(slot.height()) * MISSING_MARK_SHARE);
+                icon::paint(
+                    painter,
+                    icon::IMAGE_OFF,
+                    icon::square(grid, slot, budget),
+                    theme.text_dim.into(),
+                    theme.button_idle.into(),
+                );
+            }
         }
     }
 }

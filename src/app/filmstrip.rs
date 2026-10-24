@@ -23,6 +23,7 @@ use std::sync::Arc;
 use super::chooser::Thumbs;
 use super::files::Files;
 use super::order::Key;
+use crate::thumbnailer::Missing;
 use crate::ui::filmstrip::{self, Input, Order, Row};
 
 /// The state behind the strip.
@@ -202,12 +203,13 @@ impl Filmstrip {
         &mut self,
         thumbs: &Thumbs,
         key: impl for<'a> Fn(&'a Path) -> Key<'a>,
+        missing: impl Fn(&Path) -> Option<Missing>,
         current: Option<&Path>,
         back: bool,
         forward: bool,
     ) -> Input {
         if self.dirty || self.rows.is_none() || self.thumbs_seen != thumbs.generation {
-            let (rows, tops) = self.build(thumbs, key);
+            let (rows, tops) = self.build(thumbs, key, missing);
             self.rows = Some(rows);
             self.tops = tops;
             self.dirty = false;
@@ -236,6 +238,7 @@ impl Filmstrip {
         &self,
         thumbs: &Thumbs,
         key: impl for<'a> Fn(&'a Path) -> Key<'a>,
+        missing: impl Fn(&Path) -> Option<Missing>,
     ) -> (Arc<[Row]>, Arc<[f32]>) {
         let rows: Vec<Row> = self
             .paths
@@ -253,6 +256,7 @@ impl Filmstrip {
                     modified: known.modified,
                     taken: known.taken,
                     thumb: thumbs.get(path),
+                    missing: missing(path),
                 }
             })
             .collect();
@@ -324,6 +328,7 @@ mod tests {
         let input = strip.input(
             &thumbs,
             |path| known(&facts_known, path),
+            |path| (path == Path::new("a/2.jpg")).then_some(Missing::TooLarge),
             Some(Path::new("b/3.png")),
             false,
             true,
@@ -341,9 +346,11 @@ mod tests {
                 modified: None,
                 taken: None,
                 thumb: None,
+                missing: Some(Missing::TooLarge),
             }
         );
         assert_eq!(input.rows[2].format, None, "not read yet");
+        assert_eq!(input.rows[2].missing, None, "still coming");
         assert_eq!(input.current, Some(2));
         let (wide, square) = (
             row_height(SLOT_DEFAULT, Some((300, 200)), 1.0),
@@ -370,6 +377,7 @@ mod tests {
         let input = strip.input(
             &thumbs,
             |path| known(&facts_known, path),
+            |_| None,
             Some(Path::new("b/3.png")),
             false,
             false,
@@ -386,6 +394,7 @@ mod tests {
         let again = strip.input(
             &thumbs,
             |path| known(&facts_known, path),
+            |_| None,
             None,
             false,
             false,
@@ -403,11 +412,25 @@ mod tests {
         let thumbs = Thumbs::default();
         strip.relist(&paths(&["a.png", "b.png"]));
         let nothing = HashMap::new();
-        let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
+        let input = strip.input(
+            &thumbs,
+            |path| known(&nothing, path),
+            |_| None,
+            None,
+            false,
+            false,
+        );
         assert_eq!(input.slot, SLOT_DEFAULT);
 
         strip.set_slot(200.0);
-        let input = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
+        let input = strip.input(
+            &thumbs,
+            |path| known(&nothing, path),
+            |_| None,
+            None,
+            false,
+            false,
+        );
         assert_eq!(input.slot, 200.0);
         assert_eq!(
             &*input.tops,
@@ -434,14 +457,28 @@ mod tests {
         let thumbs = Thumbs::default();
         strip.relist(&paths(&["a.png", "b.png", "c.png"]));
         let nothing = HashMap::new();
-        let _ = strip.input(&thumbs, |path| known(&nothing, path), None, false, false);
+        let _ = strip.input(
+            &thumbs,
+            |path| known(&nothing, path),
+            |_| None,
+            None,
+            false,
+            false,
+        );
         assert_eq!(
             strip.wanted(0..3, &thumbs, |path| path == Path::new("b.png")),
             paths(&["a.png", "c.png"])
         );
         assert_eq!(
             strip
-                .input(&thumbs, |path| known(&nothing, path), None, false, false)
+                .input(
+                    &thumbs,
+                    |path| known(&nothing, path),
+                    |_| None,
+                    None,
+                    false,
+                    false
+                )
                 .visible,
             0..3
         );
@@ -449,12 +486,26 @@ mod tests {
         strip.reveal();
         assert!(
             strip
-                .input(&thumbs, |path| known(&nothing, path), None, false, false)
+                .input(
+                    &thumbs,
+                    |path| known(&nothing, path),
+                    |_| None,
+                    None,
+                    false,
+                    false
+                )
                 .reveal
         );
         assert!(
             !strip
-                .input(&thumbs, |path| known(&nothing, path), None, false, false)
+                .input(
+                    &thumbs,
+                    |path| known(&nothing, path),
+                    |_| None,
+                    None,
+                    false,
+                    false
+                )
                 .reveal
         );
     }

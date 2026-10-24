@@ -270,6 +270,7 @@ impl App {
         }
         for path in &modified {
             self.chooser.forget_failure(path);
+            self.filmstrip.facts_changed();
         }
         // What it is sorted by may have changed with it.
         if self.filmstrip.order().reads_facts() {

@@ -97,6 +97,8 @@ pub struct Row {
     /// Its thumbnail, once one has arrived and while the screen still
     /// holds it.
     pub thumb: Option<super::Thumb>,
+    /// Why no thumbnail is coming, where none is.
+    pub missing: Option<crate::thumbnailer::Missing>,
     /// The chars of `dir/name` — `name` alone where `dir` is empty — the
     /// query was found at, for lighting them.
     pub positions: Vec<usize>,
@@ -469,6 +471,7 @@ fn row(
         slot,
         THUMB_SLOT[0] * ui.ctx().pixels_per_point(),
         item.thumb.as_ref(),
+        item.missing,
         theme,
     );
 

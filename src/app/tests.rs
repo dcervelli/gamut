@@ -3487,6 +3487,7 @@ fn a_removed_file_leaves_the_list_and_stays_off_it_until_undo() {
             .input(
                 &app.thumbs,
                 |path| App::key_of(chooser, &HashMap::new(), path),
+                |path| chooser.missing(path),
                 None,
                 false,
                 false,

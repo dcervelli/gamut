@@ -205,6 +205,14 @@ pub trait Decoder: Sync {
     /// produce, orientation and all. Every fixture is checked for that.
     fn dimensions(&self, source: &mut dyn ReadSeek) -> Result<Option<(u32, u32)>>;
 
+    /// What one pixel of [`Decoder::decode`]'s picture comes to in bytes,
+    /// from the header: what the thumbnail thread weighs a large file by
+    /// before it reads a pixel. `None` where the format cannot say without
+    /// decoding, and the thread then assumes the worst a decoder produces.
+    fn pixel_bytes(&self, _source: &mut dyn ReadSeek) -> Result<Option<u64>> {
+        Ok(None)
+    }
+
     /// What the format's own reader of the file has to say about it, for
     /// the information panel, beyond what the EXIF reader gets out of it:
     /// the camera and the exposure as the library parsed them from the
@@ -669,6 +677,15 @@ impl Opened {
         .map(|(size, _)| size)
     }
 
+    /// What one decoded pixel comes to, from the header — see
+    /// [`Decoder::pixel_bytes`].
+    pub fn pixel_bytes(&mut self) -> Result<Option<u64>> {
+        self.ask("reading the header of", |source, decoder| {
+            decoder.pixel_bytes(source)
+        })
+        .map(|(bytes, _)| bytes)
+    }
+
     /// What the file holds beyond the image [`Opened::decode`] returns,
     /// from its header.
     pub fn sequence(&mut self) -> Result<Sequence> {
@@ -891,6 +908,12 @@ impl FrameSource for Finished {
 /// to close again.
 pub fn probe(path: &Path) -> Result<Option<(u32, u32)>> {
     Opened::new(path)?.dimensions()
+}
+
+/// What one pixel of `path`'s picture comes to decoded, from its header —
+/// see [`Decoder::pixel_bytes`].
+pub fn pixel_bytes(path: &Path) -> Result<Option<u64>> {
+    Opened::new(path)?.pixel_bytes()
 }
 
 /// The format of `path`, as the decoder that owns it says — see
