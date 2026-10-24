@@ -52,8 +52,9 @@ app/           the event loop's state and winit handlers
                  that takes only the latest weight asked for; the base and the last weight
                  kept, so the switch between them measures nothing again
   kept.rs        what each file was left in — its view, its display, its turn, and its frame or page — so stepping back to it puts it back
-  edits.rs       what is done to the file on disk — moved to the trash, renamed — and the
-                 stack that undoes it; the rename dialog's state while it is up
+  edits.rs       what is done to the file on disk — moved to the trash, renamed, replaced
+                 by a command's output — and the stack that undoes it; the rename
+                 dialog's state while it is up
   exporting.rs   the export dialog's state while it is up, the animation it holds still, the
                  picture as shown written to a new file on a thread of its own, and the file
                  taken into the list once it is
@@ -211,8 +212,9 @@ thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is k
 exiftool.rs    exiftool run as a process for the Tags tab: parse() its -X output into Tags
                and Values, Program — where it is found — and run_on_thread()
 commands.rs    the configuration file's commands: parse() of the [command.<name>] tables, the
-               result file's directives(), and run() / run_on_thread() — a line of the
-               shell in its own process group, its streams capped, its Stopper
+               result file's directives(), run() / run_on_thread() — a line of the
+               shell in its own process group, its streams capped, its Stopper — and
+               make_output_dir(), the hidden directory a replacing run writes into
 fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
                one file that names the fuzzy-matcher crate
 gestures.rs    the mouse's slots — a surface, a button, the wheel or a pinch, with modifiers —
@@ -223,9 +225,11 @@ gestures.rs    the mouse's slots — a surface, a button, the wheel or a pinch, 
 watch.rs       polling a file — or a directory — for a settled change
 no_replace.rs  rename_no_replace(): a rename that refuses rather than replace what is at
                the new name — for a rename, an export's write and the trash alike
-trash/         the desktop's trash: mod.rs Refused; freedesktop.rs the Linux trash by the
-               specification — put() moves a file into it and says which Entry it became,
-               restore() moves that entry back — and the tests' on both; macos.rs Finder's
+trash/         the desktop's trash: mod.rs Refused and Unreplaced; freedesktop.rs the Linux
+               trash by the specification — put() moves a file into it and says which Entry
+               it became, restore() moves that entry back, replace() keeps a file there
+               while another is renamed over it and restore_over() undoes that — and the
+               tests' on both; macos.rs Finder's
 monitor/       what each monitor is, SDR or HDR and how large in logical pixels: mod.rs
                Monitors, the table the platform fills, and key_of(), what it is keyed by;
                wayland.rs the compositor's answer, over a Wayland connection of its own;
@@ -426,7 +430,7 @@ still agrees with both, so renaming either is editing the constant —
 | A thumbnail: what is made, where it goes, what the row gets | `thumbnailer.rs` for the stages and the queue, `thumbnail.rs` for the cache's naming, chunks and write; `image/resample.rs` for the filter; `App::hold_thumb` for the texture and `app/chooser.rs::Thumbs` for how many the screen keeps |
 | What a region does, or what a key does while one is up | `image/region.rs` for the change to the rectangle; `app/region.rs::Marking` for what the application holds about it and what a drag makes of it (`grab`, `pull`, `release`), tested with no picture; `App::perform_on_region` in `app/input.rs` for the keys a region takes; `ui/region.rs` for where it is drawn and which handle the pointer is on; `Pass::region_gestures` in `ui/mod.rs` for which drag is the region's and which the view's |
 | The region panel, or the aspect a region is held to | `ui/region_panel.rs` for the panel — `panel()` for where it goes, `Field` for its boxes — and `ui/menu.rs::aspect_items` for the menu; `image/aspect.rs` for `Aspect`, `PRESETS` and what can be typed; `Marking::aspect`, `hold_to` and `swap` for what is held; the presses in `App::press` (`Control::{RegionClose, RegionCopy, RegionFit, RegionSwap, Aspect}`) and `App::type_region` for `Command::RegionField`; a held change to the rectangle goes through `Region::held` |
-| What deleting, renaming or removing a file does, or what undo puts back | `app/edits.rs`: `App::delete_shown` moves the file to the trash through `trash::put` and steps away, `App::rename_shown` renames through `no_replace::rename_no_replace`, `App::remove_shown` takes the file off the list through `Files::hide` and steps away, and each pushes an `Edit` that `App::undo` pops. The list's side is `app/files.rs`: a trashed or removed file is `condemn`ed and leaves in `shown` — or, the last on the list, in `remove_shown` at once — comes back by `reinstate`, and a renamed one is `rename`d in place; a removed one is remembered in `hidden`, which `add` leaves out and `append`, `adopt` and `unhide` take a file back out of. The dialog is `ui/rename.rs` — its words, and `judge` for what is wrong with a name — with `App::set_rename_name` asking the directory whether the name is taken. The menu is `menu::file_items`, hung off `status::file_button` |
+| What deleting, renaming or removing a file does, or what undo puts back | `app/edits.rs`: `App::delete_shown` moves the file to the trash through `trash::put` and steps away, `App::rename_shown` renames through `no_replace::rename_no_replace`, `App::remove_shown` takes the file off the list through `Files::hide` and steps away, `App::replace_file` puts a command's output in the file's place through `Trash::replace`, and each pushes an `Edit` that `App::undo` pops. The list's side is `app/files.rs`: a trashed or removed file is `condemn`ed and leaves in `shown` — or, the last on the list, in `remove_shown` at once — comes back by `reinstate`, and a renamed one is `rename`d in place; a removed one is remembered in `hidden`, which `add` leaves out and `append`, `adopt` and `unhide` take a file back out of. The dialog is `ui/rename.rs` — its words, and `judge` for what is wrong with a name — with `App::set_rename_name` asking the directory whether the name is taken. The menu is `menu::file_items`, hung off `status::file_button` |
 | What a paste accepts, or where it is written | `clipboard/mod.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `FrameInput::paste`, which `App::frame_input_under` sets from what `clipboard::watch`'s thread last said — kept by `App::clipboard_changed` — and whether the interface is showing |
 | A color-space source (a new tag a format carries) | `image/color/` |
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its license is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |

@@ -154,7 +154,14 @@ impl App {
                 modified,
             } => {
                 self.glimpsed.extend(glimpses);
-                let gone: HashSet<PathBuf> = removed.into_iter().collect();
+                // A file said to have gone that is there now was caught
+                // between its leaving and its arriving again: replaced by a
+                // program that removes a file before it writes the new one,
+                // as a command's output takes a file's place on a Mac.
+                let gone: HashSet<PathBuf> = removed
+                    .into_iter()
+                    .filter(|path| std::fs::symlink_metadata(path).is_err())
+                    .collect();
                 let left = self.files.remove(&gone);
                 let new = self.files.add(added);
                 let grew = !new.is_empty();
@@ -260,7 +267,7 @@ impl App {
     /// their writer was still going, as often as not — which the thumbnail
     /// thread is asked for again, header and all, whatever it made of them
     /// before. Says whether any was on the list.
-    fn rewritten(&mut self, modified: Vec<PathBuf>) -> bool {
+    pub(super) fn rewritten(&mut self, modified: Vec<PathBuf>) -> bool {
         let modified: Vec<PathBuf> = modified
             .into_iter()
             .filter(|path| self.files.position(path).is_some())

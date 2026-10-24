@@ -1273,7 +1273,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Files,
         when: Some(When::Undoable),
-        help: "Undo the last rename, deletion or removal",
+        help: "Undo the last rename, deletion, removal or replacement",
         keys: one!("files.undo", Undo, [typed(CTRL, 'z')]),
     },
     Row {

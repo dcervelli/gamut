@@ -35,6 +35,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - An *Output* tab in the information panel, while there are commands: what
   the last command printed on the file, a line to a row, copied by a click
   or all at once, and opened in your editor.
+- Commands that change the file itself, with `output = "replace"`: the
+  command writes its version to `GAMUT_OUTPUT`, which takes the file's
+  place once it exits cleanly, the original kept in the trash. Undo puts
+  the original back, the edited file going to the trash in its turn. The
+  file is left alone when the command fails, writes nothing or something
+  that cannot be read, or when the file changed while it ran.
 
 ### Changed
 
@@ -69,6 +75,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 - The file list no longer slides under the pointer when files arrive above
   the one on screen.
+- A file saved by a program that takes it away before writing it again no
+  longer drops off the list when its folder is looked at in between.
 - On a display scaled by a fraction, such as 1.6, the words over the file
   list's thumbnails no longer flicker a pixel up and down while the list's
   pictures are read.

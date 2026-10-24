@@ -42,6 +42,9 @@ pub struct Command {
     pub confirm: bool,
     /// Whether the picture as shown is written out for it to read.
     pub shown: bool,
+    /// Whether what it writes to `GAMUT_OUTPUT` takes the place of the file
+    /// it ran on: `output = "replace"`.
+    pub replaces: bool,
     /// What its dialog asks for, in the order the file lists them.
     pub inputs: Vec<Input>,
 }
@@ -87,7 +90,7 @@ fn input_name(name: &str) -> bool {
 }
 
 /// What a command's table takes.
-const FIELDS: &str = "label, run, needs, confirm, shown or input";
+const FIELDS: &str = "label, run, needs, confirm, shown, output or input";
 
 /// A problem, and the line it is said on.
 type Problem = (usize, String);
@@ -143,9 +146,11 @@ fn read_command(
         needs: Needs::default(),
         confirm: false,
         shown: false,
+        replaces: false,
         inputs: Vec::new(),
     };
     let mut run = None;
+    let mut output_at = line;
     for (key, value) in fields.iter() {
         let field: &str = key.get_ref();
         let at = lines.of(value.span());
@@ -176,6 +181,18 @@ fn read_command(
             }),
             "confirm" => flag(value).map(|on| command.confirm = on),
             "shown" => flag(value).map(|on| command.shown = on),
+            "output" => words(value).and_then(|word| {
+                output_at = at;
+                match word.as_str() {
+                    "replace" => {
+                        command.replaces = true;
+                        Ok(())
+                    }
+                    other => Err(format!(
+                        "command.{name}.output is \"replace\", or left out, not \"{other}\""
+                    )),
+                }
+            }),
             "input" => {
                 command.inputs = read_inputs(name, at, value, lines, problems);
                 Ok(())
@@ -199,6 +216,17 @@ fn read_command(
         problems.push((line, format!("command.{name} has no run")));
         return None;
     };
+    // What it replaces is the file it ran on, so it needs one.
+    if command.replaces && command.needs == Needs::Nothing {
+        problems.push((
+            output_at,
+            format!(
+                "command.{name} replaces the file it runs on, so it cannot need none; \
+                 it runs without replacing"
+            ),
+        ));
+        command.replaces = false;
+    }
     Some(Command { run, ..command })
 }
 
@@ -416,7 +444,9 @@ pub const TEMPLATE: &str = "\n\
 # slider. A script asks the window to show an image it made, or to say
 # something, with open, message and error lines in the file $GAMUT_RESULT
 # names: the name, an equals sign, and the rest of the line, unquoted. What
-# it prints is shown, never obeyed.
+# it prints is shown, never obeyed. With output set to \"replace\", it writes
+# its version of the file to $GAMUT_OUTPUT, which then takes the file's
+# place: the original goes to the trash, and undo brings it back.
 #   [command.redact]
 #   label = \"Redact region\"
 #   run = \"~/bin/redact.sh\"
@@ -582,12 +612,28 @@ fn runs_dir() -> PathBuf {
 fn make_run_dir(id: u64) -> io::Result<PathBuf> {
     let runs = runs_dir();
     fs::create_dir_all(&runs)?;
-    let base = format!("{}-{id}", std::process::id());
+    fresh_dir(&runs, &format!("{}-{id}", std::process::id()))
+}
+
+/// Where run `id` of a command that replaces `file` writes what is to take
+/// its place: a directory of its own, made fresh beside the file — on its
+/// filesystem, so that the file can be replaced by a rename, and hidden,
+/// so that nothing that lists the folder's images lists what is in it.
+/// What is written there keeps the file's name, and so the extension a
+/// tool that writes many formats picks one by.
+pub fn make_output_dir(file: &Path, id: u64) -> io::Result<PathBuf> {
+    let beside = file.parent().unwrap_or(Path::new(""));
+    fresh_dir(beside, &format!(".{PROGRAM}-{}-{id}", std::process::id()))
+}
+
+/// A directory under `parent` called `base`, or `base` with a number after
+/// it where that is taken, made fresh and readable by its owner alone.
+fn fresh_dir(parent: &Path, base: &str) -> io::Result<PathBuf> {
     let mut tries = 0;
     loop {
         let dir = match tries {
-            0 => runs.join(&base),
-            n => runs.join(format!("{base}-{n}")),
+            0 => parent.join(base),
+            n => parent.join(format!("{base}-{n}")),
         };
         match fs::DirBuilder::new().mode(0o700).create(&dir) {
             Ok(()) => return Ok(dir),
@@ -965,6 +1011,32 @@ mod tests {
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
         assert_eq!(lines, [3, 4], "{problems:?}");
         assert!(problems[0].1.contains("goes above the first [command]"));
+    }
+
+    /// `output = "replace"` is the one output there is, and a command that
+    /// needs nothing has no file to replace: it is taken without.
+    #[test]
+    fn a_command_replaces_its_file_where_it_has_one() {
+        let (commands, problems) = parsed(
+            "[command.strip]\n\
+             run = \"strip.sh\"\n\
+             output = \"replace\"\n\
+             [command.odd]\n\
+             run = \"odd.sh\"\n\
+             output = \"beside\"\n\
+             [command.none]\n\
+             run = \"none.sh\"\n\
+             needs = \"none\"\n\
+             output = \"replace\"\n",
+        );
+        let replaces: Vec<(&str, bool)> = commands
+            .iter()
+            .map(|c| (c.name.as_str(), c.replaces))
+            .collect();
+        assert_eq!(replaces, [("strip", true), ("odd", false), ("none", false)]);
+        let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
+        assert_eq!(lines, [6, 10], "{problems:?}");
+        assert!(problems[1].1.contains("cannot need none"), "{problems:?}");
     }
 
     /// A line of the shell keeps every quote it was written with.

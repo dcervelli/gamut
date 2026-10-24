@@ -2846,7 +2846,7 @@ fn the_help_popup_says_a_line_is_unbound() {
             rows: vec![
                 help::Row {
                     key: String::new(),
-                    does: "Undo the last rename, deletion or removal".into(),
+                    does: "Undo the last rename, deletion, removal or replacement".into(),
                     when: None,
                 },
                 help::Row {

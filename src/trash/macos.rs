@@ -20,7 +20,7 @@ use anyhow::{Context, Result, anyhow};
 use objc2::rc::autoreleasepool;
 use objc2_foundation::{NSFileManager, NSURL};
 
-use super::{Refused, freedesktop};
+use super::{Refused, Unreplaced, freedesktop};
 use crate::no_replace::rename_no_replace;
 
 /// Where files thrown away go.
@@ -98,6 +98,67 @@ impl Trash {
                 })
             }
         }
+    }
+
+    /// Puts `with` where `path` is, the file that was there moved to the
+    /// trash, and says which entry it became. Finder's trash only moves, so
+    /// for the moment between the two nothing is at `path`; a failure
+    /// after the move brings the file back out, and says when that failed
+    /// too.
+    pub fn replace(&self, path: &Path, with: &Path) -> Result<Entry, Unreplaced> {
+        if let Self::Directory(trash) = self {
+            let entry = trash.replace(path, with)?;
+            return Ok(Entry {
+                original: entry.original.clone(),
+                held: Held::Directory(entry),
+            });
+        }
+        let entry = self.put(path).map_err(Unreplaced::Untouched)?;
+        match rename_no_replace(with, &entry.original) {
+            Ok(()) => Ok(entry),
+            Err(error) => {
+                let error = anyhow!(error).context(format!(
+                    "moving the new {} into place",
+                    crate::shown_path(path)
+                ));
+                match restore(&entry) {
+                    Ok(()) => Err(Unreplaced::Untouched(error)),
+                    Err(_) => Err(Unreplaced::InTrash(error)),
+                }
+            }
+        }
+    }
+
+    /// Puts `entry` back where it came from over whatever is there now,
+    /// which goes to the trash in its turn: the undoing of
+    /// [`Trash::replace`]. Refused before anything moves when the trash no
+    /// longer holds the entry; when the entry will not come back, what was
+    /// there is brought back out in its place.
+    pub fn restore_over(&self, entry: &Entry) -> Result<(), Refused> {
+        let held = match (self, &entry.held) {
+            (Self::Directory(trash), Held::Directory(inner)) => return trash.restore_over(inner),
+            (_, Held::Directory(inner)) => &inner.held,
+            (_, Held::Finder(held)) => held,
+        };
+        match fs::symlink_metadata(held) {
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => return Err(Refused::Gone),
+            Err(error) => {
+                return Err(Refused::Failed(anyhow!(error).context(format!(
+                    "looking in the Trash for {}; Finder's Put Back can restore it",
+                    crate::shown_path(&entry.original)
+                ))));
+            }
+        }
+        let moved = match fs::symlink_metadata(&entry.original) {
+            Ok(_) => Some(self.put(&entry.original).map_err(Refused::Failed)?),
+            Err(_) => None,
+        };
+        restore(entry).inspect_err(|_| {
+            if let Some(moved) = &moved {
+                let _ = restore(moved);
+            }
+        })
     }
 }
 

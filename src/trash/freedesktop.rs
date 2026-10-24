@@ -27,7 +27,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow};
 
-use super::Refused;
+use super::{Refused, Unreplaced};
 use crate::no_replace::rename_no_replace;
 #[cfg(target_os = "linux")]
 use crate::xdg;
@@ -79,6 +79,66 @@ impl Trash {
     /// `files/` by a broken trash is not overwritten either — and the name
     /// is tried again with a number in it if either half finds it taken.
     pub fn put(&self, path: &Path) -> Result<Entry> {
+        self.enter(path, Leaving::Moved)
+    }
+
+    /// Puts a copy of the file at `path` in the trash and leaves the file
+    /// where it is: a hard link where the trash is on its filesystem and the
+    /// filesystem has them, and the bytes copied where not. What a
+    /// replacement keeps the original as, so that the name is never empty
+    /// on the way.
+    fn keep(&self, path: &Path) -> Result<Entry> {
+        self.enter(path, Leaving::Kept)
+    }
+
+    /// Puts `with` where `path` is, the file that was there kept in the
+    /// trash, and says which entry it became. The rename that puts `with`
+    /// in place replaces what is there in one step, so that whatever looks
+    /// at `path` meanwhile finds one file or the other and never neither.
+    /// `with` has to be on `path`'s filesystem. A failure leaves `path` as
+    /// it was, and the trash without the copy.
+    pub fn replace(&self, path: &Path, with: &Path) -> Result<Entry, Unreplaced> {
+        let entry = self.keep(path).map_err(Unreplaced::Untouched)?;
+        if let Err(error) = fs::rename(with, path) {
+            discard(&entry);
+            return Err(Unreplaced::Untouched(anyhow!(error).context(format!(
+                "moving the new {} into place",
+                crate::shown_path(path)
+            ))));
+        }
+        Ok(entry)
+    }
+
+    /// Puts `entry` back where it came from over whatever is there now,
+    /// which is kept in the trash in its turn, so that nothing is lost
+    /// either way: the undoing of [`Trash::replace`]. Replaced in one step
+    /// where the entry is on the filesystem it came from, and by way of a
+    /// copy beside it where not. Refused before anything moves when the
+    /// trash no longer holds the entry; a failure after that takes the
+    /// copy of what was there back out of the trash.
+    pub fn restore_over(&self, entry: &Entry) -> Result<(), Refused> {
+        if fs::symlink_metadata(&entry.held).is_err() {
+            return Err(Refused::Gone);
+        }
+        let kept = match fs::symlink_metadata(&entry.original) {
+            Ok(_) => Some(self.keep(&entry.original).map_err(Refused::Failed)?),
+            Err(_) => None,
+        };
+        if let Err(error) = put_back_over(entry) {
+            if let Some(kept) = &kept {
+                discard(kept);
+            }
+            return Err(Refused::Failed(error));
+        }
+        // The file is back; an info file that will not go is a line in the
+        // file manager's trash, not a reason to say the undo failed.
+        let _ = fs::remove_file(&entry.info);
+        Ok(())
+    }
+
+    /// Moves the file at `path` into the trash, or keeps a copy of it
+    /// there, and says exactly where it went.
+    fn enter(&self, path: &Path, leaving: Leaving) -> Result<Entry> {
         let original = std::path::absolute(path)
             .with_context(|| format!("locating {}", crate::shown_path(path)))?;
         // The file has to be there to be thrown away; asked up front so
@@ -128,10 +188,18 @@ impl Trash {
                 return Err(error).with_context(|| format!("writing {}", info_path.display()));
             }
             let held = files.join(in_trash);
-            let moved = if copy {
-                copy_over(&original, &held)
-            } else {
-                rename_no_replace(&original, &held)
+            let moved = match (leaving, copy) {
+                (Leaving::Moved, true) => copy_over(&original, &held),
+                (Leaving::Moved, false) => rename_no_replace(&original, &held),
+                (Leaving::Kept, true) => copy_into(&original, &held),
+                // A filesystem without hard links — FAT, many a FUSE mount
+                // — keeps a copy instead; a name taken is tried again.
+                (Leaving::Kept, false) => match fs::hard_link(&original, &held) {
+                    Err(error) if error.kind() != ErrorKind::AlreadyExists => {
+                        copy_into(&original, &held)
+                    }
+                    linked => linked,
+                },
             };
             match moved {
                 Ok(()) => {
@@ -201,6 +269,48 @@ impl Trash {
     }
 }
 
+/// Whether a file going into the trash leaves where it was, or stays there
+/// too.
+#[derive(Clone, Copy)]
+enum Leaving {
+    Moved,
+    Kept,
+}
+
+/// Takes `entry` back out of the trash for good: what a replacement that
+/// failed half way does with the copy it kept.
+fn discard(entry: &Entry) {
+    let _ = fs::remove_file(&entry.held);
+    let _ = fs::remove_file(&entry.info);
+}
+
+/// Puts `entry`'s file at the path it came from, replacing what is there:
+/// renamed over it from the same filesystem, and otherwise copied in beside
+/// it under a hidden name no reader of images claims, then renamed over it.
+fn put_back_over(entry: &Entry) -> Result<()> {
+    let into = |error: io::Error| {
+        anyhow!(error).context(format!(
+            "moving {} back to {}",
+            entry.held.display(),
+            crate::shown_path(&entry.original)
+        ))
+    };
+    if same_device(&entry.held, &entry.original) {
+        return fs::rename(&entry.held, &entry.original).map_err(into);
+    }
+    let mut staged = std::ffi::OsString::from(".");
+    staged.push(entry.original.file_name().unwrap_or_default());
+    staged.push(format!(".{}-{}", crate::PROGRAM, std::process::id()));
+    let staged = entry.original.with_file_name(staged);
+    copy_into(&entry.held, &staged).map_err(into)?;
+    if let Err(error) = fs::rename(&staged, &entry.original) {
+        let _ = fs::remove_file(&staged);
+        return Err(into(error));
+    }
+    let _ = fs::remove_file(&entry.held);
+    Ok(())
+}
+
 /// Where a file is going: the trash directory, what its `Path=` says, and
 /// whether it has to be copied rather than renamed to get there.
 struct Place {
@@ -256,16 +366,24 @@ pub fn restore(entry: &Entry) -> Result<(), Refused> {
 /// removed — and the copy removed instead if the original cannot be, so
 /// that the file is in one place afterwards whichever way it went.
 fn copy_over(from: &Path, to: &Path) -> io::Result<()> {
+    copy_into(from, to)?;
+    if let Err(error) = fs::remove_file(from) {
+        let _ = fs::remove_file(to);
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Copies `from` to `to`, a name nothing holds yet, and leaves `from` be:
+/// the copy written to the disk before it is said to be there, and taken
+/// away again if it could not be.
+fn copy_into(from: &Path, to: &Path) -> io::Result<()> {
     let mut target = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(to)?;
     let copied = fs::File::open(from).and_then(|mut source| io::copy(&mut source, &mut target));
     if let Err(error) = copied.and_then(|_| target.sync_all()) {
-        let _ = fs::remove_file(to);
-        return Err(error);
-    }
-    if let Err(error) = fs::remove_file(from) {
         let _ = fs::remove_file(to);
         return Err(error);
     }
@@ -445,6 +563,72 @@ mod tests {
         fs::remove_file(&entry.info).expect("emptied");
         assert!(matches!(restore(&entry), Err(Refused::Gone)));
 
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// A file kept in the trash stays where it is too, the trash holding a
+    /// link to the same bytes where it is on the same filesystem.
+    #[test]
+    fn a_kept_file_stays_and_is_linked_into_the_trash() {
+        let (dir, trash) = sandbox("keep");
+        let path = dir.join("scan.tif");
+        fs::write(&path, b"old").expect("writable");
+        let entry = trash.keep(&path).expect("kept");
+        assert_eq!(fs::read(&path).expect("still there"), b"old");
+        assert_eq!(entry.held, dir.join("Trash/files/scan.tif"));
+        assert!(entry.info.exists());
+        let ino = |path: &Path| fs::metadata(path).expect("there").ino();
+        assert_eq!(ino(&entry.held), ino(&path), "one file, two names");
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// A replacement keeps the file in the trash and puts the new one in its
+    /// place; restoring over it puts the original back and keeps the
+    /// replacement in the trash in its turn. Once the trash is emptied,
+    /// nothing is touched.
+    #[test]
+    fn a_replaced_file_comes_back_over_its_replacement() {
+        let (dir, trash) = sandbox("replace");
+        let path = dir.join("scan.tif");
+        let new = dir.join("new.tif");
+        fs::write(&path, b"old").expect("writable");
+        fs::write(&new, b"new").expect("writable");
+
+        let entry = trash.replace(&path, &new).expect("replaced");
+        assert_eq!(fs::read(&path).expect("there"), b"new");
+        assert!(!new.exists(), "moved, not copied");
+        assert_eq!(fs::read(&entry.held).expect("kept"), b"old");
+
+        trash.restore_over(&entry).expect("restored");
+        assert_eq!(fs::read(&path).expect("back"), b"old");
+        assert!(!entry.held.exists() && !entry.info.exists());
+        assert_eq!(
+            fs::read(dir.join("Trash/files/scan.2.tif")).expect("kept in turn"),
+            b"new"
+        );
+        assert!(dir.join("Trash/info/scan.2.tif.trashinfo").exists());
+
+        fs::write(&new, b"newer").expect("writable");
+        let entry = trash.replace(&path, &new).expect("replaced again");
+        fs::remove_file(&entry.held).expect("emptied");
+        assert!(matches!(trash.restore_over(&entry), Err(Refused::Gone)));
+        assert_eq!(fs::read(&path).expect("untouched"), b"newer");
+
+        fs::remove_dir_all(dir).expect("cleanup");
+    }
+
+    /// A replacement whose new file never arrives leaves the file as it was
+    /// and the trash without the copy it kept.
+    #[test]
+    fn a_failed_replacement_takes_its_copy_back_out() {
+        let (dir, trash) = sandbox("unreplaced");
+        let path = dir.join("scan.tif");
+        fs::write(&path, b"old").expect("writable");
+        let refused = trash.replace(&path, &dir.join("missing.tif"));
+        assert!(matches!(refused, Err(Unreplaced::Untouched(_))));
+        assert_eq!(fs::read(&path).expect("untouched"), b"old");
+        assert!(!dir.join("Trash/files/scan.tif").exists());
+        assert!(!dir.join("Trash/info/scan.tif.trashinfo").exists());
         fs::remove_dir_all(dir).expect("cleanup");
     }
 

@@ -134,7 +134,46 @@ That sends `SIGTERM` to the run's process group, through the `Stopper` the
 thread holds the group in while the child lives. Without it a script stuck
 on the network would leave every command dead until the window closed. The
 window closing waits for nothing: a long job outlives it, and gets `SIGPIPE`
-the next time it prints.
+the next time it prints. A run that replaces its file is the exception,
+stopped by `Commands::abandon` in `App::exiting` with its output directory
+taken away, since nothing would be left to swap its output in.
+
+## Replacing the file
+
+A command with `output = "replace"` changes the file it ran on, and the
+change is an undo step like a deletion or a rename. The script never names
+the file to replace and never writes over it: it writes to `GAMUT_OUTPUT`,
+and the window makes the swap. A script that edited the file in place could
+not be undone, and one that named its own target could replace anything.
+
+`GAMUT_OUTPUT` is the file's own name inside a directory made fresh for the
+run beside the file, `.gamut-<pid>-<run>` from `commands::make_output_dir`.
+Beside it, so that it is on the file's filesystem and the swap is a
+rename; a directory, so that the output keeps the file's name and with it
+the extension a tool such as ImageMagick picks the format by; hidden, so
+that `listing::contents`, which skips hidden directories, never lists the
+output as an image that arrived. `App::prepare_replacing` makes it on the
+loop before the run starts, refusing a link, whose replacement would be a
+file where the link was, and records the file's `watch::Signature`. The
+directory is removed whole when the run is over, however it ended.
+
+The swap is `App::replace_file` in `src/app/edits.rs`, called from
+`App::command_finished` before the result file's directives, so that an
+`open` of the file finds the new one. It is made only after an exit of 0,
+and only where the output is a regular file that is not empty, the file's
+signature is the one recorded at launch — a file changed under the run
+would have its change lost — and `decode::probe` reads the output's header,
+since a file nothing can show would leave the window with a file it could
+not show. The output takes the original's permissions, then
+`Trash::replace` makes the swap; see
+[editing](editing.md#a-replacement-keeps-the-original-without-moving-it).
+The file replaced is the one the run was launched on, held in
+`Replacing::file`, not whatever is on screen when the run ends; it is read
+again only if it is still the file on screen.
+
+The window's message about the replacement is raised last, over any
+`message` the script wrote: the toast has one slot, and that the original
+is in the trash and how to undo is the thing a reader must not miss.
 
 ## The dialog
 

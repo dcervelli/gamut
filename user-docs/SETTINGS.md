@@ -226,6 +226,7 @@ digits, `_` and `-`.
 | `needs` | What it cannot run without: `"file"` (the default), `"region"`, `"pointer"`, `"location"` (a photo that says where it was taken), `"georeference"` (a map placed on the ground), or `"none"`, which runs from the empty window too. Without it, the item is dead and its tooltip says why |
 | `confirm` | `true` asks before running, even with nothing to ask |
 | `shown` | `true` writes the picture as you see it, turned, exposed and toned, to a PNG for the command to read, in `GAMUT_SHOWN` |
+| `output` | `"replace"` has the command change the file itself: it writes its version to `GAMUT_OUTPUT`, which takes the file's place, the original going to the trash. See [Changing the file itself](#changing-the-file-itself) |
 | `input` | What to ask before it runs: one `[[command.<name>.input]]` table for each, below. The window puts up a dialog with every input in the order the file has them |
 
 A `run` line in single quotes is read exactly as written, which suits a
@@ -294,6 +295,7 @@ whose EXIF orientation turns it, and a picture you have turned with `[` or
 | `GAMUT_SHOWN_WIDTH`, `GAMUT_SHOWN_HEIGHT` | Its size |
 | `GAMUT_SHOWN_REGION_X`, `_Y`, `_WIDTH`, `_HEIGHT` | The region in it, as you see it |
 | `GAMUT_RESULT` | The file to write what the window should do afterward, below |
+| `GAMUT_OUTPUT` | With `output = "replace"`: where to write the new version of the file, below |
 | `GAMUT_VERSION` | Which version of `gamut` ran it |
 | `GAMUT_INPUT_<NAME>` | What each input was given |
 
@@ -346,7 +348,8 @@ stops it and everything it started. It has nothing to read from and no
 terminal, so a command that waits for typing ends at once, and `sudo`
 cannot ask for a password. Closing the window leaves a command running; it
 ends with an error the next time it prints, so a long job should write to a
-file.
+file. A command that replaces its file is stopped instead, since nothing
+would be left to put its work in place.
 
 The values reach the command through its environment, never spliced into
 the line, so a camera name or a file name cannot run anything by itself.
@@ -357,6 +360,29 @@ On a Mac started from the Dock or Finder, the shell does not read your
 startup files, so a program installed by Homebrew is found only because
 `gamut` adds `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin` and
 `~/.local/bin` to the end of the path. Elsewhere, name it by its full path.
+
+#### Changing the file itself
+
+A command with `output = "replace"` changes the file it runs on, and the
+change can be undone. It never writes over the file: it writes the new
+version to the path in `GAMUT_OUTPUT`, which has the file's own name, in a
+hidden folder beside it. Once the command exits cleanly, `gamut` puts that
+in the file's place, keeps the original in the trash, and shows the new
+version. **Undo** (`Ctrl+Z`, `⌘Z` on a Mac) puts the original back, and the
+edited file goes to the trash in its turn, so neither way loses a file.
+
+The file is left as it was, and the window says why, when the command
+fails, writes nothing, or writes something `gamut` cannot read, and when
+the file changed or was moved while the command ran. The hidden folder is
+removed however the command ends. The window's own message about the change
+is what it says afterward, in place of any `message` line.
+
+The new version keeps the original's permissions and nothing else of the
+file is carried across for you: if your command drops metadata, the file
+loses it, the EXIF orientation included, and a photo held on its side then
+shows on its side. Write the format the file is already in, since the name
+does not change. A command that replaces needs a file, so it cannot have
+`needs = "none"`, and it cannot run on a link.
 
 #### Examples
 
@@ -379,6 +405,31 @@ magick "$GAMUT_FILE" -fill black \
 
 The coordinates are the file's own, so this blacks out the right place
 whichever way the photo was held, and the new file keeps its orientation.
+
+Black out the region in the photo itself, the original kept in the trash
+for undo:
+
+```
+[command.redact-in-place]
+label = "Redact in place"
+needs = "region"
+output = "replace"
+run = '''
+magick "$GAMUT_FILE" -fill black \
+  -draw "rectangle $GAMUT_REGION_X,$GAMUT_REGION_Y $((GAMUT_REGION_X + GAMUT_REGION_WIDTH - 1)),$((GAMUT_REGION_Y + GAMUT_REGION_HEIGHT - 1))" \
+  "$GAMUT_OUTPUT"
+'''
+```
+
+Take every tag out of the photo, its location included, keeping the
+orientation and the color profile it needs to look right:
+
+```
+[command.strip]
+label = "Strip metadata"
+output = "replace"
+run = 'exiftool -q -all= -tagsfromfile @ -Orientation -ColorSpaceTags -o "$GAMUT_OUTPUT" "$GAMUT_FILE"'
+```
 
 Blur it instead, as hard as the slider says:
 

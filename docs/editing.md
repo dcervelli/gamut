@@ -44,6 +44,36 @@ restore refuses to replace, through the same `renameat2`, and reports why
 it did not happen as `Refused::Taken` or `Refused::Gone` so that the
 message at the foot of the window can say which.
 
+## A replacement keeps the original without moving it
+
+A command's output takes the place of its file through `Trash::replace`
+(see [commands](commands.md#replacing-the-file)). On Linux the original
+never moves: `Trash::keep` gives the trash a second name for it — a hard
+link into `files/`, or the bytes copied where the trash is on another
+filesystem or the filesystem has no links — with its `.trashinfo` written
+as `put` writes it, and then `rename(2)` puts the output over the file's
+name, which replaces it in one step. Whatever looks at the name meanwhile,
+the window's own watch or another program, finds the old file or the new
+one and never neither. Anything that fails before the rename leaves the
+file as it was, and the copy in the trash is taken back out.
+
+Undo is `Trash::restore_over`, the same thing the other way: the edited
+file is kept in the trash, then the original renamed over the name from
+`files/` — or, from another filesystem, copied in beside it under a hidden
+name and renamed over it — and its `.trashinfo` removed. A trash emptied
+since is found before anything moves, as `Refused::Gone`, and the edited
+file stays. Undo does not ask whether the edited file was changed again
+since: whatever it holds goes to the trash, and nothing is lost.
+
+Finder's trash only moves a file, so on a Mac the original is moved there
+with `put` and the output renamed into the empty name with
+`rename_no_replace`. For that moment the name holds nothing, and the
+walker may report the file gone; `App::take_tree_event` drops a removal of
+a path that exists when it is taken, which covers any program that saves by
+removing a file and writing it again. A rename that fails after the move
+puts the original back, and where that fails too the window says the
+original is in the Trash, as `Unreplaced::InTrash`.
+
 ## The list keeps a trashed file until something replaces it
 
 Deleting the file on screen would be simplest as "take it off the list and
@@ -84,11 +114,12 @@ second removal and a deletion, each with a message that says which it is.
 
 `src/app/edits.rs` holds a `Vec<Edit>`: `Trashed`, with the entry, the
 path as the list spelled it, where it stood and whether it was kept
-whatever its directory said — a paste; `Renamed`, with both spellings; and
+whatever its directory said — a paste; `Renamed`, with both spellings;
 `Removed`, with the path, where it stood and whether it was kept so — a removal touches
 nothing on disk, but it takes a file out of the walk, and that is as
-much a mistake to reach for undo over. One stack and one key for all
-three, because the moment a reader reaches for undo is the moment they
+much a mistake to reach for undo over; and `Replaced`, with the trash entry
+the original is in and the path. One stack and one key for all
+four, because the moment a reader reaches for undo is the moment they
 have just made a mistake, and that is no time to ask which kind. Only
 what touched the disk or the list goes on it: the view and the display
 change dozens of times a session and have their own ways back — `z`,
@@ -101,8 +132,9 @@ Restoring out of order, or after the window has closed, is what the file
 manager's Trash is for, and the message about an undo that could not be
 done says so. Whichever file an undo acts on is the file on screen
 afterwards — a restored file goes back into the list by `Files::reinstate`
-and is asked for; a file renamed back is asked for if it had been left —
-since the message about it is the only other sign anything happened.
+and is asked for; a file renamed back, or whose original is put back, is
+asked for if it had been left, and read again in place if not — since the
+message about it is the only other sign anything happened.
 
 ## The rename dialog is a modal, and its state is the application's
 

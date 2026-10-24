@@ -5773,3 +5773,212 @@ command.copy.shown = true
     assert!(shown.ends_with("shown.png"), "{shown:?}");
     assert!(!shown.exists(), "{shown:?} is taken away");
 }
+
+/// The `.gamut-…` directories a replacing run left beside its file.
+fn output_dirs(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .expect("the directory is there")
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| crate::basename(path).starts_with(&format!(".{}-", crate::PROGRAM)))
+        .collect()
+}
+
+/// A command that replaces its file writes its version to `GAMUT_OUTPUT`,
+/// in a hidden directory beside the file, which takes the file's place
+/// once the run is over: the original kept in the trash, the file read
+/// again, its permissions kept, and the directory gone. Undo puts the
+/// original back over it, the edited file going to the trash in its turn.
+#[test]
+fn a_command_replaces_its_file_and_undo_puts_the_original_back() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (mut app, dir) = app_over("command-replace", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let file = dir.join("a.png");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let original = std::fs::read(&file).unwrap();
+    std::fs::create_dir_all(dir.join("made")).unwrap();
+    write_png(&dir.join("made"), "wider.png", 6, 2);
+    let received = with_commands(
+        &mut app,
+        r#"[command.widen]
+label = "Widen"
+run = "cp made/wider.png \"$GAMUT_OUTPUT\"; echo \"$GAMUT_OUTPUT\""
+output = "replace"
+"#,
+    );
+    let _ = app.perform(input::Action::Command(0));
+    assert_eq!(output_dirs(&dir).len(), 1, "made before the run");
+    finish(&mut app, &received);
+
+    let run = app.commands.run_on(Some(&file)).expect("kept");
+    let output = PathBuf::from(&run.lines[0].text);
+    assert_eq!(output.file_name(), file.file_name(), "keeps the name");
+    assert_eq!(output.parent().and_then(Path::parent), Some(dir.as_path()));
+    assert_eq!(
+        said(&app),
+        spelled_here("Widen changed a.png. The original is in the trash. Ctrl+Z to undo.")
+    );
+    assert_eq!(decode::probe(&file).unwrap(), Some((6, 2)));
+    let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o640, "the permissions are the old file's");
+    assert_eq!(output_dirs(&dir), Vec::<PathBuf>::new(), "taken away");
+    assert_eq!(
+        std::fs::read(dir.join("Trash/files/a.png")).unwrap(),
+        original
+    );
+    answer(&mut app, Reload::InPlace);
+    assert_eq!(app.current.as_ref().unwrap().pixels(), [6, 2]);
+    assert!(app.conditions().undoable);
+
+    assert_eq!(app.perform(input::Action::Undo), Effect::Redraw);
+    assert_eq!(
+        said(&app),
+        "Restored the original a.png. The edited file is in the trash."
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), original);
+    assert_eq!(
+        decode::probe(&dir.join("Trash/files/a.2.png")).unwrap(),
+        Some((6, 2)),
+        "the edited file is in the trash"
+    );
+    assert!(!dir.join("Trash/files/a.png").exists());
+    assert!(!dir.join("Trash/info/a.png.trashinfo").exists());
+    answer(&mut app, Reload::InPlace);
+    assert_eq!(app.current.as_ref().unwrap().pixels(), [4, 3]);
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// A replacement is refused, the file left as it was and nothing pushed to
+/// undo, where the run failed, wrote nothing, wrote what will not read, or
+/// ran while the file changed or went; the directory made for the output
+/// goes whichever way it ended.
+#[test]
+fn a_replacement_is_refused_and_the_file_left_alone() {
+    let (mut app, dir) = app_over("command-unreplaced", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let file = dir.join("a.png");
+    let original = std::fs::read(&file).unwrap();
+    let received = with_commands(
+        &mut app,
+        r#"[command.fail]
+run = "cp a.png \"$GAMUT_OUTPUT\"; exit 1"
+output = "replace"
+[command.nothing]
+run = "true"
+output = "replace"
+[command.empty]
+run = ": > \"$GAMUT_OUTPUT\""
+output = "replace"
+[command.junk]
+run = "echo junk > \"$GAMUT_OUTPUT\"; echo 'message = Junked' >> \"$GAMUT_RESULT\""
+output = "replace"
+[command.meddle]
+run = "cp a.png \"$GAMUT_OUTPUT\"; printf more >> a.png"
+output = "replace"
+[command.gone]
+run = "cp a.png \"$GAMUT_OUTPUT\"; mv a.png b.png"
+output = "replace"
+"#,
+    );
+    let refusals = [
+        "fail failed: exit 1",
+        "nothing wrote nothing, so a.png was left alone.",
+        "empty wrote nothing, so a.png was left alone.",
+        "junk wrote a file that can't be read, so a.png was left alone.",
+        "a.png changed while meddle ran, so it was left alone.",
+        "a.png was moved or deleted while gone ran.",
+    ];
+    for (index, refusal) in refusals.into_iter().enumerate() {
+        let _ = app.perform(input::Action::Command(index));
+        finish(&mut app, &received);
+        assert_eq!(said(&app), refusal);
+        assert_eq!(output_dirs(&dir), Vec::<PathBuf>::new(), "{refusal}");
+        assert!(!app.conditions().undoable, "{refusal}");
+        assert!(!dir.join("Trash/files").exists(), "{refusal}");
+        if index < 4 {
+            assert_eq!(std::fs::read(&file).unwrap(), original, "{refusal}");
+        }
+    }
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// Undoing a replacement whose original has since been emptied from the
+/// trash keeps the edited file, and says so.
+#[test]
+fn undoing_a_replacement_emptied_from_the_trash_keeps_the_edited_file() {
+    let (mut app, dir) = app_over("command-unreplace-gone", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let file = dir.join("a.png");
+    std::fs::create_dir_all(dir.join("made")).unwrap();
+    write_png(&dir.join("made"), "wider.png", 6, 2);
+    let received = with_commands(
+        &mut app,
+        "[command.widen]\nrun = 'cp made/wider.png \"$GAMUT_OUTPUT\"'\noutput = \"replace\"\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    answer(&mut app, Reload::InPlace);
+    std::fs::remove_dir_all(dir.join("Trash")).unwrap();
+
+    assert_eq!(app.perform(input::Action::Undo), Effect::Redraw);
+    assert_eq!(
+        said(&app),
+        "The original a.png is no longer in the trash. The edited file was kept."
+    );
+    assert_eq!(decode::probe(&file).unwrap(), Some((6, 2)));
+    assert!(!app.conditions().undoable);
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// The window closing ends a run that was to replace its file, nothing
+/// being left to put its output in place, and takes its directory away.
+#[test]
+fn closing_ends_a_replacing_run_and_takes_its_directory_away() {
+    let (mut app, dir) = app_over("command-replace-closed", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let received = with_commands(
+        &mut app,
+        "[command.slow]\nrun = \"sleep 30\"\noutput = \"replace\"\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    assert_eq!(output_dirs(&dir).len(), 1);
+    // The run's shell is started on its thread; the stop reaches it once
+    // it is there to be stopped.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let finished = loop {
+        app.commands.abandon();
+        if let Ok(finished) = received.recv_timeout(Duration::from_millis(50)) {
+            break finished;
+        }
+        assert!(std::time::Instant::now() < deadline, "the run ends");
+    };
+    assert_eq!(output_dirs(&dir), Vec::<PathBuf>::new());
+    assert_eq!(finished.status, crate::commands::Status::Killed);
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// A file the walker says has gone, but which is there, stays on the list:
+/// it was caught between a program taking it away and writing it again.
+/// One that is not there leaves.
+#[test]
+fn a_file_said_gone_that_is_there_stays_on_the_list() {
+    let (mut app, dir) = opening_directory(
+        "walker-stale-removal",
+        &[("a.png", 4, 3), ("b.png", 4, 3), ("c.png", 4, 3)],
+    );
+    answer(&mut app, Reload::Fresh);
+    std::fs::remove_file(dir.join("c.png")).unwrap();
+    let _ = told(
+        &mut app,
+        vec![walker::Event::Changed {
+            added: Vec::new(),
+            glimpses: Vec::new(),
+            removed: vec![dir.join("b.png"), dir.join("c.png")],
+            modified: Vec::new(),
+        }],
+    );
+    assert_eq!(app.files.paths(), [dir.join("a.png"), dir.join("b.png")]);
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}

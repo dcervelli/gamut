@@ -3903,6 +3903,7 @@ impl ApplicationHandler<UserEvent> for App {
     /// outlasts the window.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.copying.join_all();
+        self.commands.abandon();
         self.state.save(self.kept_state());
     }
 }

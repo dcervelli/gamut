@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use super::App;
+use super::edits::Replacing;
 use super::files::SLOW_READ;
 use super::input::Effect;
 use crate::commands::{self, Command, Directive, Finished, Launch, Status, Stopper};
@@ -66,6 +67,9 @@ struct Running {
     stopper: Stopper,
     /// Whether the window ended it.
     stopped: bool,
+    /// Where its output is to take the file's place: the file, and where
+    /// the output goes.
+    replacing: Option<Replacing>,
 }
 
 /// The dialog while it is up: which command it is for, and what each
@@ -166,6 +170,19 @@ impl Commands {
     pub(super) fn replace(&mut self, set: Vec<Command>) {
         self.set = set;
         self.asking = None;
+    }
+
+    /// The window closing. A run that was to replace its file is ended,
+    /// since nothing will be left to put its output in the file's place, and
+    /// the directory made for that output taken away; any other run is
+    /// left to finish on its own.
+    pub(super) fn abandon(&mut self) {
+        if let Some(running) = &self.running
+            && let Some(replacing) = &running.replacing
+        {
+            running.stopper.stop();
+            let _ = std::fs::remove_dir_all(&replacing.dir);
+        }
     }
 }
 
@@ -480,8 +497,21 @@ impl App {
             }
             _ => None,
         };
-        self.commands.runs += 1;
-        let id = self.commands.runs;
+        let id = self.commands.runs + 1;
+        let replacing = match (command.replaces, &about) {
+            (true, Some(file)) => match self.prepare_replacing(&command.label, file, id) {
+                Some(replacing) => Some(replacing),
+                None => return Effect::Redraw,
+            },
+            _ => None,
+        };
+        if let Some(replacing) = &replacing {
+            env.push((
+                "GAMUT_OUTPUT".into(),
+                replacing.output.display().to_string(),
+            ));
+        }
+        self.commands.runs = id;
         let stopper = Stopper::default();
         self.commands.running = Some(Running {
             id,
@@ -491,6 +521,7 @@ impl App {
             started: Instant::now(),
             stopper: stopper.clone(),
             stopped: false,
+            replacing,
         });
         commands::run_on_thread(
             Launch {
@@ -506,6 +537,59 @@ impl App {
             Arc::clone(&self.commands.delivered),
         );
         Effect::Redraw
+    }
+
+    /// What run `id` of `label`, which replaces `file`, is given to write
+    /// its output to, and the file as it is now, which it has to still be
+    /// once the run is over. `None`, with the reason said, where the file
+    /// cannot be replaced: there is no trash to keep the original in, the
+    /// file is a link — whose replacement would be a file in the link's
+    /// place — or is not there, or its folder will not take a directory.
+    fn prepare_replacing(&mut self, label: &str, file: &Path, id: u64) -> Option<Replacing> {
+        let name = super::edits::name_of(file);
+        if self.trash.is_none() {
+            self.toast(super::edits::NO_TRASH, Level::Error);
+            return None;
+        }
+        let was = match std::fs::symlink_metadata(file) {
+            Ok(link) if link.is_symlink() => {
+                self.toast(
+                    format!("{label} replaces the file it runs on, and {name} is a link."),
+                    Level::Error,
+                );
+                return None;
+            }
+            _ => crate::watch::Signature::of(file),
+        };
+        let Some(was) = was else {
+            self.toast(
+                format!("{label} could not start: {name} is not there."),
+                Level::Error,
+            );
+            return None;
+        };
+        let dir = match commands::make_output_dir(file, id) {
+            Ok(dir) => dir,
+            Err(error) => {
+                self.toast(
+                    format!(
+                        "{label} failed to start: {}",
+                        crate::escape_controls(&format!(
+                            "making a directory beside {name}: {error}"
+                        ))
+                    ),
+                    Level::Error,
+                );
+                return None;
+            }
+        };
+        let output = dir.join(file.file_name().unwrap_or_default());
+        Some(Replacing {
+            file: file.to_path_buf(),
+            dir,
+            output,
+            was,
+        })
     }
 
     /// The cross on the running message: the run ended, and everything it
@@ -687,8 +771,10 @@ impl App {
             Some(running) if running.id == finished.id => self.commands.running.take(),
             _ => None,
         };
-        let stopped = running.as_ref().is_some_and(|running| running.stopped);
-        let cwd = running.map(|running| running.cwd);
+        let (stopped, cwd, replacing) = match running {
+            Some(running) => (running.stopped, Some(running.cwd), running.replacing),
+            None => (false, None, None),
+        };
         let label = finished.label.clone();
         let mut lines: Vec<Line> = Vec::new();
         let mut push = |text: &str, error: bool| {
@@ -754,6 +840,12 @@ impl App {
             finished.dir.map(|dir| dir.join("stdout")),
         );
         let mut effect = Effect::Redraw;
+        // The file replaced before anything the result file asks is done,
+        // so that an `open` of it finds the new one.
+        let unreplaced = finished.status == Status::Exited(0)
+            && replacing
+                .as_ref()
+                .is_some_and(|replacing| !self.replace_file(&label, replacing));
         match finished.status {
             Status::Unstarted(reason) => {
                 self.toast(
@@ -768,6 +860,10 @@ impl App {
             Status::Killed => {
                 self.toast(format!("{label} failed: ended by a signal"), Level::Error)
             }
+            // The file left as it was, and why said: nothing the result
+            // file asks for is done, since what it says was about a file
+            // that did not arrive.
+            Status::Exited(0) if unreplaced => {}
             Status::Exited(0) => {
                 let mut said = false;
                 for directive in asked {
@@ -792,6 +888,12 @@ impl App {
                 } else if !said {
                     self.toast(format!("{label} done."), Level::Message);
                 }
+                // Said last, over whatever the script said: the original
+                // being in the trash, and undo bringing it back, is what
+                // has to be read.
+                if let Some(replacing) = &replacing {
+                    self.said_replaced(&label, &replacing.file);
+                }
             }
             Status::Exited(code) => {
                 // A script that said what went wrong is taken at its word.
@@ -808,6 +910,9 @@ impl App {
                 });
                 self.toast(words, Level::Error);
             }
+        }
+        if let Some(replacing) = replacing {
+            let _ = std::fs::remove_dir_all(replacing.dir);
         }
         if reveal {
             effect = effect.also(self.reveal_info(ui::tags::Tab::Output));

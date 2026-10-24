@@ -19,17 +19,21 @@
 //! rename, refused rather than replacing anything, and undone by the same
 //! rename the other way. A removal touches nothing on disk: the file is
 //! taken off the list for the session, and undo puts it back where it
-//! stood.
+//! stood. A replacement — a command's output put in the place of the file
+//! it ran on — keeps the original in the trash, and undo puts it back over
+//! the edited file, which goes to the trash in its turn: neither undoing
+//! nor doing loses a file.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::App;
 use super::input::Effect;
 use crate::no_replace::rename_no_replace;
-use crate::trash::{self, Entry, Refused};
+use crate::trash::{self, Entry, Refused, Unreplaced};
 use crate::ui::rename::{self, TAKEN, Verdict};
 use crate::ui::toast::Level;
-use crate::watch::Watch;
+use crate::watch::{Signature, Watch};
 
 /// One thing done to a file on disk, or to its place on the list, and
 /// enough to undo it.
@@ -54,6 +58,26 @@ pub(super) enum Edit {
         index: usize,
         adopted: bool,
     },
+    /// A file a command's output took the place of: the entry the original
+    /// is in in the trash, and the path both are called, as the list
+    /// spells it.
+    Replaced { entry: Entry, path: PathBuf },
+}
+
+/// A run of a command that replaces the file it ran on, as the window holds
+/// it until the run is over: the file, where its output is to be written,
+/// and the file as it was when the run began, which it has to still be for
+/// the output to take its place.
+#[derive(Debug)]
+pub(super) struct Replacing {
+    /// The file, as the list spells it.
+    pub(super) file: PathBuf,
+    /// The directory made for the output, taken away whole once the run
+    /// is over, however it went.
+    pub(super) dir: PathBuf,
+    /// What the command is told to write: `GAMUT_OUTPUT`.
+    pub(super) output: PathBuf,
+    pub(super) was: Signature,
 }
 
 /// The rename dialog while it is up: which file, what the field says, and
@@ -79,6 +103,9 @@ fn to_undo(keys: &super::keymap::Keymap) -> String {
         key => format!(" {key} to undo."),
     }
 }
+
+/// What the window says where there is no trash to keep a file in.
+pub(super) const NO_TRASH: &str = "No trash to move the file to: HOME is unset.";
 
 /// The last part of `path`, for a message about the file.
 pub(super) fn name_of(path: &Path) -> String {
@@ -144,7 +171,7 @@ impl App {
             return;
         };
         let Some(trash) = &self.trash else {
-            self.toast("No trash to move the file to: HOME is unset.", Level::Error);
+            self.toast(NO_TRASH, Level::Error);
             return;
         };
         let entry = match trash.put(&listed) {
@@ -193,6 +220,110 @@ impl App {
             ),
             Level::Message,
         );
+    }
+
+    /// A run that was to replace `replacing.file` has exited cleanly: its
+    /// output put in the file's place, the original kept in the trash, and
+    /// the file read again where it is on screen. Refused, the file left as
+    /// it was, where the output is empty or will not read, or where the
+    /// file changed or went while the command ran. Says whether the file
+    /// was replaced: a refusal is said here, and a replacement by
+    /// [`App::said_replaced`], once the caller has done what the run's
+    /// result file asked.
+    pub(super) fn replace_file(&mut self, label: &str, replacing: &Replacing) -> bool {
+        let Replacing {
+            file, output, was, ..
+        } = replacing;
+        let name = name_of(file);
+        let refused = match fs::symlink_metadata(output) {
+            Ok(written) if written.is_file() && written.len() > 0 => None,
+            _ => Some(format!("{label} wrote nothing, so {name} was left alone.")),
+        }
+        .or_else(|| match Signature::of(file) {
+            None => Some(format!("{name} was moved or deleted while {label} ran.")),
+            Some(now) if now != *was => Some(format!(
+                "{name} changed while {label} ran, so it was left alone."
+            )),
+            Some(_) => None,
+        })
+        .or_else(|| {
+            crate::image::decode::probe(output).is_err().then(|| {
+                format!("{label} wrote a file that can't be read, so {name} was left alone.")
+            })
+        });
+        if let Some(refused) = refused {
+            self.toast(refused, Level::Error);
+            return false;
+        }
+        let Some(trash) = &self.trash else {
+            self.toast(NO_TRASH, Level::Error);
+            return false;
+        };
+        // The new file is read and written by whoever could the old one.
+        let replaced = fs::metadata(file)
+            .and_then(|old| fs::set_permissions(output, old.permissions()))
+            .map_err(|error| {
+                Unreplaced::Untouched(anyhow::Error::from(error).context(format!(
+                    "giving the new {} the permissions of the old",
+                    crate::shown_path(file)
+                )))
+            })
+            .and_then(|()| trash.replace(file, output));
+        let entry = match replaced {
+            Ok(entry) => entry,
+            Err(Unreplaced::Untouched(error)) => {
+                super::input::report(&error);
+                self.toast(
+                    format!(
+                        "Could not replace {name}: {}. The original is untouched.",
+                        crate::escape_controls(&format!("{error:#}"))
+                    ),
+                    Level::Error,
+                );
+                return false;
+            }
+            Err(Unreplaced::InTrash(error)) => {
+                super::input::report(&error);
+                self.toast(
+                    format!("Could not replace {name}. The original is in the Trash."),
+                    Level::Error,
+                );
+                return false;
+            }
+        };
+        self.edits.push(Edit::Replaced {
+            entry,
+            path: file.clone(),
+        });
+        self.file_replaced(file);
+        true
+    }
+
+    /// Says that `label` replaced `file`, and how to take it back.
+    pub(super) fn said_replaced(&mut self, label: &str, file: &Path) {
+        self.toast(
+            format!(
+                "{label} changed {}. The original is in the trash.{}",
+                name_of(file),
+                to_undo(&self.keys)
+            ),
+            Level::Message,
+        );
+    }
+
+    /// The file at `path` is another file under the same name: what was
+    /// made of it is made again — its thumbnail, its facts, its place in an
+    /// order that reads them — and it is read again where it is on screen.
+    /// The read's answer brings the watch on it up to date, so the change is
+    /// not read a second time when the watch next looks.
+    fn file_replaced(&mut self, path: &Path) {
+        self.rewritten(vec![path.to_path_buf()]);
+        if self.files.shown_path() == Some(path)
+            && self.files.is_idle()
+            && let Some(request) = self.files.reload()
+        {
+            let _ = self.send(request);
+        }
     }
 
     /// Opens the rename dialog on the file on screen, its name in the field.
@@ -362,8 +493,57 @@ impl App {
                     Level::Message,
                 );
             }
+            Edit::Replaced { entry, path } => self.unreplace(&entry, &path),
         }
         Effect::Redraw
+    }
+
+    /// Puts the original of a replaced file back, the edited one going to
+    /// the trash in its place, and shows it.
+    fn unreplace(&mut self, entry: &Entry, path: &Path) {
+        let name = name_of(path);
+        let restored = match &self.trash {
+            Some(trash) => trash.restore_over(entry),
+            None => Err(Refused::Failed(anyhow::anyhow!(
+                "no trash, HOME being unset"
+            ))),
+        };
+        match restored {
+            Ok(()) => {}
+            Err(Refused::Gone) => {
+                self.toast(
+                    format!(
+                        "The original {name} is no longer in the trash. The edited file was kept."
+                    ),
+                    Level::Warning,
+                );
+                return;
+            }
+            Err(refused) => {
+                let error = anyhow::anyhow!("{refused}");
+                super::input::report(&error);
+                self.toast(
+                    format!(
+                        "Could not restore {name}: {}. The edited file was kept.",
+                        crate::escape_controls(&refused.to_string())
+                    ),
+                    Level::Error,
+                );
+                return;
+            }
+        }
+        match self.files.position(path) {
+            Some(at) if at != self.files.index() => {
+                self.rewritten(vec![path.to_path_buf()]);
+                let request = self.files.go_to(at);
+                let _ = self.send(request);
+            }
+            _ => self.file_replaced(path),
+        }
+        self.toast(
+            format!("Restored the original {name}. The edited file is in the trash."),
+            Level::Message,
+        );
     }
 
     /// Puts a trashed file back: on disk, and on the list — where it still

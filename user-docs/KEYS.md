@@ -140,7 +140,7 @@ on screen, since there is then nowhere to pan to.
 | `F2` | Rename the file on screen | `files.rename` |
 | `Del` | Move the file on screen to the trash, and show the next | `files.delete` |
 | `⌫` (`Backspace`) | Take the file on screen off the list, and show the next | `files.remove` |
-| `Ctrl+Z` | Undo the last rename, deletion or removal | `files.undo` |
+| `Ctrl+Z` | Undo the last rename, deletion, removal or replacement | `files.undo` |
 | `Ctrl+E` | Export the picture as shown to a new JPG or PNG | `files.export` |
 | `Ctrl+Shift+M` | Open map of image location in browser, for a picture that records its location | `files.map` |
 | `Ctrl+Alt+Shift+M` | Open map of image bounds in browser, for a picture placed in latitude and longitude | `files.map-bounds` |

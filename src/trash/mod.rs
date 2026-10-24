@@ -16,6 +16,19 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::{Entry, Trash, restore};
 
+/// Why a file was not replaced by another.
+#[derive(Debug)]
+pub enum Unreplaced {
+    /// Nothing changed: the file is where it was, as it was.
+    Untouched(anyhow::Error),
+    /// The file went to the trash, and what was to take its place did not
+    /// arrive, nor could the file be brought back: it is in the trash. Only
+    /// Finder's trash, which moves a file rather than keeping a copy of it,
+    /// can leave one there.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    InTrash(anyhow::Error),
+}
+
 /// Why a restore did not happen.
 #[derive(Debug)]
 pub enum Refused {
