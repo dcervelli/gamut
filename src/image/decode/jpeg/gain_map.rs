@@ -27,6 +27,7 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 /// A JPEG, examined for the things the `image` crate throws away: the ICC
 /// profile, and a gain map if there is one.
 pub(super) struct Container<'a> {
+    bytes: &'a [u8],
     decoder: Decoder<'a>,
 }
 
@@ -34,7 +35,9 @@ impl<'a> Container<'a> {
     /// `None` for anything that is not a JPEG at all. Every real JPEG opens,
     /// gain map or not.
     pub fn open(bytes: &'a [u8]) -> Option<Self> {
-        Decoder::new(bytes).ok().map(|decoder| Self { decoder })
+        Decoder::new(bytes)
+            .ok()
+            .map(|decoder| Self { bytes, decoder })
     }
 
     /// The embedded ICC profile, reassembled across the APP2 chunks it is
@@ -62,6 +65,9 @@ impl<'a> Container<'a> {
             return Ok(None);
         };
         if !self.decoder.is_ultrahdr() {
+            return Ok(None);
+        }
+        if !self.split_holds(base_jpeg, map_jpeg) {
             return Ok(None);
         }
 
@@ -118,6 +124,51 @@ impl<'a> Container<'a> {
             lift: Lift::Iso(metadata.clone()),
         }));
         Ok(Some(image))
+    }
+
+    /// Whether the two JPEGs the crate split the file into are the
+    /// photograph and an image after it.
+    ///
+    /// Without an MPF directory, `ultrahdr-rs` 0.3.5 falls back to pairing
+    /// each `FFD8` in the file with the next `FFD9`, and the thumbnails that
+    /// EXIF and Photoshop's APP13 carry are JPEGs of their own. A file whose
+    /// XMP still names a gain map it no longer has — Lightroom's export, put
+    /// through something that dropped the second image — then comes back as a
+    /// "base" that is the headers up to the EXIF thumbnail's end, and a "map"
+    /// that is the next thumbnail. The photograph's own scan is the test: the
+    /// base has to run from the start of the file through it, and the map has
+    /// to begin after the base ends. Anything else is a plain JPEG.
+    fn split_holds(&self, base: &[u8], map: &[u8]) -> bool {
+        let Some(scan) = first_scan(self.bytes) else {
+            return false;
+        };
+        let offset = |part: &[u8]| part.as_ptr() as usize - self.bytes.as_ptr() as usize;
+        let base_end = offset(base) + base.len();
+        offset(base) == 0 && base_end > scan && offset(map) >= base_end
+    }
+}
+
+/// Where the photograph's first SOS marker is, found by walking the segments
+/// before it by their lengths, so that a JPEG carried inside an APP segment is
+/// stepped over whole rather than mistaken for the file's own.
+fn first_scan(bytes: &[u8]) -> Option<usize> {
+    let mut at = 2;
+    loop {
+        let marker = bytes.get(at..at + 2)?;
+        if marker[0] != 0xFF {
+            return None;
+        }
+        match marker[1] {
+            0xDA => return Some(at),
+            // Fill bytes before a marker.
+            0xFF => at += 1,
+            // The markers that stand alone, with no length after them.
+            0x01 | 0xD0..=0xD8 => at += 2,
+            _ => {
+                let length = bytes.get(at + 2..at + 4)?;
+                at += 2 + u16::from_be_bytes([length[0], length[1]]) as usize;
+            }
+        }
     }
 }
 
@@ -475,6 +526,59 @@ mod tests {
         let opened = Container::open(&plain).expect("a JPEG opens");
         assert!(opened.gain_mapped(ColorSpace::SRGB).unwrap().is_none());
         assert!(opened.icc_profile().is_none());
+    }
+
+    /// One APP segment: its marker, its length and its bytes.
+    fn segment(marker: u8, data: &[u8]) -> Vec<u8> {
+        let mut segment = vec![0xFF, marker];
+        segment.extend_from_slice(&(data.len() as u16 + 2).to_be_bytes());
+        segment.extend_from_slice(data);
+        segment
+    }
+
+    /// A file shaped as a Lightroom export whose gain map has been stripped:
+    /// the XMP still names one, the EXIF and Photoshop's APP13 each carry a
+    /// thumbnail, and there is no MPF and no second image. The crate's
+    /// fallback splits it into two thumbnails, which have to be refused and
+    /// the file read as the plain JPEG it is.
+    #[test]
+    fn a_gain_map_named_but_missing_is_a_plain_jpeg() {
+        let photo = jpeg(
+            &[GRAY; 16 * 16 * 3],
+            16,
+            16,
+            ::image::ExtendedColorType::Rgb8,
+        );
+        let thumbnail = jpeg(&[GRAY; 4 * 4 * 3], 4, 4, ::image::ExtendedColorType::Rgb8);
+
+        let mut exif = b"Exif\0\0".to_vec();
+        exif.extend_from_slice(&thumbnail);
+        let mut photoshop = b"Photoshop 3.0\0".to_vec();
+        photoshop.extend_from_slice(&thumbnail);
+        let mut xmp = b"http://ns.adobe.com/xap/1.0/\0".to_vec();
+        xmp.extend_from_slice(
+            br#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:hdrgm="http://ns.adobe.com/hdr-gain-map/1.0/" hdrgm:Version="1.0" hdrgm:GainMapMin="0" hdrgm:GainMapMax="1.5" hdrgm:HDRCapacityMin="0" hdrgm:HDRCapacityMax="1.5"/></rdf:RDF></x:xmpmeta>"#,
+        );
+
+        let mut bytes = photo[..2].to_vec();
+        bytes.extend(segment(0xE1, &exif));
+        bytes.extend(segment(0xED, &photoshop));
+        bytes.extend(segment(0xE1, &xmp));
+        bytes.extend_from_slice(&photo[2..]);
+
+        let container = Container::open(&bytes).expect("a JPEG opens");
+        // The crate's split, which is the thing being guarded against.
+        assert!(container.decoder.is_ultrahdr());
+        assert!(container.decoder.metadata().is_some());
+        let base = container.decoder.primary_jpeg().expect("a base is found");
+        let scan = first_scan(&bytes).expect("the photograph has a scan");
+        assert!(
+            base.len() <= scan,
+            "the crate's base reaches the photograph's scan"
+        );
+        assert!(container.decoder.gainmap_jpeg().is_some());
+
+        assert!(container.gain_mapped(ColorSpace::SRGB).unwrap().is_none());
     }
 
     /// A base image that is already HDR needs the map run the other way,
