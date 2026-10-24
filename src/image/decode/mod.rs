@@ -244,6 +244,13 @@ pub trait Decoder: Sync {
         Ok(None)
     }
 
+    /// What the file calls one of its pages, where it names them: a band's
+    /// description, a directory's page name. Only where
+    /// [`Decoder::sequence`] said [`Sequence::Pages`].
+    fn page_name(&self, _source: &mut dyn ReadSeek, _page: usize) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     /// One picture of a file that holds several, by its place in the file.
     /// Only where [`Decoder::sequence`] said [`Sequence::Pages`]; page zero
     /// of anything else is the image itself.
@@ -671,6 +678,14 @@ impl Opened {
         .map(|(sequence, _)| sequence)
     }
 
+    /// What the file calls page `page` — see [`Decoder::page_name`].
+    pub fn page_name(&mut self, page: usize) -> Result<Option<String>> {
+        self.ask("reading the page names of", |source, decoder| {
+            decoder.page_name(source, page)
+        })
+        .map(|(name, _)| name)
+    }
+
     /// How long each frame of the animation is shown for, from its headers
     /// — see [`Decoder::delays`].
     pub fn delays(&mut self) -> Result<Option<Vec<Duration>>> {
@@ -1002,9 +1017,10 @@ mod tests {
                 "gif" | "hdr" | "exr" | "bmp" | "pnm" => "gif/hdr/exr/bmp/netpbm",
                 // A PNG under a TIFF name: sniffed for what it is.
                 "mislabeled" => "png",
-                // The two truncated files still say what they are.
+                // The truncated files still say what they are.
                 "bad" if name.ends_with(".png") => "png",
                 "bad" if name.ends_with(".dng") => "camera raw",
+                "bad" if name.ends_with(".tif") => "tiff",
                 // Not fixtures: the script, the notes, a profile, the raw
                 // samples' directory, and the one format nothing reads.
                 "generate" | "README" | "display" | "raw" | "unsupported" => continue,

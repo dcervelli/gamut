@@ -20,6 +20,18 @@
 //! coverage of the picture before it, one bit a pixel, and GDAL writes one
 //! after the picture and one after each reduced copy.
 //!
+//! A directory of gray may also hold more samples a pixel than its one, as
+//! GDAL writes a raster of several bands — a classifier's probabilities, a
+//! stack of a satellite's bands. Each band past the first is a page too,
+//! after the picture the first band and its alpha make — see [`runs`]. A
+//! band's page is read like any other, every chunk decoded whole and the
+//! one sample a pixel kept, and named by GDAL's description of it where the
+//! file carries one. RGB with samples beside it that are not alpha is read
+//! as its picture alone: the crate hands an interleaved chunk of RGB back
+//! with only its color, and a band that could be reached only where the
+//! file happens to be stored a plane to a band would come and go with how
+//! it was written.
+//!
 //! The pixels are stored in chunks — strips, or tiles — each compressed on
 //! its own, and each is read here on its own too: the rows of chunks are
 //! divided between rayon's threads, and every thread opens a decoder of its
@@ -57,6 +69,11 @@ use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// GDAL writes the no-data value here, as an ASCII string.
 const GDAL_NODATA: u16 = 42113;
+/// GDAL's metadata, as an XML document of `Item`s: among them each band's
+/// description, which is where a band's name is kept.
+const GDAL_METADATA: u16 = 42112;
+/// `PageName`: the name of the document a directory is a page of.
+const PAGE_NAME: u16 = 285;
 /// GeoTIFF's key directory, which a raster placed on the ground carries.
 const GEO_KEY_DIRECTORY: u16 = 34735;
 
@@ -117,14 +134,44 @@ impl super::Decoder for TiffRs {
     }
 
     /// How many pictures the chain holds, walked without reading any
-    /// pixels.
+    /// pixels, and whether they are all the bands of one directory.
     fn sequence(&self, source: &mut dyn super::ReadSeek) -> Result<Sequence> {
-        let count = pages(&mut Decoder::new(source)?)?.len();
+        let pages = pages(&mut Decoder::new(source)?)?;
+        let count = pages.len();
         Ok(if count > 1 {
-            Sequence::Pages { count, default: 0 }
+            Sequence::Pages {
+                count,
+                default: 0,
+                bands: pages
+                    .iter()
+                    .all(|page| page.directory == pages[0].directory),
+            }
         } else {
             Sequence::Still
         })
+    }
+
+    /// A band's description, from GDAL's metadata, or the directory's own
+    /// `PageName` for a page that is the whole of its directory's picture.
+    fn page_name(&self, source: &mut dyn super::ReadSeek, page: usize) -> Result<Option<String>> {
+        let mut decoder = Decoder::new(source)?;
+        let found = find(&mut decoder, page)?;
+        let band = match found.run {
+            Some(Run {
+                first,
+                channels: Channels::Gray,
+            }) => description(&mut decoder, first),
+            _ => None,
+        };
+        // A directory's name is the name of its picture, and not of one band
+        // among several.
+        let whole = found.run.is_none_or(|run| run.first == 0);
+        Ok(band.or_else(|| {
+            whole
+                .then(|| decoder.get_tag_ascii_string(Tag::Unknown(PAGE_NAME)).ok())
+                .flatten()
+                .and_then(named)
+        }))
     }
 
     fn decode_page(
@@ -144,38 +191,37 @@ impl super::Decoder for TiffRs {
         // threads' decoders will read, where there is one.
         let shared = source.share()?;
         let mut decoder = Decoder::new(source)?.with_limits(limits.clone());
-        // The first page is the first directory, whatever it says of itself;
-        // any other is found past the masks.
-        let directory = match page {
-            0 => 0,
-            _ => *pages(&mut decoder)?
-                .get(page)
-                .ok_or_else(|| anyhow!("TIFF has no page {page}"))?,
-        };
-        if directory > 0 {
-            decoder.seek_to_image(directory)?;
-        }
+        let found = find(&mut decoder, page)?;
+        let directory = found.directory;
         let (width, height) = decoder.dimensions()?;
-        let color = decoder.colortype()?;
 
-        let channels = match color {
-            tiff::ColorType::Gray(_) => Channels::Gray,
-            tiff::ColorType::GrayA(_) => Channels::GrayAlpha,
-            // The decoder expands indexed data to RGB for us; YCbCr it
-            // leaves to us, and only 8-bit is ever seen, since JPEG is the
-            // compression that carries it.
-            tiff::ColorType::RGB(_) | tiff::ColorType::Palette(_) | tiff::ColorType::YCbCr(8) => {
-                Channels::Rgb
+        // A run of the samples is read as what it was found to be; a
+        // directory read whole, as the crate names its layout.
+        let (channels, ycbcr) = match found.run {
+            Some(run) => (run.channels, None),
+            None => {
+                let color = decoder.colortype()?;
+                let channels = match color {
+                    // The decoder expands indexed data to RGB for us; YCbCr
+                    // it leaves to us, and only 8-bit is ever seen, since
+                    // JPEG is the compression that carries it.
+                    tiff::ColorType::RGB(_)
+                    | tiff::ColorType::Palette(_)
+                    | tiff::ColorType::YCbCr(8) => Channels::Rgb,
+                    other => bail!("unsupported TIFF color type {other:?}"),
+                };
+                let ycbcr = match color {
+                    tiff::ColorType::YCbCr(_) => Some(YCbCr::read(&mut decoder)?),
+                    _ => None,
+                };
+                (channels, ycbcr)
             }
-            tiff::ColorType::RGBA(_) => Channels::Rgba,
-            other => bail!("unsupported TIFF color type {other:?}"),
-        };
-        let ycbcr = match color {
-            tiff::ColorType::YCbCr(_) => Some(YCbCr::read(&mut decoder)?),
-            _ => None,
         };
         let webp = match decoder.find_tag_unsigned::<u16>(Tag::Compression)? {
-            Some(COMPRESSION_WEBP) => Some(WebP::read(&mut decoder, color)?),
+            Some(COMPRESSION_WEBP) => {
+                let color = decoder.colortype()?;
+                Some(WebP::read(&mut decoder, color)?)
+            }
             _ => None,
         };
 
@@ -199,14 +245,16 @@ impl super::Decoder for TiffRs {
         let georeferenced =
             nodata.is_some() || decoder.find_tag(Tag::Unknown(GEO_KEY_DIRECTORY))?.is_some();
 
-        // Chunk by chunk, across threads, wherever the layout is the plain
-        // one. A planar file keeps each channel's chunks apart, which is
-        // a different assembly and rare enough to leave to `read_image`.
-        let chunky = decoder
+        // Chunk by chunk, across threads, wherever the samples are a run the
+        // decoder found: interleaved, a pixel's samples side by side in each
+        // chunk, or planar, each sample's chunks a plane of their own. What
+        // is left — a palette or YCbCr stored planar — is rare enough to
+        // leave to `read_image`.
+        let planar = decoder
             .find_tag_unsigned::<u16>(Tag::PlanarConfiguration)?
-            .is_none_or(|planar| planar == 1);
-        let samples = if chunky {
-            let geometry = Geometry::of(&decoder, width, height, channels)?;
+            .is_some_and(|planar| planar == 2);
+        let samples = if !planar || found.run.is_some() {
+            let geometry = Geometry::of(&decoder, width, height, &found, channels, planar)?;
             let read = Read {
                 shared: shared.as_ref(),
                 limits: &limits,
@@ -245,7 +293,10 @@ impl super::Decoder for TiffRs {
             ));
         }
 
-        let color = color_space(&samples, profile, georeferenced);
+        // One band of several is a measurement, whatever its depth: nothing
+        // stores a picture as a gray channel with others beside it.
+        let band = channels == Channels::Gray && found.stride > 1;
+        let color = color_space(&samples, profile, georeferenced || band);
         let mut image = DecodedImage::new(
             width,
             height,
@@ -258,12 +309,116 @@ impl super::Decoder for TiffRs {
     }
 }
 
-/// The directories that are pictures, in order, by index in the chain: every
-/// one but a transparency mask, which is the coverage of the picture before
-/// it rather than a page of its own — and one bit a pixel, which the crate
+/// One page of the file: a directory, and which of its samples make it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Page {
+    /// Which directory of the chain, by index.
+    directory: usize,
+    /// How many samples a pixel the crate hands an interleaved chunk back
+    /// with: every one the directory holds for gray, and the picture's
+    /// alone for RGB.
+    stride: usize,
+    /// The samples of each pixel the page is made of. `None` is the
+    /// directory read whole, as the crate names its layout: a palette,
+    /// YCbCr, or an interpretation the program has no run for.
+    run: Option<Run>,
+}
+
+/// A run of a pixel's samples, read as one picture.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Run {
+    /// The first of the pixel's samples in the run.
+    first: usize,
+    /// What the run is, and so how many samples it takes.
+    channels: Channels,
+}
+
+/// The pages a directory holds, in order: the picture its photometric
+/// interpretation names first, with its alpha where the sample after the
+/// color is one, and then, for gray, a page for each sample past those. An
+/// `ExtraSamples` tag says which of the extra samples is alpha; with no tag,
+/// the one extra sample a picture can have is taken as alpha, as readers
+/// have long taken a fourth sample of RGB.
+///
+/// Only gray is split, and RGB read as its run: a palette is one sample
+/// expanded, YCbCr is three converted together, and anything else is left
+/// to the crate to name or refuse, as one page.
+fn runs(photometric: Option<u16>, samples: usize, extra: Option<&[u16]>) -> Vec<Option<Run>> {
+    // WhiteIsZero, BlackIsZero, RGB.
+    let color = match photometric {
+        Some(0 | 1) => 1,
+        Some(2) => 3,
+        _ => return vec![None],
+    };
+    if samples < color {
+        return vec![None];
+    }
+    // Associated or unassociated alpha.
+    let alpha = samples > color
+        && match extra {
+            Some(extra) => matches!(extra.first(), Some(1 | 2)),
+            None => samples == color + 1,
+        };
+    let channels = match (color, alpha) {
+        (1, false) => Channels::Gray,
+        (1, true) => Channels::GrayAlpha,
+        (_, false) => Channels::Rgb,
+        (_, true) => Channels::Rgba,
+    };
+    let picture = Run { first: 0, channels };
+    let bands = if color == 1 {
+        channels.count()..samples
+    } else {
+        0..0
+    };
+    std::iter::once(Some(picture))
+        .chain(bands.map(|first| {
+            Some(Run {
+                first,
+                channels: Channels::Gray,
+            })
+        }))
+        .collect()
+}
+
+/// The pages of the directory the decoder is on.
+fn directory_pages<R: io::Read + Seek>(
+    decoder: &mut Decoder<R>,
+    directory: usize,
+) -> Result<Vec<Page>> {
+    let photometric = decoder.find_tag_unsigned::<u16>(Tag::PhotometricInterpretation)?;
+    let samples = decoder
+        .find_tag_unsigned::<u16>(Tag::SamplesPerPixel)?
+        .unwrap_or(1)
+        .max(1) as usize;
+    let extra = match decoder.find_tag(Tag::ExtraSamples)? {
+        Some(value) => Some(value.into_u16_vec()?),
+        None => None,
+    };
+    let runs = runs(photometric, samples, extra.as_deref());
+    let stride = match runs[0] {
+        Some(Run {
+            channels: channels @ (Channels::Rgb | Channels::Rgba),
+            ..
+        }) => channels.count(),
+        _ => samples,
+    };
+    Ok(runs
+        .into_iter()
+        .map(|run| Page {
+            directory,
+            stride,
+            run,
+        })
+        .collect())
+}
+
+/// The pages of the whole chain, in order: every directory's but a
+/// transparency mask's, which is the coverage of the picture before it
+/// rather than a page of its own — and one bit a pixel, which the crate
 /// would not decode as a picture anyway. The decoder is left on the last
 /// directory; `seek_to_image` finds any of them again from there.
-fn pages<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Vec<usize>> {
+fn pages<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Vec<Page>> {
     let mut pages = Vec::new();
     let mut index = 0;
     loop {
@@ -271,7 +426,7 @@ fn pages<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Vec<usize>> {
             .find_tag_unsigned::<u32>(Tag::NewSubfileType)?
             .unwrap_or(0);
         if subfile & TRANSPARENCY_MASK == 0 {
-            pages.push(index);
+            pages.extend(directory_pages(decoder, index)?);
         }
         if !decoder.more_images() {
             break;
@@ -280,6 +435,49 @@ fn pages<R: io::Read + Seek>(decoder: &mut Decoder<R>) -> Result<Vec<usize>> {
         index += 1;
     }
     Ok(pages)
+}
+
+/// Page `page`, with the decoder left on its directory. The first page is
+/// the first directory's picture, whatever the directory says of itself,
+/// and found without walking the chain; any other is found past the masks.
+fn find<R: io::Read + Seek>(decoder: &mut Decoder<R>, page: usize) -> Result<Page> {
+    if page == 0 {
+        let first = directory_pages(decoder, 0)?[0];
+        return Ok(first);
+    }
+    let found = *pages(decoder)?
+        .get(page)
+        .ok_or_else(|| anyhow!("TIFF has no page {page}"))?;
+    decoder.seek_to_image(found.directory)?;
+    Ok(found)
+}
+
+/// GDAL's description of the directory's sample `sample`, from the metadata
+/// it writes beside the pixels: an `Item` named `DESCRIPTION` in the role of
+/// one, for that sample. Metadata that will not parse names nothing.
+fn description<R: io::Read + Seek>(decoder: &mut Decoder<R>, sample: usize) -> Option<String> {
+    let text = decoder
+        .get_tag_ascii_string(Tag::Unknown(GDAL_METADATA))
+        .ok()?;
+    let document = roxmltree::Document::parse(&text).ok()?;
+    let sample = sample.to_string();
+    document
+        .root_element()
+        .children()
+        .filter(|node| node.has_tag_name("Item"))
+        .find(|item| {
+            item.attribute("name") == Some("DESCRIPTION")
+                && item.attribute("role") == Some("description")
+                && item.attribute("sample") == Some(sample.as_str())
+        })
+        .and_then(|item| item.text())
+        .and_then(|text| named(text.to_string()))
+}
+
+/// A name as a file wrote it, trimmed, and nothing where nothing is left.
+fn named(name: String) -> Option<String> {
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// The width a file's samples are held at: the stored type for unsigned
@@ -380,12 +578,16 @@ fn widened(result: DecodingResult) -> Vec<f32> {
     }
 }
 
-/// How a directory's pixels are cut into chunks, and where each lands.
+/// How a directory's pixels are cut into chunks, which of each pixel's
+/// samples are kept, and where each lands.
 struct Geometry {
     width: usize,
     height: usize,
-    /// Samples per pixel.
+    /// Samples per pixel kept: the channels of the page.
     samples: usize,
+    /// Where the kept samples are in the directory's, and how they are
+    /// stored there.
+    layout: Layout,
     /// A chunk's size, before the right and bottom edges clip it: the tile
     /// size, or the image's width by the rows in a strip.
     chunk: (usize, usize),
@@ -394,12 +596,25 @@ struct Geometry {
     down: usize,
 }
 
+/// How the samples a page keeps are stored.
+#[derive(Clone, Copy)]
+enum Layout {
+    /// Side by side in every chunk, `stride` samples a pixel, of which the
+    /// page keeps those from `first`.
+    Interleaved { stride: usize, first: usize },
+    /// Each sample's chunks a plane of their own, the planes one after
+    /// another; the page reads the planes from `first`.
+    Planar { first: usize },
+}
+
 impl Geometry {
     fn of<R: io::Read + Seek>(
         decoder: &Decoder<R>,
         width: u32,
         height: u32,
+        page: &Page,
         channels: Channels,
+        planar: bool,
     ) -> Result<Self> {
         let (chunk_width, chunk_height) = decoder.chunk_dimensions();
         if chunk_width == 0 || chunk_height == 0 {
@@ -407,10 +622,30 @@ impl Geometry {
         }
         let (width, height) = (width as usize, height as usize);
         let chunk = (chunk_width as usize, chunk_height as usize);
+        let samples = channels.count();
+        // A directory read whole is the crate's layout: as many samples a
+        // chunk's pixel as the page has, a palette's expanded already.
+        let layout = match (page.run, planar) {
+            (Some(run), true) => Layout::Planar { first: run.first },
+            (Some(run), false) => Layout::Interleaved {
+                stride: page.stride,
+                first: run.first,
+            },
+            (None, _) => Layout::Interleaved {
+                stride: samples,
+                first: 0,
+            },
+        };
+        if let Layout::Interleaved { stride, first } = layout
+            && first + samples > stride
+        {
+            bail!("TIFF samples {first}.. of {stride} hold no {channels:?}");
+        }
         Ok(Self {
             width,
             height,
-            samples: channels.count(),
+            samples,
+            layout,
             chunk,
             across: width.div_ceil(chunk.0),
             down: height.div_ceil(chunk.1),
@@ -504,43 +739,117 @@ fn read_rows<R: io::Read + Seek, T: Resident>(
     band: &mut [T],
 ) -> Result<()> {
     let geometry = read.geometry;
-    let row_samples = geometry.width * geometry.samples;
     let top = geometry.rows(0..chunk_rows.start).len();
+    let per_plane = geometry.across * geometry.down;
     for chunk_row in chunk_rows {
         for column in 0..geometry.across {
             let index = chunk_row * geometry.across + column;
-            let index = u32::try_from(index).context("too many TIFF chunks")?;
-            let (chunk_width, chunk_height) = decoder.chunk_data_dimensions(index);
-            let (chunk_width, chunk_height) = (chunk_width as usize, chunk_height as usize);
-            let mut chunk = T::take(match read.webp {
-                Some(webp) => DecodingResult::U8(webp.chunk(
-                    decoder.inner(),
-                    index,
-                    geometry,
-                    (chunk_width, chunk_height),
-                )?),
-                None => decoder.read_chunk(index)?,
-            })?;
-            if let Some(ycbcr) = read.ycbcr {
-                T::to_rgb(&mut chunk, ycbcr);
-            }
-            let chunk_samples = chunk_width * geometry.samples;
-            if chunk.len() != chunk_samples * chunk_height {
-                bail!(
-                    "TIFF chunk {index} decoded to {} samples, expected {} for {chunk_width}x{chunk_height}",
-                    chunk.len(),
-                    chunk_samples * chunk_height
-                );
-            }
-            let x = column * geometry.chunk.0 * geometry.samples;
-            let y = chunk_row * geometry.chunk.1 - top;
-            for (row, source) in chunk.chunks_exact(chunk_samples).enumerate() {
-                let start = (y + row) * row_samples + x;
-                band[start..start + chunk_samples].copy_from_slice(source);
+            // The first plane's chunk: every plane is cut the same way.
+            let (width, height) = decoder.chunk_data_dimensions(chunk_index(index)?);
+            let target = Target {
+                x: column * geometry.chunk.0,
+                y: chunk_row * geometry.chunk.1 - top,
+                width: width as usize,
+                height: height as usize,
+                row_samples: geometry.width * geometry.samples,
+                samples: geometry.samples,
+            };
+            match geometry.layout {
+                Layout::Interleaved { stride, first } => {
+                    let mut chunk = T::take(match read.webp {
+                        Some(webp) => DecodingResult::U8(webp.chunk(
+                            decoder.inner(),
+                            chunk_index(index)?,
+                            geometry,
+                            (target.width, target.height),
+                        )?),
+                        None => decoder.read_chunk(chunk_index(index)?)?,
+                    })?;
+                    if let Some(ycbcr) = read.ycbcr {
+                        T::to_rgb(&mut chunk, ycbcr);
+                    }
+                    target.put(band, &chunk, index, stride, first, 0, geometry.samples)?;
+                }
+                Layout::Planar { first } => {
+                    for channel in 0..geometry.samples {
+                        let index = (first + channel) * per_plane + index;
+                        let chunk = T::take(decoder.read_chunk(chunk_index(index)?)?)?;
+                        target.put(band, &chunk, index, 1, 0, channel, 1)?;
+                    }
+                }
             }
         }
     }
     Ok(())
+}
+
+/// A chunk's index as the crate takes it.
+fn chunk_index(index: usize) -> Result<u32> {
+    u32::try_from(index).context("too many TIFF chunks")
+}
+
+/// Where one chunk's pixels land in a band of rows.
+struct Target {
+    /// The chunk's first pixel, in the band.
+    x: usize,
+    y: usize,
+    /// The pixels the chunk holds, its padding past the image's edges left
+    /// out.
+    width: usize,
+    height: usize,
+    /// Samples a row of the band, and a pixel of it.
+    row_samples: usize,
+    samples: usize,
+}
+
+impl Target {
+    /// Copies `count` samples of each of the chunk's pixels, from its sample
+    /// `first` of `stride`, into the band's from its channel `channel`.
+    ///
+    /// A chunk holding more rows than it has pixels for is read to the rows
+    /// it has: the crate pads a planar file's last row of tiles in every
+    /// plane but the first, working the padding out from the tile's index
+    /// as though the planes were one.
+    #[allow(clippy::too_many_arguments)]
+    fn put<T: Copy>(
+        &self,
+        band: &mut [T],
+        chunk: &[T],
+        index: usize,
+        stride: usize,
+        first: usize,
+        channel: usize,
+        count: usize,
+    ) -> Result<()> {
+        let chunk_row = self.width * stride;
+        if chunk_row == 0
+            || !chunk.len().is_multiple_of(chunk_row)
+            || chunk.len() / chunk_row < self.height
+        {
+            bail!(
+                "TIFF chunk {index} decoded to {} samples, expected {} for {}x{}",
+                chunk.len(),
+                chunk_row * self.height,
+                self.width,
+                self.height
+            );
+        }
+        for (row, source) in chunk.chunks_exact(chunk_row).take(self.height).enumerate() {
+            let start = (self.y + row) * self.row_samples + self.x * self.samples;
+            let destination = &mut band[start..start + self.width * self.samples];
+            if stride == count && count == self.samples {
+                destination.copy_from_slice(source);
+                continue;
+            }
+            for (pixel, source) in destination
+                .chunks_exact_mut(self.samples)
+                .zip(source.chunks_exact(stride))
+            {
+                pixel[channel..channel + count].copy_from_slice(&source[first..first + count]);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Where each chunk of a WebP-compressed directory is in the file, read
@@ -772,7 +1081,61 @@ fn color_space(
 
 #[cfg(test)]
 mod tests {
-    use super::YCbCr;
+    use super::{Run, YCbCr, runs};
+    use crate::image::Channels;
+
+    fn run(first: usize, channels: Channels) -> Option<Run> {
+        Some(Run { first, channels })
+    }
+
+    #[test]
+    fn a_directory_of_gray_is_a_page_to_a_band() {
+        // BlackIsZero, nine samples, eight of them unspecified.
+        assert_eq!(
+            runs(Some(1), 9, Some(&[0; 8])),
+            (0..9)
+                .map(|band| run(band, Channels::Gray))
+                .collect::<Vec<_>>()
+        );
+        // Alpha first among the extras goes with the gray; the rest are bands.
+        assert_eq!(
+            runs(Some(1), 3, Some(&[2, 0])),
+            [run(0, Channels::GrayAlpha), run(2, Channels::Gray)]
+        );
+        assert_eq!(runs(Some(0), 1, None), [run(0, Channels::Gray)]);
+    }
+
+    #[test]
+    fn rgb_is_its_picture_whatever_is_beside_it() {
+        assert_eq!(runs(Some(2), 3, None), [run(0, Channels::Rgb)]);
+        assert_eq!(runs(Some(2), 4, Some(&[0])), [run(0, Channels::Rgb)]);
+        assert_eq!(runs(Some(2), 5, Some(&[1, 0])), [run(0, Channels::Rgba)]);
+    }
+
+    #[test]
+    fn one_extra_sample_with_no_tag_is_alpha() {
+        assert_eq!(runs(Some(2), 4, None), [run(0, Channels::Rgba)]);
+        assert_eq!(runs(Some(1), 2, None), [run(0, Channels::GrayAlpha)]);
+        // Past one, untagged samples are bands.
+        assert_eq!(
+            runs(Some(1), 3, None),
+            [
+                run(0, Channels::Gray),
+                run(1, Channels::Gray),
+                run(2, Channels::Gray)
+            ]
+        );
+    }
+
+    #[test]
+    fn everything_else_is_left_whole() {
+        // Palette, YCbCr, CMYK, no interpretation at all, and RGB short of
+        // its three samples.
+        for photometric in [Some(3), Some(6), Some(5), None] {
+            assert_eq!(runs(photometric, 3, None), [None], "{photometric:?}");
+        }
+        assert_eq!(runs(Some(2), 2, None), [None]);
+    }
 
     fn rgb(ycbcr: &YCbCr, pixel: [u8; 3]) -> [u8; 3] {
         let mut pixel = pixel;

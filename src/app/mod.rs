@@ -1807,7 +1807,9 @@ impl App {
             (Sequence::Pages { count, .. }, _) => Some(ui::Transport {
                 index: current.page,
                 count,
-                kind: ui::transport::Kind::Pages,
+                kind: ui::transport::Kind::Pages {
+                    name: current.page_name.clone(),
+                },
             }),
             _ => None,
         }
@@ -1838,7 +1840,7 @@ impl App {
                     },
                 })
             }
-            Sequence::Pages { count, default } => {
+            Sequence::Pages { count, default, .. } => {
                 let index = match left {
                     Some(Left::Page(page)) => page,
                     _ => default,
@@ -1846,7 +1848,7 @@ impl App {
                 Some(ui::Transport {
                     index: index.min(count.saturating_sub(1)),
                     count,
-                    kind: ui::transport::Kind::Pages,
+                    kind: ui::transport::Kind::Pages { name: None },
                 })
             }
         }
@@ -2763,6 +2765,7 @@ impl App {
             gpu,
             sequence,
             page,
+            page_name,
             rendering,
             camera_jpeg,
             format,
@@ -2951,6 +2954,7 @@ impl App {
             exif,
             sequence,
             page,
+            page_name,
             turn,
             rendering,
             camera_jpeg,

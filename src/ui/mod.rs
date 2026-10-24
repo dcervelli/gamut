@@ -251,6 +251,8 @@ pub struct Current {
     pub sequence: Sequence,
     /// Which page `image` is, where the file has pages; zero otherwise.
     pub page: usize,
+    /// What the file calls that page, where it names its pages.
+    pub page_name: Option<String>,
     /// How far the picture has been turned on screen. `image` stays as the
     /// file holds it; everything read off `Current` other than `image`
     /// itself is in the turned picture's coordinates — see [`Turn`].
@@ -286,6 +288,7 @@ impl Current {
             exif: Exif::default(),
             sequence: Sequence::Still,
             page: 0,
+            page_name: None,
             turn: Turn::NONE,
             rendering: Rendering::Developed,
             camera_jpeg: CameraJpeg::Unavailable,

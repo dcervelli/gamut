@@ -559,7 +559,7 @@ fn pages_get_the_steps_alone_and_a_still_gets_no_bar() {
     harness.state_mut().input.transport = Some(Transport {
         index: 1,
         count: 3,
-        kind: Kind::Pages,
+        kind: Kind::Pages { name: None },
     });
     harness.run();
     assert!(harness.query_by_label("Play").is_none());
@@ -572,6 +572,25 @@ fn pages_get_the_steps_alone_and_a_still_gets_no_bar() {
     let harness = open(WINDOW, 1, panels());
     assert!(harness.query_by_label("Play").is_none());
     assert!(harness.query_by_label("Next frame").is_none());
+}
+
+/// A page the file names is counted and then named, in the one readout.
+#[test]
+fn a_named_page_says_its_name_after_the_count() {
+    let mut harness = build(WINDOW, 1, panels());
+    harness.state_mut().input.transport = Some(Transport {
+        index: 5,
+        count: 9,
+        kind: Kind::Pages {
+            name: Some("native forest".to_string()),
+        },
+    });
+    harness.run();
+    assert!(
+        harness
+            .query_by_label("6 / 9 \u{b7} native forest")
+            .is_some()
+    );
 }
 
 /// A toggle whose panel the window cannot take is drawn dead and refuses

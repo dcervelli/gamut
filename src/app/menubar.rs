@@ -789,11 +789,23 @@ impl App {
             {
                 "Pause"
             }
+            Does::Control(Control::StepForward) if pages && self.bands() => "Next Band",
+            Does::Control(Control::StepBack) if pages && self.bands() => "Previous Band",
             Does::Control(Control::StepForward) if pages => "Next Page",
             Does::Control(Control::StepBack) if pages => "Previous Page",
             _ => return None,
         };
         Some(title.to_string())
+    }
+
+    /// Whether the pages of the file on screen are the bands of one raster.
+    fn bands(&self) -> bool {
+        self.current.as_ref().is_some_and(|current| {
+            matches!(
+                current.sequence,
+                crate::image::sequence::Sequence::Pages { bands: true, .. }
+            )
+        })
     }
 }
 
