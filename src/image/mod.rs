@@ -14,6 +14,7 @@ pub mod attitude;
 pub mod auxiliary;
 pub mod color;
 pub mod decode;
+pub mod density;
 pub mod depth;
 pub mod directory;
 pub mod display;

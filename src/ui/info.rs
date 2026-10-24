@@ -22,11 +22,13 @@ use egui::{
 };
 
 use crate::clock;
+use crate::measurement;
 
 use crate::image::AlphaMode;
 use crate::image::attitude::{Attitude, Shown, Source};
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{Reading, Rendering};
+use crate::image::density::Density;
 use crate::image::depth::{Accuracy, Quantity};
 use crate::image::exif::{self, Group, ShownRegion};
 use crate::image::gain_map::{GainMap, Lift};
@@ -1871,6 +1873,13 @@ fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
 fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
     let face = current.picture_face();
     let image = &face.image;
+    // The file's density is of the pixels as stored, and the resolution of
+    // them stood up.
+    let stood = current.exif.orientation.is_some_and(orient::quarter_turn);
+    let density = current
+        .exif
+        .density
+        .map(|density| if stood { density.swapped() } else { density });
     let mut facts = vec![
         // The decoder that claimed the file, by what its bytes say: the
         // first thing to know about why the rest reads as it does.
@@ -1906,6 +1915,15 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         (
             "Compression",
             current.exif.compression.clone().unwrap_or_default(),
+        ),
+        // How many pixels the file says go to an inch, and the size that
+        // makes the picture on paper, in the same axes as the resolution.
+        ("Density", density.map(Density::words).unwrap_or_default()),
+        (
+            "Print size",
+            density
+                .map(|density| density.print_size([image.width, image.height], measurement::unit()))
+                .unwrap_or_default(),
         ),
         (
             "Samples",

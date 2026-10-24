@@ -14,6 +14,7 @@ mod gestures;
 mod image;
 mod listing;
 mod loader;
+mod measurement;
 mod media;
 #[cfg(target_os = "macos")]
 mod menubar;
