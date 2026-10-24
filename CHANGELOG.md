@@ -8,6 +8,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The info panel's Image section gives the density the file says it has —
+  *600 dpi* — and the size the picture prints at at that density, naming
+  the sheet where it is one: *420 × 297 mm · A3*. A size no sheet is is
+  written in millimeters, or in inches where the system's region measures
+  in them.
 - `-r` or `--recursive` opens every image under a directory named, in its
   subfolders however deep, and keeps each of those folders watched as a
   directory named is. Hidden folders, folders reached through a link and,
