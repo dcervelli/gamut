@@ -1,7 +1,7 @@
 #!/bin/sh
-# Watermark: a copy of the picture on screen with a line of text laid over
-# one corner or the middle, mixed into the pixels under it rather than
-# painted over them, written beside it and then shown. macOS.
+# Watermark: the picture on screen with a line of text laid over one corner
+# or the middle, mixed into the pixels under it rather than painted over
+# them — as a new file beside it, or in its place, as the dialog says. macOS.
 #
 # In ~/.config/gamut/config.toml, the key above the first [command] table
 # and the table below the rest:
@@ -10,6 +10,7 @@
 #
 #   [command.watermark]
 #   label = "Watermark"
+#   output = "choose"
 #   run = "/path/to/watermark-macos.sh"
 #   input = [
 #     { name = "text", label = "Text", kind = "string", default = "© 2026" },
@@ -31,6 +32,7 @@ set -eu
 
 : "${GAMUT_FILE:?run this from gamut}"
 : "${GAMUT_RESULT:?run this from gamut}"
+: "${GAMUT_OUTPUT:?give the command output = \"choose\"}"
 : "${GAMUT_INPUT_TEXT:?give the command a text input}"
 
 say_error() {
@@ -81,21 +83,18 @@ margin=$((points / 2))
 outline=$((points / 16 + 1))
 [ "$gravity" = Center ] && margin=0
 
-# The copy is written in the file's own format where ImageMagick writes it,
-# and as a PNG where it does not: a raw, a HEIC from the iPhone.
-ext=$(printf '%s' "${GAMUT_EXT:-}" | tr '[:upper:]' '[:lower:]')
+# What is written is in the format its name says, which ImageMagick goes
+# by: the file's own when it is replaced, and whatever the dialog was given
+# for a new file. A raw or a HEIC is not one it writes here.
+base=$(basename "$GAMUT_OUTPUT")
+case "$base" in
+    *.*) ext=$(printf '%s' "${base##*.}" | tr '[:upper:]' '[:lower:]') ;;
+    *) ext="" ;;
+esac
 case "$ext" in
     jpg | jpeg | png | tif | tiff | webp | bmp) ;;
-    *) ext=png ;;
+    *) say_error "ImageMagick can't write .$ext files here: make a new file, named .jpg or .png" ;;
 esac
-
-# Never over a file already there: watermarked, then watermarked-2, and so on.
-out="$GAMUT_DIR/$GAMUT_STEM-watermarked.$ext"
-n=2
-while [ -e "$out" ]; do
-    out="$GAMUT_DIR/$GAMUT_STEM-watermarked-$n.$ext"
-    n=$((n + 1))
-done
 
 # The font is named by its file, since ImageMagick knows the Mac's own fonts
 # by no name of its own: Arial Bold, which every macOS carries, and
@@ -121,8 +120,5 @@ printf '%s' "$GAMUT_INPUT_TEXT" > "$text_file"
        -fill "rgba(255,255,255,0.8)" -stroke none \
        -annotate "+$margin+$margin" "@$text_file" \) \
     -compose Overlay -composite \
-    -rotate "-$turn" "$out" ||
-    say_error "ImageMagick could not write $(basename "$out")"
-
-echo "open = $out" >> "$GAMUT_RESULT"
-echo "message = Watermarked into $(basename "$out")" >> "$GAMUT_RESULT"
+    -rotate "-$turn" "$GAMUT_OUTPUT" ||
+    say_error "ImageMagick could not write the picture"
