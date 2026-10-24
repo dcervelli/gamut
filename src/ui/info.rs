@@ -1948,10 +1948,11 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
                 .map(|exposure| format!("×{exposure}"))
                 .unwrap_or_default(),
         ),
-        // What else the file holds, for the two kinds that hold more than
-        // one picture; nothing for the usual kind.
+        // What else the file holds, for an animation; nothing for the
+        // usual kind, and for pages the two rows after.
         ("Holds", holds(current)),
     ]);
+    facts.extend(pages(current));
     facts
 }
 
@@ -2154,11 +2155,10 @@ fn applied(weight: f32, map: &GainMap) -> String {
     }
 }
 
-/// The frames or pages a file holds, in a phrase: how many, and for an
-/// animation how it loops. Empty for a still.
+/// The frames an animation holds, in a phrase: how many, and how it loops.
+/// Empty for anything else.
 fn holds(current: &Current) -> String {
     match current.sequence {
-        Sequence::Still => String::new(),
         Sequence::Animation { count, loops } => {
             let loops = match loops {
                 Loops::Forever => "looping for ever".to_string(),
@@ -2167,10 +2167,27 @@ fn holds(current: &Current) -> String {
             };
             format!("{count} frames, {loops}")
         }
-        Sequence::Pages { count, .. } => {
-            format!("{count} pages, of which this is page {}", current.page + 1)
-        }
+        Sequence::Still | Sequence::Pages { .. } => String::new(),
     }
+}
+
+/// How many pages a file holds, and which is on screen with what the file
+/// calls it: in bands, for a file whose pages are the bands of one raster.
+/// Nothing for a file of one picture or an animation.
+fn pages(current: &Current) -> Vec<(&'static str, String)> {
+    let Sequence::Pages { count, bands, .. } = current.sequence else {
+        return Vec::new();
+    };
+    let (total, this) = match bands {
+        true => ("Bands", "Current band"),
+        false => ("Pages", "Current page"),
+    };
+    let index = current.page + 1;
+    let shown = match &current.page_name {
+        Some(name) => format!("{index} \u{b7} {name}"),
+        None => index.to_string(),
+    };
+    vec![(total, count.to_string()), (this, shown)]
 }
 
 /// A file's size in the unit that reads best, and the exact count after it:

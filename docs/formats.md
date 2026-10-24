@@ -328,6 +328,31 @@ picture before it, not a picture, and at one bit a pixel not one the crate
 would decode either. `tiff-mask.tif` is the fixture, a mask between two
 pages. The mask is not applied as alpha.
 
+A directory of gray may hold more samples a pixel than the one its
+photometric interpretation names, which is how GDAL writes a raster of
+several bands: a classifier's probabilities, a satellite's bands stacked.
+The crate calls that layout `Multiband` and nothing can show it as one
+picture, so `tiff_rs::runs` splits each directory into pages — the gray and
+its alpha, where `ExtraSamples` says the sample after it is one, and then a
+page of gray for every band left. A page is a `Page`, a directory and the
+`Run` of each pixel's samples it keeps, so `sequence` counts runs rather than
+directories and `decode_page` reads the run's samples out of every chunk.
+Each band is a decode of the whole directory, since an interleaved chunk is
+compressed with every band in it: 90 ms a band for a 9921×7016 raster of nine.
+That is quick enough that the other bands are not kept between steps. A band
+of several is read as a measurement whether or not it is placed on the
+ground, and its page is named by GDAL's `DESCRIPTION` item for the sample in
+the metadata tag, 42112, where there is one, or by `PageName` for a page that
+is a directory's whole picture. `tiff-bands.tif` and `tiff-bands-planar.tif`
+are the fixtures, three described bands stored interleaved and a plane to a
+band.
+
+RGB with samples beside it that are not alpha — a satellite's near infrared,
+as `tiff-rgbn.tif` has — is read as its picture alone, one page. The crate
+reads an interleaved chunk of RGB to its color samples only, and an extra
+band reachable just where the file happens to be stored a plane to a band
+would make the pages depend on how the file was written.
+
 The pixels are read a chunk at a time — a strip or a tile, each compressed
 on its own — with the rows of chunks divided between rayon's threads, rather
 than through the crate's `read_image`, which decodes them one after another:
@@ -337,10 +362,13 @@ decoder of its own over the same file. That needs a reader per thread on one
 descriptor, which is what `decode::Positioned` is: it keeps its position in
 itself and reads with `pread`, so the duplicate descriptor `ReadSeek::share`
 hands over — whose offset is shared with the original — is never seeked.
-The file-backed case is the only one that divides; bytes held in memory, and
-the rare planar layout that keeps each channel's chunks apart, go through
-`read_image` on the loader's thread. `tiff-strips.tif` and
-`tiff-tiled.tif` are the fixtures that read on more than one band.
+The file-backed case is the only one that divides; bytes held in memory go
+through the same reading on the loader's thread. A planar file, which keeps
+each sample's chunks apart as a plane of their own, reads the planes of its
+run chunk by chunk too, `tiff_rs::Layout` saying which; a palette or YCbCr
+stored that way is rare enough to go through `read_image`. `tiff-strips.tif`
+and `tiff-tiled.tif` are the fixtures that read on more than one band, and
+`tiff-rgb-planar.tif` the planar one.
 
 A JPEG-compressed TIFF — what GDAL writes for a scanned map or an aerial
 photograph with `COMPRESS=JPEG` — stores its pixels as YCbCr with the chroma

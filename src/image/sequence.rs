@@ -45,8 +45,15 @@ pub enum Sequence {
     /// fewer, which the player allows for.
     Animation { count: usize, loops: Loops },
     /// Several images with no clock between them: the entries of an ICO, the
-    /// directories of a TIFF. `default` is the one `decode` shows.
-    Pages { count: usize, default: usize },
+    /// directories of a TIFF, the bands of one. `default` is the one
+    /// `decode` shows, and `bands` says every one of them is a band of the
+    /// same raster rather than a picture of its own, which is what the
+    /// window calls them.
+    Pages {
+        count: usize,
+        default: usize,
+        bands: bool,
+    },
 }
 
 /// One frame of an animation as the decoder hands it over: whole, at the

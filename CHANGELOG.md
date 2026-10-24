@@ -22,6 +22,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   region to, either Free, the image's Original shape, a preset or a typed
   ratio, with a button that swaps width and height; and boxes for its
   position and size in the image's pixels.
+- A TIFF holding several bands of gray, as a GIS writes a stack of a
+  satellite's bands or a classifier's probabilities, opens with each band
+  as a page, named in the bar where the file describes it. It was refused.
 
 ### Changed
 
@@ -55,6 +58,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A file read while it was half written is no longer recorded in the
   thumbnail cache as one that cannot be read when it was finished within the
   same second.
+- TIFFs of gray with transparency, of RGB stored a plane to a channel, and
+  of RGB with a band beside it that is not transparency now open; they were
+  refused.
 
 ## 0.12.2 - 2026-10-22
 
