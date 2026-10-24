@@ -157,6 +157,9 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         side: None,
         chooser: None,
         tags: None,
+        output: None,
+        commands: Vec::new(),
+        command: None,
         rename: None,
         export: None,
         empty: false,
@@ -2725,12 +2728,12 @@ fn the_help_popup_lays_the_keys_out() {
             rows: vec![
                 help::Row {
                     key: "1, 0".to_string(),
-                    does: "Actual size (100%)",
+                    does: "Actual size (100%)".into(),
                     when: None,
                 },
                 help::Row {
                     key: "Ctrl+Shift+Arrows".to_string(),
-                    does: "Shrink a region that way a pixel",
+                    does: "Shrink a region that way a pixel".into(),
                     when: Some(help::Condition {
                         words: "a region selected",
                         met: false,
@@ -2742,7 +2745,7 @@ fn the_help_popup_lays_the_keys_out() {
             title: "Files",
             rows: vec![help::Row {
                 key: "], Page Down".to_string(),
-                does: "Next file",
+                does: "Next file".into(),
                 when: Some(help::Condition {
                     words: "more than one file",
                     met: true,
@@ -2843,12 +2846,12 @@ fn the_help_popup_says_a_line_is_unbound() {
             rows: vec![
                 help::Row {
                     key: String::new(),
-                    does: "Undo the last rename, deletion or removal",
+                    does: "Undo the last rename, deletion or removal".into(),
                     when: None,
                 },
                 help::Row {
                     key: "Ctrl+E".to_string(),
-                    does: "Export the picture as shown to a new JPG or PNG",
+                    does: "Export the picture as shown to a new JPG or PNG".into(),
                     when: None,
                 },
             ],
@@ -2874,7 +2877,7 @@ fn the_help_popup_stacks_its_rows_in_a_narrow_window() {
         title: "Files",
         rows: vec![help::Row {
             key: "], Page Down".to_string(),
-            does: "Next file",
+            does: "Next file".into(),
             when: Some(help::Condition {
                 words: "more than one file",
                 met: true,
@@ -3576,5 +3579,208 @@ fn the_region_panel_hands_over_what_is_typed_when_it_is_let_go() {
     assert_eq!(
         asked(&harness),
         [Command::Press(Control::Aspect(Aspect::Ratio(16.0, 9.0)))]
+    );
+}
+
+/// The configuration file's commands are at the foot of the file menu,
+/// one trailing off where it asks first, a dead one drawn dead, and a
+/// press on a live one asking for that command.
+#[test]
+fn the_file_menu_lists_the_commands_after_a_rule() {
+    use super::commands::{Item, Needs, Slot};
+    let mut harness = open(WINDOW, 1, panels());
+    let item = |label: &str, index, asks, enabled| Item {
+        label: label.to_string(),
+        asks,
+        slot: Slot {
+            index,
+            needs: Needs::File,
+        },
+        enabled,
+    };
+    harness.state_mut().input.commands = vec![
+        item("Redact", 0, true, true),
+        item("Wallpaper", 1, false, true),
+        item("Upload", 2, false, false),
+    ];
+    harness.run();
+    assert_eq!(click(&mut harness, "File"), []);
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::Button, "Redact\u{2026}")
+            .is_some()
+    );
+    assert!(
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, "Upload")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert_eq!(
+        click(&mut harness, "Wallpaper"),
+        [Command::Press(Control::RunCommand(Slot {
+            index: 1,
+            needs: Needs::File
+        }))]
+    );
+}
+
+/// The command dialog takes the keyboard into its first box, hands back
+/// what each input is changed to, runs on `Enter` only while every input
+/// will do, and says what is wrong with a number.
+#[test]
+fn the_command_dialog_hands_back_each_value() {
+    use super::commands::{self, Kind, Refusal, Row, Value};
+    let mut harness = open(WINDOW, 1, panels());
+    let dialog = |size: &str, refused: Option<Refusal>, opened: bool| {
+        let row = |label: &str, kind: Kind, value: Value, refused| Row {
+            label: label.to_string(),
+            kind,
+            value,
+            refused,
+        };
+        Some(commands::Input {
+            title: "Redact region".to_string(),
+            rows: vec![
+                row(
+                    "Size",
+                    Kind::read("number 1 10").unwrap(),
+                    Value::Number(size.to_string()),
+                    refused,
+                ),
+                row(
+                    "Mode",
+                    Kind::read("radio blur black").unwrap(),
+                    Value::Radio(0),
+                    None,
+                ),
+                row(
+                    "Note",
+                    Kind::read("checkbox").unwrap(),
+                    Value::Checkbox(false),
+                    None,
+                ),
+                row(
+                    "Strength",
+                    Kind::read("slider 0 100 50").unwrap(),
+                    Value::Slider(50.0),
+                    None,
+                ),
+            ],
+            allowed: refused.is_none(),
+            busy: false,
+            opened,
+        })
+    };
+    harness.state_mut().input.command = dialog("3", None, true);
+    harness.run();
+    harness.state_mut().input.command = dialog("3", None, false);
+    harness.run();
+    assert!(harness.ctx.egui_wants_keyboard_input());
+    assert!(
+        harness.query_by_label("Redact region").is_some(),
+        "the title"
+    );
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::Text("7".to_string()));
+    harness.step();
+    assert_eq!(
+        asked(&harness),
+        [Command::DialogInput(0, Value::Number("7".to_string()))]
+    );
+    harness.state_mut().commands.clear();
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::RadioButton, "black")
+        .click();
+    harness.run();
+    assert_eq!(asked(&harness), [Command::DialogInput(1, Value::Radio(1))]);
+    harness.state_mut().commands.clear();
+    harness.get_by_role(egui::accesskit::Role::CheckBox).click();
+    harness.run();
+    assert_eq!(
+        asked(&harness),
+        [Command::DialogInput(2, Value::Checkbox(true))]
+    );
+    assert!(
+        harness
+            .query_by_role(egui::accesskit::Role::Slider)
+            .is_some()
+    );
+
+    harness.state_mut().commands.clear();
+    harness.key_press(egui::Key::Enter);
+    harness.step();
+    assert_eq!(asked(&harness), [Command::Press(Control::CommandOk)]);
+
+    let refused = Refusal::Outside {
+        low: 1.0,
+        high: 10.0,
+    };
+    harness.state_mut().input.command = dialog("11", Some(refused), false);
+    harness.run();
+    assert!(harness.get_by_label("OK").accesskit_node().is_disabled());
+    harness.state_mut().commands.clear();
+    harness.key_press(egui::Key::Enter);
+    harness.step();
+    assert_eq!(asked(&harness), []);
+    harness.state_mut().commands.clear();
+    harness.key_press(egui::Key::Escape);
+    harness.step();
+    assert_eq!(asked(&harness), [Command::Press(Control::CommandCancel)]);
+}
+
+/// The Output tab is on the panel only where there are commands: it shows
+/// the last run's head line and its lines, a click on a line copying it.
+#[test]
+fn the_output_tab_shows_the_last_run_and_copies_a_line() {
+    use super::output::{self, Ended, Line, Run};
+    use super::tags;
+
+    let mut shown = panels();
+    shown.side = Some(super::side::Side::Info);
+    let mut harness = build(WINDOW, 1, shown);
+    harness.run();
+    assert!(harness.query_by_label("Output").is_none(), "no commands");
+
+    shown.info_tab = tags::Tab::Output;
+    let mut harness = build(WINDOW, 1, shown);
+    let run = Run {
+        label: "OCR".to_string(),
+        took: std::time::Duration::from_millis(340),
+        ended: Ended::Exited(0),
+        lines: vec![
+            Line {
+                text: "Total = 5".to_string(),
+                error: false,
+            },
+            Line {
+                text: "a warning".to_string(),
+                error: true,
+            },
+        ],
+        logged: true,
+    };
+    harness.state_mut().input.output = Some(output::Input {
+        file: "photo.png".to_string(),
+        state: output::State::Shown(std::sync::Arc::new(run)),
+    });
+    harness.run();
+    assert!(harness.query_by_label("Output").is_some(), "the tab");
+    assert_eq!(
+        click(&mut harness, "Copy output line 1"),
+        [Command::Press(Control::OutputRow(0))]
+    );
+    assert_eq!(
+        click(&mut harness, "Copy output"),
+        [Command::Press(Control::OutputCopy)]
+    );
+    assert_eq!(
+        click(&mut harness, "Open log in editor"),
+        [Command::Press(Control::OutputEdit)]
+    );
+    assert!(
+        harness.query_by_label("Output").is_some(),
+        "the tab's name is not covered"
     );
 }

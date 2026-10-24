@@ -197,6 +197,7 @@ fn options() -> Options {
             exiftool: "exiftool".to_string(),
             keys: keymap::Keymap::table(),
             gestures: Gestures::table(),
+            commands: Vec::new(),
         },
         upscale: Upscale::default(),
         size: None,
@@ -218,6 +219,7 @@ fn threads() -> Threads {
         arranged: Arc::new(|_| {}),
         measured: Arc::new(|_| {}),
         tags: Arc::new(|_| {}),
+        ran: Arc::new(|_| {}),
         walker: walker::Walker::detached(crate::settings::MAX_FILES),
     }
 }
@@ -5358,4 +5360,416 @@ fn the_horizon_grid_takes_a_heading_alone() {
     assert!(app.panels.horizon_grid);
     assert_eq!(app.perform(Action::CycleHorizonStep), Effect::Nothing);
     assert_eq!(app.panels.horizon_step, 10.0);
+}
+
+/// The commands `text`'s `command.` lines define, which must all read.
+fn commands_of(text: &str) -> Vec<crate::commands::Command> {
+    let lines: Vec<(usize, &str, &str)> = crate::settings::lines(text)
+        .filter_map(|(number, line)| {
+            let (name, value) = line?;
+            Some((number, name.strip_prefix("command.")?, value))
+        })
+        .collect();
+    let (commands, problems) = crate::commands::parse(&lines);
+    assert_eq!(problems, Vec::new());
+    commands
+}
+
+/// Gives `app` the commands `text` defines, and what each run's answer
+/// arrives on: a test has no event loop for it to reach.
+fn with_commands(
+    app: &mut App,
+    text: &str,
+) -> std::sync::mpsc::Receiver<crate::commands::Finished> {
+    let (sent, received) = std::sync::mpsc::channel();
+    let sent = std::sync::Mutex::new(sent);
+    app.commands.replace(commands_of(text));
+    app.commands.deliver_to(Arc::new(move |finished| {
+        let _ = sent.lock().unwrap().send(finished);
+    }));
+    received
+}
+
+/// Waits for the run in flight to end, and has the application take its
+/// answer in.
+fn finish(app: &mut App, received: &std::sync::mpsc::Receiver<crate::commands::Finished>) {
+    let finished = received
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the run ends");
+    let _ = app.command_finished(finished);
+}
+
+/// The variable `name` of the environment a command run now would get.
+fn variable(app: &App, name: &str) -> Option<String> {
+    app.command_environment()
+        .into_iter()
+        .find(|(each, _)| each == name)
+        .map(|(_, value)| value)
+}
+
+/// A command runs in the shell beside the file: what its result file asks
+/// is done — the image it made shown, its message said — and what it
+/// printed is kept for the Output tab, verbatim, and opens it.
+#[test]
+fn a_command_runs_in_the_shell_and_its_result_file_is_followed() {
+    let (mut app, dir) = app_over("command-run", &[("a.png", 4, 3)]);
+    app.headless = Some(WINDOW);
+    write_png(&dir, "b.png", 6, 2);
+    let received = with_commands(
+        &mut app,
+        "command.make.label = Make\n\
+         command.make.run = printf 'open = b.png\\nmessage = Made it\\n' >> \"$GAMUT_RESULT\"; echo 'Total = 5'\n",
+    );
+    let slot = ui::commands::Slot {
+        index: 0,
+        needs: ui::commands::Needs::File,
+    };
+    assert!(!app.refuses(ui::Control::RunCommand(slot)));
+    let _ = app.perform(input::Action::Command(0));
+    assert!(app.commands.running());
+    assert!(app.refuses(ui::Control::RunCommand(slot)), "one at a time");
+    finish(&mut app, &received);
+    assert!(!app.commands.running());
+    assert_eq!(said(&app), "Made it");
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.files.shown_path(), Some(dir.join("b.png").as_path()));
+    let run = app
+        .commands
+        .run_on(Some(&dir.join("a.png")))
+        .expect("the run is kept for the file it ran on");
+    let printed: Vec<&str> = run.lines.iter().map(|line| line.text.as_str()).collect();
+    assert_eq!(printed, ["Total = 5"]);
+    assert_eq!(app.panels.info_tab, ui::tags::Tab::Output);
+    assert_eq!(app.panels.side, Some(ui::side::Side::Info));
+}
+
+/// What a command prints is shown and never obeyed, whatever it says: an
+/// `open` line read from a file's metadata opens nothing.
+#[test]
+fn a_line_of_output_is_never_a_directive() {
+    let (mut app, dir) = app_over("command-printed", &[("a.png", 4, 3)]);
+    write_png(&dir, "b.png", 6, 2);
+    let received = with_commands(
+        &mut app,
+        "command.echo.run = echo 'open = b.png'; echo 'message = gotcha'\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    assert_eq!(said(&app), "echo done.");
+    assert!(app.files.pending().is_none(), "nothing was asked for");
+    assert_eq!(app.files.len(), 1);
+}
+
+/// A command that fails says why in the words its error stream starts
+/// with, or in its own where it wrote an `error` line.
+#[test]
+fn a_failed_command_says_its_first_error_line() {
+    let (mut app, _dir) = app_over("command-failed", &[("a.png", 4, 3)]);
+    let received = with_commands(
+        &mut app,
+        "command.fail.label = Fail\n\
+         command.fail.run = echo; echo '  no such tool  ' >&2; exit 2\n\
+         command.own.label = Own\n\
+         command.own.run = echo 'error = The map is down' >> \"$GAMUT_RESULT\"; exit 1\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    assert_eq!(said(&app), "Fail failed: no such tool");
+    let run = app.commands.run_on(app.shown_path().as_deref()).unwrap();
+    assert_eq!(run.ended, ui::output::Ended::Exited(2));
+    assert!(run.lines.iter().any(|line| line.error));
+    let _ = app.perform(input::Action::Command(1));
+    finish(&mut app, &received);
+    assert_eq!(said(&app), "The map is down");
+}
+
+/// A command that needs something the window does not have is dead, and
+/// says why; given it, it runs. One that needs nothing runs with nothing
+/// open.
+#[test]
+fn a_command_is_dead_without_what_it_needs() {
+    use ui::commands::{Needs, Slot};
+    let (mut app, _dir) = app_over("command-needs", &[("a.png", 8, 6)]);
+    let _ = with_commands(
+        &mut app,
+        "command.r.run = true\n\
+         command.r.needs = region\n\
+         command.l.run = true\n\
+         command.l.needs = location\n\
+         command.g.run = true\n\
+         command.g.needs = georeference\n",
+    );
+    let dead = |app: &App, index, needs| {
+        ui::tooltip::disabled(
+            ui::Tip::Control(ui::Control::RunCommand(Slot { index, needs })),
+            app.conditions(),
+        )
+        .map(|refused| refused.said)
+    };
+    assert_eq!(dead(&app, 0, Needs::Region), Some(ui::tooltip::NO_REGION));
+    assert_eq!(app.perform(input::Action::Command(0)), Effect::Nothing);
+    assert!(!app.commands.running());
+    assert_eq!(
+        dead(&app, 1, Needs::Location),
+        Some(ui::tooltip::NO_LOCATION)
+    );
+    assert_eq!(
+        dead(&app, 2, Needs::Georeference),
+        Some(ui::tooltip::NO_GEOREFERENCE)
+    );
+    app.marking.selection = Selection::Shown(Region {
+        x: 1,
+        y: 1,
+        width: 2,
+        height: 2,
+    });
+    assert_eq!(dead(&app, 0, Needs::Region), None);
+
+    let mut empty = opened_on_nothing();
+    let received = with_commands(
+        &mut empty,
+        "command.n.run = true\ncommand.n.needs = none\ncommand.f.run = true\n",
+    );
+    assert_eq!(
+        dead(&empty, 1, Needs::File),
+        Some(ui::tooltip::NOTHING_OPEN)
+    );
+    assert_eq!(dead(&empty, 0, Needs::Nothing), None);
+    let _ = empty.perform(input::Action::Command(0));
+    finish(&mut empty, &received);
+    assert_eq!(said(&empty), "n done.");
+    assert_eq!(variable(&empty, "GAMUT_FILE"), None);
+    assert_eq!(variable(&empty, "GAMUT_COUNT").as_deref(), Some("0"));
+}
+
+/// The environment says where things are in the file's own grid: the
+/// user's turn undone, and the orientation tag the decoder applied undone
+/// too, with both said beside it.
+#[test]
+fn the_environment_is_the_file_in_its_own_pixels() {
+    let (mut app, dir) = app_over("command-environment", &[("a.png", 8, 6)]);
+    let _ = app.perform(input::Action::TurnRight);
+    // As though the file's tag had turned it a quarter on its way in.
+    app.current.as_mut().unwrap().exif.orientation =
+        Some(crate::image::orient::Orientation::Rotate90);
+    // Two columns by three rows at the top left of the picture as shown.
+    app.marking.selection = Selection::Shown(Region {
+        x: 0,
+        y: 0,
+        width: 2,
+        height: 3,
+    });
+    let file = dir.join("a.png");
+    assert_eq!(
+        variable(&app, "GAMUT_FILE"),
+        Some(file.display().to_string())
+    );
+    assert_eq!(variable(&app, "GAMUT_DIR"), Some(dir.display().to_string()));
+    assert_eq!(variable(&app, "GAMUT_NAME").as_deref(), Some("a.png"));
+    assert_eq!(variable(&app, "GAMUT_STEM").as_deref(), Some("a"));
+    assert_eq!(variable(&app, "GAMUT_EXT").as_deref(), Some("png"));
+    assert_eq!(variable(&app, "GAMUT_INDEX").as_deref(), Some("1"));
+    assert_eq!(variable(&app, "GAMUT_COUNT").as_deref(), Some("1"));
+    // Decoded 8 by 6, from a file a quarter turn from that.
+    assert_eq!(variable(&app, "GAMUT_WIDTH").as_deref(), Some("6"));
+    assert_eq!(variable(&app, "GAMUT_HEIGHT").as_deref(), Some("8"));
+    assert_eq!(variable(&app, "GAMUT_ORIENTATION").as_deref(), Some("6"));
+    assert_eq!(variable(&app, "GAMUT_TURN").as_deref(), Some("90"));
+    // A quarter turn twice over is a half: the top left as shown is the
+    // bottom right of the file.
+    let region =
+        ["X", "Y", "WIDTH", "HEIGHT"].map(|name| variable(&app, &format!("GAMUT_REGION_{name}")));
+    assert_eq!(
+        region,
+        ["4", "5", "2", "3"].map(|value| Some(value.to_string()))
+    );
+    for absent in [
+        "GAMUT_LAT",
+        "GAMUT_POINTER_X",
+        "GAMUT_GEO_CRS",
+        "GAMUT_FRAME",
+    ] {
+        assert_eq!(variable(&app, absent), None, "{absent}");
+    }
+    // The pointer, where it is on the picture.
+    app.headless = Some(WINDOW);
+    app.pointer.cursor = Some([WINDOW[0] / 2.0, WINDOW[1] / 2.0]);
+    app.pointer.over_image = true;
+    assert!(app.pointer_pixel().is_some());
+    let x: u32 = variable(&app, "GAMUT_POINTER_X").unwrap().parse().unwrap();
+    let y: u32 = variable(&app, "GAMUT_POINTER_Y").unwrap().parse().unwrap();
+    assert!(x < 6 && y < 8, "{x}, {y}");
+}
+
+/// A command with inputs asks first: its dialog opens at the defaults, a
+/// number that will not do keeps OK dead, and OK runs it with the values
+/// in its environment and remembers them for next time. Reading the
+/// configuration again takes the dialog down.
+#[test]
+fn a_command_with_inputs_asks_first_and_remembers_its_answers() {
+    use ui::commands::Value;
+    let (mut app, _dir) = app_over("command-dialog", &[("a.png", 4, 3)]);
+    let received = with_commands(
+        &mut app,
+        "command.ask.run = echo \"$GAMUT_INPUT_SIZE $GAMUT_INPUT_MODE $GAMUT_INPUT_ON $GAMUT_INPUT_GAIN $GAMUT_INPUT_NOTE\"\n\
+         command.ask.input.size = number 1 10 3\n\
+         command.ask.input.mode = radio fast slow = slow\n\
+         command.ask.input.on = checkbox\n\
+         command.ask.input.gain = slider 0 1 0.5 0.1\n\
+         command.ask.input.note = string hello there\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    assert!(!app.commands.running(), "it asks first");
+    let input = app.command_input().expect("the dialog is up");
+    assert!(input.opened && input.allowed);
+    let values: Vec<Value> = input.rows.iter().map(|row| row.value.clone()).collect();
+    assert_eq!(
+        values,
+        [
+            Value::Number("3".into()),
+            Value::Radio(1),
+            Value::Checkbox(false),
+            Value::Slider(0.5),
+            Value::Text("hello there".into()),
+        ]
+    );
+    assert!(!app.command_input().unwrap().opened);
+    let _ = app.act(ui::Command::DialogInput(0, Value::Number("eleven".into())));
+    let input = app.command_input().unwrap();
+    assert!(!input.allowed);
+    assert_eq!(
+        input.rows[0].refused,
+        Some(ui::commands::Refusal::NotANumber)
+    );
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    assert!(!app.commands.running(), "OK is dead");
+    let _ = app.act(ui::Command::DialogInput(0, Value::Number("7".into())));
+    let _ = app.act(ui::Command::DialogInput(1, Value::Radio(0)));
+    let _ = app.act(ui::Command::DialogInput(2, Value::Checkbox(true)));
+    // A value of another kind than its input's is not taken.
+    let _ = app.act(ui::Command::DialogInput(2, Value::Radio(0)));
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    assert!(app.command_input().is_none());
+    assert!(app.commands.running());
+    finish(&mut app, &received);
+    let run = app.commands.run_on(app.shown_path().as_deref()).unwrap();
+    assert_eq!(run.lines[0].text, "7 fast true 0.5 hello there");
+    let _ = app.perform(input::Action::Command(0));
+    let values: Vec<Value> = app
+        .command_input()
+        .unwrap()
+        .rows
+        .iter()
+        .map(|row| row.value.clone())
+        .collect();
+    assert_eq!(values[0], Value::Number("7".into()));
+    assert_eq!(values[2], Value::Checkbox(true));
+    // The keys go to the dialog, not the window, while it is up.
+    let effect = app.handle_key(
+        &winit::keyboard::Key::Character("q".into()),
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyQ),
+        winit::event::ElementState::Pressed,
+    );
+    assert_eq!(effect, Effect::Nothing);
+    let config = Config {
+        commands: commands_of("command.ask.run = true\n"),
+        ..Config::default()
+    };
+    let _ = app.reconfigure(config, None);
+    assert!(app.command_input().is_none(), "the file changed under it");
+}
+
+/// A command that only asks to be sure opens a dialog with nothing in it
+/// but the question.
+#[test]
+fn a_confirm_command_asks_with_no_rows() {
+    let (mut app, _dir) = app_over("command-confirm", &[("a.png", 4, 3)]);
+    let received = with_commands(
+        &mut app,
+        "command.sure.run = true\ncommand.sure.confirm = true\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    let input = app.command_input().expect("it asks");
+    assert!(input.rows.is_empty() && input.allowed);
+    let _ = app.act(ui::Command::Press(ui::Control::CommandCancel));
+    assert!(app.command_input().is_none() && !app.commands.running());
+    let _ = app.perform(input::Action::Command(0));
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    finish(&mut app, &received);
+    assert_eq!(said(&app), "sure done.");
+}
+
+/// The cross on the running message stops the command, and everything it
+/// started, at once.
+#[test]
+fn a_run_is_stopped_from_its_message() {
+    let (mut app, _dir) = app_over("command-stop", &[("a.png", 4, 3)]);
+    let received = with_commands(
+        &mut app,
+        "command.wait.label = Wait\ncommand.wait.run = sleep 30\n",
+    );
+    let started = Instant::now();
+    let _ = app.perform(input::Action::Command(0));
+    let toast = app
+        .commands
+        .toast(started + Duration::from_secs(1))
+        .expect("said once it has gone on");
+    assert_eq!(toast.message, "Running Wait\u{2026}");
+    // The shell started before it is stopped.
+    std::thread::sleep(Duration::from_millis(200));
+    let _ = app.act(ui::Command::Press(ui::Control::StopCommand));
+    finish(&mut app, &received);
+    assert!(started.elapsed() < Duration::from_secs(20));
+    assert_eq!(said(&app), "Stopped Wait.");
+    assert!(!app.commands.running());
+}
+
+/// The help popup lists the configuration file's commands under a heading
+/// of their own, each with its key, before the mouse; with none there is
+/// no such heading.
+#[test]
+fn the_help_popup_lists_the_commands_after_the_keys() {
+    let mut keys = keymap::Keymap::table();
+    keys.add_extra("command.redact", "Redact region", input::Action::Command(0));
+    keys.bind(
+        "command.redact",
+        vec![keymap::Chord::read("ctrl+shift+r").unwrap()],
+    )
+    .unwrap();
+    let conditions = input::Conditions::default();
+    let sections = input::help_sections(&keys, &Gestures::table(), &conditions);
+    let commands = sections
+        .iter()
+        .find(|section| section.title == input::COMMANDS)
+        .expect("a section of the commands");
+    assert_eq!(commands.rows.len(), 1);
+    assert_eq!(commands.rows[0].does, "Redact region");
+    assert_eq!(commands.rows[0].key, spelled_here("Ctrl+Shift+R"));
+    assert_eq!(
+        sections.last().map(|section| section.title),
+        Some(input::MOUSE)
+    );
+    let plain = input::help_sections(&keymap::Keymap::table(), &Gestures::table(), &conditions);
+    assert!(plain.iter().all(|section| section.title != input::COMMANDS));
+}
+
+/// A command that asks for the picture as shown is handed it as a PNG,
+/// turned as it is on screen, which is taken away once it has run.
+#[test]
+fn the_picture_as_shown_is_handed_to_the_script_and_taken_away() {
+    let (mut app, dir) = app_over("command-shown", &[("a.png", 8, 6)]);
+    let _ = app.perform(input::Action::TurnRight);
+    let received = with_commands(
+        &mut app,
+        "command.copy.run = cp \"$GAMUT_SHOWN\" copied.png; echo \"$GAMUT_SHOWN\"\n\
+         command.copy.shown = true\n",
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    let copied = dir.join("copied.png");
+    assert_eq!(decode::probe(&copied).unwrap(), Some((6, 8)));
+    let run = app.commands.run_on(app.shown_path().as_deref()).unwrap();
+    let shown = PathBuf::from(&run.lines[0].text);
+    assert!(shown.ends_with("shown.png"), "{shown:?}");
+    assert!(!shown.exists(), "{shown:?} is taken away");
 }

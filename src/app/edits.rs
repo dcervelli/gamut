@@ -200,7 +200,7 @@ impl App {
         // One thing at a time: a menu still open under a dialog would be a
         // second thing on screen asking for a press, and so would the other
         // dialog.
-        if self.exporting.is_some() {
+        if self.exporting.is_some() || self.commands.asking.is_some() {
             return;
         }
         self.close_menus();

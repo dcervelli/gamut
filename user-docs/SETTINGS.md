@@ -166,6 +166,245 @@ cannot be changed: a drag begun while a region is asked for draws it, one
 from a handle pulls the handle, one with `zoom.fit`'s key held draws a box
 to zoom to, and a click on a handle makes it the current one.
 
+### Commands
+
+A command is a line of the shell that `gamut` runs for you, with the file on
+screen and what you have marked on it handed over in its environment. Each
+one is a few lines of the file, all starting `command.` and its name:
+
+```
+command.redact.label = Redact region
+command.redact.run = ~/bin/redact.sh
+command.redact.needs = region
+command.redact.input.style = radio black blur = black
+command.redact.input.style.label = Style
+keys.command.redact = ctrl+shift+r
+```
+
+Only `run` is required. A command appears at the foot of the file menu,
+under the button before the file's name, and on a Mac in **File ▸
+Commands**. The help popup lists it with its key. Bind a key to it with
+`keys.command.<name>`, or a click with `gesture.image.<button>.click =
+command.<name>`; a command has no key until you give it one. The name is
+lower-case letters, digits, `_` and `-`.
+
+| Line | What it does |
+| --- | --- |
+| `run` | The line the shell runs, as `sh -c` would. It runs in the folder of the file on screen, or your home folder with nothing open. A script's `$0` is `gamut` |
+| `label` | What the menu, the help popup and the window's messages call it. The name, if left out |
+| `needs` | What it cannot run without: `file` (the default), `region`, `pointer`, `location` (a photo that says where it was taken), `georeference` (a map placed on the ground), or `none`, which runs from the empty window too. Without it, the item is dead and its tooltip says why |
+| `confirm` | `true` asks before running, even with nothing to ask |
+| `shown` | `true` writes the picture as you see it, turned, exposed and toned, to a PNG for the command to read, in `GAMUT_SHOWN` |
+| `input.<name>` | Something to ask before it runs. The window puts up a dialog with every input in the order the file first names them, and the answer reaches the command as `GAMUT_INPUT_<NAME>`, in capitals. The name is lower-case letters, digits and `_` |
+| `input.<name>.label` | What the dialog calls that input. Its name, if left out |
+
+An input is one of these, each with a default where the line gives none:
+
+| Input | Written | Reaches the command as |
+| --- | --- | --- |
+| A line of text | `string`, then the default text | What was typed |
+| A number | `number`, then a least and a most, then a default. All optional; the dialog refuses a number outside them | The number: `4.5` |
+| A checkbox | `checkbox true` or `checkbox false` | `true` or `false` |
+| A choice of words | `radio`, the words, then `=` and the default: `radio png jpg = jpg`. The first word, if no default | The word chosen |
+| A slider | `slider`, a least, a most, a default and a step: `slider 0 1 0.5 0.05`. The default is the least, and the step 1 between whole numbers or a hundredth of the range otherwise | The number |
+
+The dialog opens with what you last chose for that command in this
+session. `Enter` runs it, `Esc` closes it.
+
+A `run` line is read as every line of the file is: a `#` after a space
+starts a comment there too, so a command that needs one belongs in a script
+of its own, named by `run`.
+
+#### What a command is told
+
+Each of these is set only where there is something to say: no `GAMUT_LAT` on
+a photo that does not say where it was taken, no `GAMUT_REGION_X` with no
+region. Positions and sizes are in the file's own pixels, as the file holds
+them, which is what another program reading the file counts in. A photo
+whose EXIF orientation turns it, and a picture you have turned with `[` or
+`]`, are counted as the file lies, not as you see them.
+
+| Variable | What it holds |
+| --- | --- |
+| `GAMUT_FILE` | The file on screen, a full path |
+| `GAMUT_DIR`, `GAMUT_NAME`, `GAMUT_STEM`, `GAMUT_EXT` | Its folder, its name, its name without the extension, and the extension without the dot |
+| `GAMUT_INDEX`, `GAMUT_COUNT` | Which file of the list it is, counting from 1, and how many there are. `GAMUT_COUNT` is set with nothing open too |
+| `GAMUT_FORMAT` | What read it, as the information panel's *Read by* line says |
+| `GAMUT_WIDTH`, `GAMUT_HEIGHT` | Its size in the file's pixels |
+| `GAMUT_ORIENTATION` | Its EXIF orientation, 1 to 8; 1 where it has none |
+| `GAMUT_TURN` | How far you have turned it on screen: `0`, `90`, `180` or `270` degrees clockwise |
+| `GAMUT_FRAME`, `GAMUT_FRAMES` | For an animation, the frame on screen counting from 1, and how many |
+| `GAMUT_PAGE`, `GAMUT_PAGES` | For a file of pages, the same |
+| `GAMUT_LAT`, `GAMUT_LNG` | Where the photo was taken, in degrees, negative south and west |
+| `GAMUT_TAKEN` | When, with the camera's offset from UTC where the photo gives one: `2024-03-09T14:05:07-07:00` |
+| `GAMUT_CAMERA` | The camera, as the information panel names it |
+| `GAMUT_FOCAL_35MM` | The 35 mm-equivalent focal length |
+| `GAMUT_FOV_H`, `GAMUT_FOV_V`, `GAMUT_FOV_D` | The field of view across, down and corner to corner, in degrees, worked out from that |
+| `GAMUT_HEADING`, `GAMUT_HEADING_REF` | Which way the camera faced, in degrees, and whether from `true` or `magnetic` north |
+| `GAMUT_POINTER_X`, `GAMUT_POINTER_Y` | The pixel under the pointer. A command chosen from the menu never has one, the pointer being on the menu: give it a key |
+| `GAMUT_REGION_X`, `GAMUT_REGION_Y`, `GAMUT_REGION_WIDTH`, `GAMUT_REGION_HEIGHT` | The region, in the file's pixels |
+| `GAMUT_SHOWN` | With `shown = true`: the picture as you see it, a PNG, taken away once the command is over |
+| `GAMUT_SHOWN_WIDTH`, `GAMUT_SHOWN_HEIGHT` | Its size |
+| `GAMUT_SHOWN_REGION_X`, `_Y`, `_WIDTH`, `_HEIGHT` | The region in it, as you see it |
+| `GAMUT_RESULT` | The file to write what the window should do afterward, below |
+| `GAMUT_VERSION` | Which version of `gamut` ran it |
+| `GAMUT_INPUT_<NAME>` | What each input was given |
+
+A map placed on the ground — a GeoTIFF, say — adds where its corners and the
+rest are, in the map's own coordinates, and in latitude and longitude where
+`gamut` can work them out:
+
+| Variable | What it holds |
+| --- | --- |
+| `GAMUT_GEO_CRS` | Its coordinate system, `EPSG:` and the code, where it names one |
+| `GAMUT_GEO_UNIT` | The unit its coordinates are in |
+| `GAMUT_GEO_TRANSFORM` | Six numbers placing its pixels, in the order GDAL writes a geotransform: the left edge, a pixel's width, the row's skew, the top edge, the column's skew, a pixel's height |
+| `GAMUT_GEO_UL_X`, `_Y`, `_LAT`, `_LNG` | Its upper left corner; `UR`, `LR` and `LL` the others |
+| `GAMUT_GEO_CENTER_X`, `_Y`, `_LAT`, `_LNG` | Its middle |
+| `GAMUT_GEO_POINTER_X`, `_Y`, `_LAT`, `_LNG` | The middle of the pixel under the pointer |
+| `GAMUT_GEO_REGION_UL_X`, `_Y`, `_LAT`, `_LNG` | The region's upper left corner; `REGION_LR` its lower right |
+
+#### What a command tells the window
+
+To have the window show an image the command made, or say something,
+write lines to the file `GAMUT_RESULT` names, written as this file's lines
+are:
+
+| Line | What the window does |
+| --- | --- |
+| `open = <path>` | Shows that image, joining it to the list beside the file on screen. A relative path is read from the command's folder. With several, the last |
+| `message = <words>` | Says the words at the foot of the window |
+| `error = <words>` | Says them as something that went wrong |
+
+What a command prints is never read for these: a script printing what it
+found in a file, such as its tags or the text in it, cannot make the window
+do anything. What it prints goes to the information panel's **Output** tab,
+which comes up when there is any, a line to a row; its errors in the warning
+color. Click a line to copy it, or **Copy All** for every line. **Open log**
+opens what it printed in your editor, as **Edit configuration file** does.
+The last 64 runs' output is kept in `~/.cache/gamut/runs`, or
+`~/Library/Caches/gamut/runs` on a Mac. Only the first megabyte of each
+stream is kept.
+
+A command that exits with an error is said in the window with the first
+line of its error output, or with its own words where it wrote an `error`
+line; an `open` it asked for is not done then. One that finishes without a
+word says it is done. A file written beside the picture, or the picture
+itself written again, appears without any `open` line, since the folder and
+the file on screen are watched.
+
+One command runs at a time; while one does, the others are dead. A command
+that takes a moment is said at the foot of the window with a cross, which
+stops it and everything it started. It has nothing to read from and no
+terminal, so a command that waits for typing ends at once, and `sudo`
+cannot ask for a password. Closing the window leaves a command running; it
+ends with an error the next time it prints, so a long job should write to a
+file.
+
+The values reach the command through its environment, never spliced into
+the line, so a camera name or a file name cannot run anything by itself.
+What your command does with them is up to it: put each variable in double
+quotes, and never `eval` one.
+
+On a Mac started from the Dock or Finder, the shell does not read your
+startup files, so a program installed by Homebrew is found only because
+`gamut` adds `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin` and
+`~/.local/bin` to the end of the path. Elsewhere, name it by its full path.
+
+#### Examples
+
+These use programs you install yourself: ImageMagick's `magick`,
+`tesseract`, `exiftool`, `curl` and `jq`.
+
+Black out the region, in a new file beside the photo, and show it:
+
+```
+command.redact.label = Redact region
+command.redact.needs = region
+command.redact.run = out="$GAMUT_DIR/$GAMUT_STEM-redacted.$GAMUT_EXT"; magick "$GAMUT_FILE" -fill black -draw "rectangle $GAMUT_REGION_X,$GAMUT_REGION_Y $((GAMUT_REGION_X + GAMUT_REGION_WIDTH - 1)),$((GAMUT_REGION_Y + GAMUT_REGION_HEIGHT - 1))" "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+```
+
+The coordinates are the file's own, so this blacks out the right place
+whichever way the photo was held, and the new file keeps its orientation.
+
+Blur it instead, as hard as the slider says:
+
+```
+command.blur.label = Blur region
+command.blur.needs = region
+command.blur.input.radius = slider 1 50 12
+command.blur.input.radius.label = Radius
+command.blur.run = out="$GAMUT_DIR/$GAMUT_STEM-blurred.$GAMUT_EXT"; magick "$GAMUT_FILE" -region "${GAMUT_REGION_WIDTH}x${GAMUT_REGION_HEIGHT}+${GAMUT_REGION_X}+${GAMUT_REGION_Y}" -blur "0x$GAMUT_INPUT_RADIUS" "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+```
+
+Sign the picture in its lower right corner. `-auto-orient` first, since the
+corner is the one you see:
+
+```
+command.sign.label = Watermark
+command.sign.input.text = string © Your Name
+command.sign.input.text.label = Text
+command.sign.run = out="$GAMUT_DIR/$GAMUT_STEM-signed.jpg"; magick "$GAMUT_FILE" -auto-orient -gravity southeast -pointsize 48 -fill "rgba(255,255,255,0.6)" -annotate +32+32 "$GAMUT_INPUT_TEXT" "$out" && echo "open = $out" >> "$GAMUT_RESULT"
+```
+
+Save exactly what is on screen, exposure and false color included:
+
+```
+command.snapshot.label = Save as shown
+command.snapshot.shown = true
+command.snapshot.run = cp "$GAMUT_SHOWN" "$GAMUT_DIR/$GAMUT_STEM-shown.png" && echo "message = Saved $GAMUT_STEM-shown.png" >> "$GAMUT_RESULT"
+```
+
+Open where a photo was taken in OpenStreetMap (`open` in place of
+`xdg-open` on a Mac):
+
+```
+command.osm.label = Open in OpenStreetMap
+command.osm.needs = location
+command.osm.run = xdg-open "https://www.openstreetmap.org/?mlat=$GAMUT_LAT&mlon=$GAMUT_LNG#map=17/$GAMUT_LAT/$GAMUT_LNG"
+```
+
+Say what place that is, by asking OpenStreetMap's search. This sends the
+location over the network:
+
+```
+command.where.label = What place is this?
+command.where.needs = location
+command.where.run = curl -sf -A gamut "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$GAMUT_LAT&lon=$GAMUT_LNG" | jq -r '"message = " + .display_name' >> "$GAMUT_RESULT"
+```
+
+Read the text in the region into the Output tab:
+
+```
+command.ocr.label = Read text
+command.ocr.needs = region
+command.ocr.run = magick "$GAMUT_FILE" -crop "${GAMUT_REGION_WIDTH}x${GAMUT_REGION_HEIGHT}+${GAMUT_REGION_X}+${GAMUT_REGION_Y}" png:- | tesseract - -
+```
+
+List every GPS tag in the Output tab:
+
+```
+command.gps.label = GPS tags
+command.gps.run = exiftool -a -G1 -gps:all "$GAMUT_FILE"
+```
+
+Copy the photo into a folder for the day, never over one already there:
+
+```
+command.pick.label = Copy to today's picks
+command.pick.run = d="$HOME/Pictures/picks/$(date +%F)"; mkdir -p "$d" && cp -n "$GAMUT_FILE" "$d/" && echo "message = Copied to $d" >> "$GAMUT_RESULT"
+```
+
+Ask first before something that cannot be undone:
+
+```
+command.publish.label = Publish
+command.publish.confirm = true
+command.publish.run = rsync -a "$GAMUT_FILE" example.com:/srv/photos/
+```
+
+A longer command is better as a script of its own, named by `run`.
+
 ### Editing it from the window
 
 `Ctrl+,` (`⌘,` on a Mac, or **Settings** in the menu bar), or **Edit
@@ -187,9 +426,10 @@ or Finder never sees it.
 
 ### While `gamut` is running
 
-Saving the file puts the keys, the gestures, `open_map_link`,
+Saving the file puts the keys, the gestures, the commands, `open_map_link`,
 `open_map_bounds_link` and `exiftool` in it in force at once, and the window says it was reloaded, or names the first line
-it could not use.
+it could not use. A command's dialog that is up closes; a command running
+goes on.
 Everything else in it is how the window opens: the panels stay as you have
 them, and `browse_folder` and `max_files` wait for the next start.
 

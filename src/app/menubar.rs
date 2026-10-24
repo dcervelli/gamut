@@ -22,8 +22,8 @@ use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{Reading, Rendering};
 use crate::image::display::{Colormap, EV_STEP, ToneMap};
 use crate::menubar::{
-    Bar, Chosen, Deliver, Equivalent, Identity, Menu, Modifiers, Node, Role, Shown, Snapshot,
-    Standard,
+    Bar, Chosen, Deliver, Equivalent, Identity, Listed, Menu, Modifiers, Node, Role, Shown,
+    Snapshot, Standard,
 };
 use crate::render::Upscale;
 use crate::ui::filmstrip::{Direction, Sort};
@@ -41,7 +41,14 @@ enum Does {
     Magnification(f32),
     /// The horizon grid's spacing, likewise.
     HorizonStep(f32),
+    /// The submenu of the configuration file's commands, which opens
+    /// while there are any.
+    Commands,
 }
+
+/// Which of the bar's lists each is: the snapshot's lists by these places.
+const OPENERS: usize = 0;
+const COMMANDS: usize = 1;
 
 /// The menu bar as installed, and what each of its tags does.
 pub(super) struct MenuBar {
@@ -87,7 +94,7 @@ fn waits(keys: &Keymap, tags: &[Does]) -> Vec<Option<When>> {
             let action = match does {
                 Does::Action(action) => Some(*action),
                 Does::Control(control) => action_of(Tip::Control(*control)),
-                Does::Magnification(_) | Does::HorizonStep(_) => None,
+                Does::Magnification(_) | Does::HorizonStep(_) | Does::Commands => None,
             };
             action
                 .and_then(|action| keys.row_for(action))
@@ -206,6 +213,12 @@ fn menus(b: &mut Builder) -> Vec<Menu> {
                 Node::List {
                     title: "Open With".to_string(),
                     tag: b.tag(Does::Control(Control::OpenIn)),
+                    list: OPENERS,
+                },
+                Node::List {
+                    title: "Commands".to_string(),
+                    tag: b.tag(Does::Commands),
+                    list: COMMANDS,
                 },
                 Node::Separator,
                 b.preferring("Close Window", Action::Quit, chord_command('w')),
@@ -640,19 +653,42 @@ impl App {
                 title: self.retitled(*does, &conditions),
             })
             .collect();
-        let list = self
+        let openers: Vec<Listed> = self
             .openers
             .iter()
-            .map(|opener| opener.name.clone())
+            .map(|opener| Listed {
+                title: opener.name.clone(),
+                enabled: true,
+            })
             .collect();
-        menubar.bar.publish(Snapshot { shown, list });
+        let commands: Vec<Listed> = self
+            .command_items(&conditions)
+            .into_iter()
+            .map(|item| Listed {
+                title: match item.asks {
+                    true => format!("{}\u{2026}", item.label),
+                    false => item.label,
+                },
+                enabled: item.enabled,
+            })
+            .collect();
+        // In the order of their places, `OPENERS` then `COMMANDS`.
+        let lists = vec![openers, commands];
+        menubar.bar.publish(Snapshot { shown, lists });
     }
 
     /// Does what was chosen in the menu bar with the pointer. A key that
     /// reached an item never arrives here: it went on to the window.
     pub(super) fn chose(&mut self, chosen: Chosen) -> Effect {
         let does = match chosen {
-            Chosen::Listed(index) => Does::Control(Control::Opener(index)),
+            Chosen::Listed(OPENERS, index) => Does::Control(Control::Opener(index)),
+            Chosen::Listed(COMMANDS, index) => {
+                match self.command_items(&self.conditions()).get(index) {
+                    Some(item) => Does::Control(Control::RunCommand(item.slot)),
+                    None => return Effect::Nothing,
+                }
+            }
+            Chosen::Listed(..) => return Effect::Nothing,
             Chosen::Item(tag) => match self.menubar.as_ref().and_then(|bar| bar.tags.get(tag)) {
                 Some(does) => *does,
                 None => return Effect::Nothing,
@@ -669,6 +705,7 @@ impl App {
                 self.panels.horizon_step = step;
                 Effect::Redraw
             }
+            Does::Commands => Effect::Nothing,
         }
     }
 
@@ -693,6 +730,7 @@ impl App {
             Does::Magnification(_) => true,
             // The spacings wait on what the key that steps them does.
             Does::HorizonStep(_) => self.spaces_horizon(),
+            Does::Commands => !self.commands.set.is_empty(),
         }
     }
 
@@ -706,6 +744,7 @@ impl App {
             Does::Action(_) => false,
             Does::Magnification(times) => panels.loupe_magnification == times,
             Does::HorizonStep(step) => panels.horizon_step == step,
+            Does::Commands => false,
             Does::Control(control) => match control {
                 // The toggles that are one flag of the panels, and the two
                 // choosing what the side panel holds, read through the one

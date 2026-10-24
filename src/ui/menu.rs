@@ -548,17 +548,42 @@ pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
             ),
         ]);
         for (control, label) in items {
-            let mut button = Button::new(label);
-            if let Some(key) = pass.namer.shortcut(control) {
-                button = button.shortcut_text(key);
-            }
-            let response = ui.add(button);
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
-            }
+            menu_item(pass, ui, control, label, true);
+        }
+        // The configuration file's commands, after a rule: each item its
+        // label, trailing off where it asks before it runs, with its key.
+        let commands = pass.input.commands.clone();
+        if !commands.is_empty() {
+            ui.separator();
+        }
+        for item in commands {
+            let label = match item.asks {
+                true => format!("{}\u{2026}", item.label),
+                false => item.label,
+            };
+            menu_item(
+                pass,
+                ui,
+                Control::RunCommand(item.slot),
+                label,
+                item.enabled,
+            );
         }
     });
+}
+
+/// One item of the file menu, `label` on it and its key beside it; drawn
+/// dead where `enabled` is not, its tooltip saying why.
+fn menu_item(pass: &mut Pass, ui: &mut Ui, control: Control, label: String, enabled: bool) {
+    let mut button = Button::new(label);
+    if let Some(key) = pass.namer.shortcut(control) {
+        button = button.shortcut_text(key);
+    }
+    let response = ui.add_enabled(enabled, button);
+    let response = pass.tooltip(response, Tip::Control(control));
+    if response.clicked() {
+        pass.press(control);
+    }
 }
 
 /// The menu of other programs: one item for each application the desktop

@@ -79,14 +79,20 @@ pub enum Tab {
     Facts,
     /// Every tag exiftool reads.
     Tags,
+    /// What the last command run on the file printed — see `ui/output.rs`.
+    Output,
 }
 
 impl Tab {
+    /// Every tab, in the order the panel's head lists them.
+    pub const ALL: [Tab; 3] = [Tab::Facts, Tab::Tags, Tab::Output];
+
     /// What the tab says.
     pub fn label(self) -> &'static str {
         match self {
             Tab::Facts => "Curated",
             Tab::Tags => "Raw Data",
+            Tab::Output => "Output",
         }
     }
 }

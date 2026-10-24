@@ -78,7 +78,7 @@ impl App {
     /// where it is one of the two.
     pub(super) fn open_export(&mut self) {
         // One dialog at a time, and no menu under it.
-        if self.renaming.is_some() {
+        if self.renaming.is_some() || self.commands.asking.is_some() {
             return;
         }
         self.close_menus();

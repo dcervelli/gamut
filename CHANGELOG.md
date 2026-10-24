@@ -22,6 +22,19 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   region to, either Free, the image's Original shape, a preset or a typed
   ratio, with a button that swaps width and height; and boxes for its
   position and size in the image's pixels.
+- Commands of your own in the configuration file: a line of the shell run
+  on the file on screen from the foot of the file menu, or from a key bound
+  to `keys.command.<name>`, with the file, the picture's size, where it was
+  taken, the pointer, the region and a map's corners in its environment.
+  A command can ask for text, numbers, checkboxes, choices and sliders in a
+  dialog first, or only ask to be sure; can be handed the picture as shown;
+  and can have the window show an image it made or say something, through
+  the file `GAMUT_RESULT` names. One runs at a time, and the message at the
+  foot of the window stops it. The help popup lists them, and on a Mac they
+  are under File.
+- An *Output* tab in the information panel, while there are commands: what
+  the last command printed on the file, a line to a row, copied by a click
+  or all at once, and opened in your editor.
 
 ### Changed
 

@@ -269,6 +269,22 @@ pub fn stored(orientation: Orientation, x: usize, y: usize, w: usize, h: usize) 
     }
 }
 
+/// Where the pixel `upright` of a picture decoded upright, `size` pixels
+/// across and down, is in the file's own grid, before `orientation` turned
+/// it: [`stored`], given the upright picture's size rather than the
+/// file's.
+pub fn raw(orientation: Orientation, upright: [u32; 2], size: [u32; 2]) -> [u32; 2] {
+    let (width, height) = self::size(size[0], size[1], orientation);
+    let (x, y) = stored(
+        orientation,
+        upright[0] as usize,
+        upright[1] as usize,
+        width as usize,
+        height as usize,
+    );
+    [x as u32, y as u32]
+}
+
 /// Where a point of the stored picture lands in the upright one, both
 /// written as shares of their sides: the inverse of [`stored`], for a point
 /// anywhere in the picture rather than a pixel of it. What turns a region
@@ -389,6 +405,29 @@ mod tests {
                 "{orientation:?}"
             );
             assert_eq!(ours, theirs.into_rgb8().into_raw(), "{orientation:?}");
+        }
+    }
+
+    /// A pixel of the picture decoded upright is found in the file's own
+    /// grid where the bytes put it: under every orientation, each upright
+    /// pixel holds the value of the raw pixel [`raw`] names.
+    #[test]
+    fn every_upright_pixel_is_found_in_the_raw_grid() {
+        let (width, height) = (3u32, 2u32);
+        let data: Vec<u8> = (0..width * height).map(|i| i as u8).collect();
+        for orientation in ALL {
+            let upright = turn(&data, width, height, 1, orientation);
+            let (across, down) = size(width, height, orientation);
+            for y in 0..down {
+                for x in 0..across {
+                    let [rx, ry] = raw(orientation, [x, y], [across, down]);
+                    assert_eq!(
+                        upright[(y * across + x) as usize],
+                        data[(ry * width + rx) as usize],
+                        "{orientation:?} at {x}, {y}"
+                    );
+                }
+            }
         }
     }
 

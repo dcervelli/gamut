@@ -218,6 +218,9 @@ fn every_chrome_button_has_something_to_say() {
         let wordless = matches!(
             widget,
             Control::Opener(_)
+                | Control::RunCommand(_)
+                | Control::CommandOk
+                | Control::CommandCancel
                 | Control::Choose(_)
                 | Control::Facts(ui::info::Copyable::Section(_) | ui::info::Copyable::Fact(_))
                 | Control::TagGroup(_)
@@ -382,7 +385,7 @@ fn the_help_popup_shows_every_line_of_the_table_once() {
             .rows
             .iter()
             .find(|row| row.key == key)
-            .map(|row| row.does)
+            .map(|row| row.does.as_ref())
     };
     assert_eq!(row("Drag"), Some("Pan, the image following the pointer"));
     assert_eq!(row("Back"), Some("Back in image history"));

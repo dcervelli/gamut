@@ -192,8 +192,11 @@ title changes ("Undo Rename", "Copy Region", "Pause", "Next Page") — and the
 menus read the last one. A bare move of the pointer is the exception: all it
 can change for the menus is whether the pointer is on a pixel of the
 picture, and a move that changes that owes a frame, whose redraw publishes.
-The Open With submenu is rebuilt from the
-snapshot's list each time it opens. An item holding a submenu is given an
+The Open With and Commands submenus are each rebuilt from their own list in
+the snapshot each time they open, a listed item's tag holding both which
+list it is in and its place there, and whether it can be chosen read from
+the same list. A listed item carries no key equivalent: a command's key
+still works, since keys never go through the menu. An item holding a submenu is given an
 action of its own, `open:`, which is never sent: AppKit enables an item that
 only opens a submenu whatever the validator says, and one with an action is
 validated like any other.

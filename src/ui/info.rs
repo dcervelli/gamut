@@ -379,6 +379,19 @@ fn copy_button(pass: &mut Pass, ui: &mut egui::Ui, label: Option<&str>, control:
     }
 }
 
+/// The Output tab's copy: the whole of the last run's output, where one
+/// is kept. Its log is opened from the head line under it.
+fn output_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
+    let shown = pass
+        .input
+        .output
+        .as_ref()
+        .is_some_and(|output| matches!(output.state, super::output::State::Shown(_)));
+    if shown {
+        copy_button(pass, ui, Some("Copy All"), Control::OutputCopy);
+    }
+}
+
 /// The Raw Data tab's copy button: a chip like Copy All, which opens the
 /// menu of the forms the tags shown can be copied in.
 fn copy_menu(pass: &mut Pass, ui: &mut egui::Ui) {
@@ -406,11 +419,16 @@ fn copy_menu(pass: &mut Pass, ui: &mut egui::Ui) {
     }
 }
 
-/// The switch between the two tabs, at the head of the panel: each tab's
-/// name, the one on screen washed and in the text's ink, the other dim.
+/// The switch between the tabs, at the head of the panel: each tab's
+/// name, the one on screen washed and in the text's ink, the others dim.
+/// The Output tab only where the configuration file defines a command.
 fn tabs(pass: &mut Pass, ui: &mut egui::Ui) {
     let theme = pass.theme;
-    for tab in [Tab::Facts, Tab::Tags] {
+    let commands = pass.input.output.is_some();
+    for tab in Tab::ALL
+        .into_iter()
+        .filter(|tab| *tab != Tab::Output || commands)
+    {
         let control = Control::InfoTab(tab);
         let live = pass.panels.info_tab == tab;
         let galley = ui.ctx().fonts_mut(|fonts| {
@@ -483,6 +501,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel:
                 match pass.panels.info_tab {
                     Tab::Facts => copy_all(pass, ui),
                     Tab::Tags => copy_menu(pass, ui),
+                    Tab::Output => output_buttons(pass, ui),
                 }
             });
         });
@@ -494,9 +513,12 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel:
         ui.add_space((HEADER_GAP - RULE_WIDTH) / 2.0);
 
         let input = pass.input;
-        match (pass.panels.info_tab, &input.tags) {
-            (Tab::Tags, Some(tags)) => {
+        match (pass.panels.info_tab, &input.tags, &input.output) {
+            (Tab::Tags, Some(tags), _) => {
                 super::tags::show(pass, ui, tags, inside.x);
+            }
+            (Tab::Output, _, Some(output)) => {
+                super::output::show(pass, ui, output, inside.x);
             }
             _ => column(pass, ui, current, &picture),
         }

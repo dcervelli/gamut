@@ -6,6 +6,7 @@
 //! and runs an [`Action`], and [`App::perform`] is the one place an action
 //! happens. The mouse goes through [`crate::gestures`] the same way.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
@@ -16,7 +17,7 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use super::App;
 use super::copying::Done;
 use super::folder::Then;
-use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
+use super::keymap::{self, Bound, Chord, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
 use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
 use crate::image::auxiliary::{Auxiliary, Showing};
@@ -70,6 +71,10 @@ pub(super) fn restore_message(keys: &Keymap) -> Option<String> {
 /// Something a key asks for.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Action {
+    /// Run the configuration file's command at this place in its list —
+    /// see `commands.rs`. The one action no line of the table holds: its
+    /// name, `command.<name>`, is the file's.
+    Command(usize),
     Quit,
     /// Take off whatever is up — the menu that is open, or the message at the
     /// foot of the window — and quit when nothing is. Escape's, so that the
@@ -345,8 +350,7 @@ const CTRL_CMD: Mods = Mods::CONTROL.union(Mods::SUPER);
 /// one line, `2, 3, 4, 5` for four zooms, and the cell of the zoom menu that
 /// goes to one of them is named by the key that reaches it.
 fn key_of(keys: &Keymap, action: Action) -> Option<String> {
-    let (_, name) = keys.bound_for(action)?;
-    Some(keys.spelled(name)).filter(|spelled| !spelled.is_empty())
+    Some(keymap::spell_all(keys.chords_for(action))).filter(|spelled| !spelled.is_empty())
 }
 
 /// `words`, and the key after it in brackets where there is one.
@@ -386,6 +390,9 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         // The pair at the head of the top bar, which go where the keys beside
         // the count go.
         Tip::Control(Control::Previous) => PreviousFile,
+        // A command of the configuration file's, named by its own label and
+        // the key the file bound it to.
+        Tip::Control(Control::RunCommand(slot)) => Command(slot.index),
         Tip::Control(Control::Next) => NextFile,
         // The toggle before them, the pair at the head of the list it
         // puts up, and the key that takes a file off that list.
@@ -478,6 +485,12 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::Seek(_)
             | Control::Zoom
             | Control::Dismiss
+            | Control::StopCommand
+            | Control::CommandOk
+            | Control::CommandCancel
+            | Control::OutputCopy
+            | Control::OutputEdit
+            | Control::OutputRow(_)
             | Control::Facts(_)
             | Control::InfoTab(_)
             | Control::TagsCopyMenu
@@ -568,12 +581,17 @@ fn copy_action(what: Copies) -> Action {
 /// interface has some for it, and otherwise the description of the key that
 /// does the same job — with that key after it either way.
 fn names(keys: &Keymap, tip: Tip) -> Option<String> {
-    let pressed =
-        action_of(tip).and_then(|action| Some((keys.row_for(action)?.help, key_of(keys, action))));
+    let pressed = action_of(tip).and_then(|action| {
+        let help = match keys.row_for(action) {
+            Some(row) => Cow::Borrowed(row.help),
+            None => Cow::Owned(keys.extra_help_for(action)?.to_string()),
+        };
+        Some((help, key_of(keys, action)))
+    });
     match (ui::tooltip::words(tip), pressed) {
         (Some(words), Some((_, key))) => Some(with_key(&words, key)),
         (Some(words), None) => Some(words),
-        (None, Some((help, key))) => Some(with_key(help, key)),
+        (None, Some((help, key))) => Some(with_key(&help, key)),
         (None, None) => None,
     }
 }
@@ -1916,7 +1934,7 @@ pub(super) fn help_sections(
                 .filter(|row| row.section == section)
                 .map(|row| ui::help::Row {
                     key: key_column(keys, gestures, row),
-                    does: row.help,
+                    does: Cow::Borrowed(row.help),
                     when: row.when.map(|when| ui::help::Condition {
                         words: when.describe(),
                         met: conditions.met(when),
@@ -1924,6 +1942,7 @@ pub(super) fn help_sections(
                 })
                 .collect(),
         })
+        .chain(command_section(keys, gestures))
         .chain([ui::help::Section {
             title: MOUSE,
             rows: mouse_rows(keys, gestures)
@@ -1936,6 +1955,40 @@ pub(super) fn help_sections(
                 .collect(),
         }])
         .collect()
+}
+
+/// The heading the configuration file's commands are listed under.
+pub const COMMANDS: &str = "Commands";
+
+/// The configuration file's commands as the help lists them, under their
+/// own heading after the table's: each one's label, and its key and any
+/// click that runs it. Nothing where the file defines none.
+fn command_section(keys: &Keymap, gestures: &Gestures) -> Option<ui::help::Section> {
+    let rows: Vec<ui::help::Row> = keys
+        .extras()
+        .map(|(name, help, chords)| {
+            let mut key = keymap::spell_all(chords);
+            for (spelled, behavior) in gestures.rows() {
+                if let gestures::Behavior::Click(click) = behavior
+                    && click == name
+                {
+                    if !key.is_empty() {
+                        key.push_str(", ");
+                    }
+                    key.push_str(&spelled);
+                }
+            }
+            ui::help::Row {
+                key,
+                does: Cow::Owned(help.to_string()),
+                when: None,
+            }
+        })
+        .collect();
+    (!rows.is_empty()).then_some(ui::help::Section {
+        title: COMMANDS,
+        rows,
+    })
 }
 
 /// The key column of `row` as the help lists it: its chords, and then each
@@ -1964,13 +2017,13 @@ pub const MOUSE: &str = "Mouse";
 
 /// Every gesture that does anything, as it is spelled and what it does: a
 /// click by the words of the key it runs.
-pub fn mouse_rows(keys: &Keymap, gestures: &Gestures) -> Vec<(String, &'static str)> {
+pub fn mouse_rows(keys: &Keymap, gestures: &Gestures) -> Vec<(String, Cow<'static, str>)> {
     gestures
         .rows()
         .filter_map(|(spelled, behavior)| {
             let does = match behavior {
                 gestures::Behavior::Click(name) => keys.help_of(name)?,
-                other => other.describe()?,
+                other => Cow::Borrowed(other.describe()?),
             };
             Some((spelled, does))
         })
@@ -2104,6 +2157,12 @@ impl App {
                 _ => Effect::Nothing,
             };
         }
+        // The command dialog answers its own keys — Enter and Escape, read
+        // by egui — and may hold no field to keep the rest from the table:
+        // a dialog of checkboxes, or one that only asks to be sure.
+        if self.commands.asking.is_some() {
+            return Effect::Nothing;
+        }
         let region_selected = matches!(self.marking.selection, Selection::Shown(_));
         match self
             .keys
@@ -2157,6 +2216,18 @@ impl App {
         let image = self.image_size();
         let viewport = self.viewport();
         match action {
+            // A command of the configuration file's, pressed as its item on
+            // the file menu is, so that the two are refused alike.
+            Command(index) => {
+                let Some(command) = self.commands.set.get(index) else {
+                    return Effect::Nothing;
+                };
+                let slot = ui::commands::Slot {
+                    index,
+                    needs: command.needs,
+                };
+                return self.press(Control::RunCommand(slot));
+            }
             // An open menu takes the key: dismissing a popup is what Escape
             // is for, and quitting out from under one is not what was being
             // asked for.
@@ -2735,6 +2806,8 @@ impl App {
             nothing_open: current.is_none(),
             arriving: self.arriving().is_some(),
             tags_in: self.tags.tags_in(),
+            running: self.commands.running(),
+            georeferenced: georeference.is_some(),
         }
     }
 
@@ -2853,6 +2926,9 @@ impl App {
             ui::Command::Name(name) => self.set_rename_name(name),
             ui::Command::ExportName(name) => self.set_export_name(name),
             ui::Command::ExportQuality(quality) => self.set_export_quality(quality),
+            ui::Command::DialogInput(input, value) => {
+                return self.set_command_input(input, value);
+            }
             ui::Command::ExportSize(dimension, text) => self.set_export_size(dimension, text),
             ui::Command::Cursor(step) => self.chooser.step(step),
             ui::Command::Visible(rows) => {
@@ -3092,7 +3168,7 @@ impl App {
     /// because a URI has no other kind. The path as given stands in if it
     /// cannot be made absolute, which needs the working directory and so
     /// can fail.
-    fn shown_path(&self) -> Option<PathBuf> {
+    pub(super) fn shown_path(&self) -> Option<PathBuf> {
         let path = self.files.shown_path()?;
         Some(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()))
     }
@@ -3334,7 +3410,7 @@ impl App {
     /// Done in line, unlike the picture: there is nothing here to prepare, and
     /// a copy the user follows straight away with `q` should be on the
     /// clipboard before the window goes.
-    fn copy(&mut self, content: &[u8], mime_type: &str, said: &str) {
+    pub(super) fn copy(&mut self, content: &[u8], mime_type: &str, said: &str) {
         self.copying.claim();
         match clipboard::copy(content, mime_type) {
             Ok(()) => self.toast(said, Level::Message),
@@ -3716,6 +3792,16 @@ impl App {
                 self.toasts.dismiss();
                 Effect::Redraw
             }
+            // The configuration file's commands: run, or asked about first;
+            // the run in flight stopped; the dialog let go of either way;
+            // and the Output tab's copies and log.
+            Control::RunCommand(slot) => self.press_command(slot),
+            Control::StopCommand => self.stop_command(),
+            Control::CommandOk => self.confirm_command(),
+            Control::CommandCancel => self.cancel_command(),
+            Control::OutputCopy => self.copy_output(),
+            Control::OutputEdit => self.edit_output(),
+            Control::OutputRow(row) => self.copy_output_line(row),
             // The chooser, toggled. Its open state is egui's, as a menu's is,
             // so opening it is a matter of asking egui — which closes any
             // menu on the way, one popup being open at a time — and closing

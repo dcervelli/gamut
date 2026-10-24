@@ -4,6 +4,7 @@ mod app;
 mod cli;
 mod clipboard;
 mod clock;
+mod commands;
 #[cfg(target_os = "linux")]
 mod dbus;
 mod exiftool;

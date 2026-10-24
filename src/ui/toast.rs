@@ -18,7 +18,9 @@
 //! One kind is not about what just happened but about what is still
 //! happening: a file that is taking its time to open. That one is made by
 //! [`Toast::waiting`] from the read in flight, carries no cross and no
-//! time of its own, and is up exactly as long as the read is.
+//! time of its own, and is up exactly as long as the read is. A command
+//! the configuration file defines, running, is said the same way, made by
+//! [`Toast::stoppable`]; its cross ends the command rather than the message.
 
 use std::time::{Duration, Instant};
 
@@ -97,6 +99,9 @@ pub struct Toast {
     /// When it takes itself off, or `None` for one that is up for as long
     /// as what it is about lasts, and carries no cross.
     until: Option<Instant>,
+    /// What its cross presses where that is not [`Control::Dismiss`]: for
+    /// one about something still going on that can be stopped.
+    stop: Option<Control>,
 }
 
 impl Toast {
@@ -108,13 +113,30 @@ impl Toast {
             level: Level::Message,
             raised,
             until: None,
+            stop: None,
         }
     }
 
-    /// Whether it can be taken off by hand: only a message about what has
-    /// happened can, one about what is happening going when that ends.
+    /// The same, about something going on that `stop` ends: its cross
+    /// presses that rather than taking the message off, which goes when
+    /// what it is about does.
+    pub fn stoppable(message: String, raised: Instant, stop: Control) -> Toast {
+        Toast {
+            stop: Some(stop),
+            ..Toast::waiting(message, raised)
+        }
+    }
+
+    /// Whether it carries a cross: a message about what has happened can
+    /// be taken off by hand, and one about what is happening only where
+    /// that can be stopped.
     fn dismissable(&self) -> bool {
-        self.until.is_some()
+        self.until.is_some() || self.stop.is_some()
+    }
+
+    /// What its cross presses.
+    fn closer(&self) -> Control {
+        self.stop.unwrap_or(Control::Dismiss)
     }
 }
 
@@ -136,6 +158,7 @@ impl Toasts {
             level,
             raised: now,
             until: Some(now + linger),
+            stop: None,
         });
     }
 
@@ -224,17 +247,17 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, toast: &Toast) {
                                 .truncate(),
                         );
                         if toast.dismissable() {
-                            cross(pass, ui);
+                            cross(pass, ui, toast.closer());
                         }
                     });
                 });
         });
 }
 
-/// The cross that takes the message off. Never lit: it takes the message off
-/// rather than switching anything on, so there is no state for it to be
-/// showing.
-fn cross(pass: &mut Pass, ui: &mut egui::Ui) {
+/// The cross that takes the message off, or stops what it is about:
+/// `control`. Never lit: it takes something away rather than switching
+/// anything on, so there is no state for it to be showing.
+fn cross(pass: &mut Pass, ui: &mut egui::Ui, control: Control) {
     let (rect, response) = ui.allocate_exact_size(vec2(CLOSE, CLOSE), Sense::CLICK);
     let (background, ink) = pass.button_ink(false, &response, true);
     ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
@@ -245,11 +268,10 @@ fn cross(pass: &mut Pass, ui: &mut egui::Ui) {
         ink,
         background,
     );
-    response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, Control::Dismiss.label()));
-    let response = pass.tooltip(response, Tip::Control(Control::Dismiss));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control));
     if response.clicked() {
-        pass.press(Control::Dismiss);
+        pass.press(control);
     }
 }
 
@@ -304,6 +326,24 @@ mod tests {
                 .showing()
                 .expect("one is up")
                 .dismissable()
+        );
+    }
+
+    /// A running command's message has no time of its own, and its cross
+    /// stops the command rather than taking the message off.
+    #[test]
+    fn a_stoppable_toast_crosses_to_its_stop() {
+        let toast = Toast::stoppable(
+            "Running Redact\u{2026}".to_string(),
+            Instant::now(),
+            Control::StopCommand,
+        );
+        assert!(toast.dismissable());
+        assert_eq!(toast.until, None);
+        assert_eq!(toast.closer(), Control::StopCommand);
+        assert_eq!(
+            raised("Copied.").showing().expect("one is up").closer(),
+            Control::Dismiss
         );
     }
 

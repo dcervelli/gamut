@@ -7,6 +7,7 @@
 //! defaults: what a configuration file rebinds is the window's help popup's
 //! to say.
 
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -457,10 +458,14 @@ fn heading(section: Section) -> String {
     format!("{title} KEYS")
 }
 
+/// A heading of `--help`'s keys, and each line under it: the key column
+/// and what it does.
+type Listed = (String, Vec<(String, Cow<'static, str>)>);
+
 /// Every line of the key table under its heading, at the default chords,
 /// and then the mouse's gestures under theirs: the key column and what it
 /// does, as `--help` and the manual page both list them.
-fn listed() -> Vec<(String, Vec<(String, &'static str)>)> {
+fn listed() -> Vec<Listed> {
     let keys = Keymap::default();
     let gestures = Gestures::default();
     Section::ALL
@@ -469,7 +474,7 @@ fn listed() -> Vec<(String, Vec<(String, &'static str)>)> {
             let lines = ROWS
                 .iter()
                 .filter(|row| row.section == section)
-                .map(|row| (key_column(&keys, &gestures, row), row.help))
+                .map(|row| (key_column(&keys, &gestures, row), Cow::Borrowed(row.help)))
                 .collect();
             (heading(section), lines)
         })
@@ -522,7 +527,7 @@ pub fn usage() -> String {
     for (heading, lines) in listed() {
         let _ = writeln!(text, "\n{heading}:");
         for (key, help) in lines {
-            let _ = writeln!(text, "{}", key_line(&key, help));
+            let _ = writeln!(text, "{}", key_line(&key, &help));
         }
     }
     text
@@ -594,7 +599,7 @@ pub fn man() -> String {
     for (heading, lines) in listed() {
         let _ = writeln!(text, ".SH {heading}");
         for (key, help) in lines {
-            let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&key), roff(help));
+            let _ = writeln!(text, ".TP\n.B {}\n{}", roff(&key), roff(&help));
         }
     }
 

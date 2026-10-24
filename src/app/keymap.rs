@@ -12,6 +12,7 @@
 //! in the same context held it. A context is where a name is tried first —
 //! [`ORDER`] — before the plain names, which hold always.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -362,6 +363,27 @@ pub struct Keymap {
     entries: Vec<Entry>,
     /// Where each name is in `entries`.
     index: HashMap<&'static str, usize>,
+    /// The names the configuration file made rather than the table: one
+    /// for each of its commands, `command.<name>`, bound to nothing until a
+    /// `keys.` line says otherwise. Plain names, in no context.
+    extras: Vec<Extra>,
+}
+
+/// A name the configuration file made: its words, the action it runs and
+/// the chords it answers to.
+#[derive(Clone, PartialEq, Debug)]
+struct Extra {
+    name: String,
+    help: String,
+    action: Action,
+    chords: Vec<Chord>,
+}
+
+/// Where a name is: on a line of the table, or among the extras.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum At {
+    Table(usize),
+    Extra(usize),
 }
 
 /// The chords in force before the configuration file is read: the table's
@@ -420,7 +442,49 @@ impl Keymap {
             rows,
             entries,
             index,
+            extras: Vec::new(),
         }
+    }
+
+    /// Makes `name` a name, bound to nothing, that runs `action` and is
+    /// described by `help`: a command the configuration file defines. A
+    /// name the table has already is left as it is.
+    pub fn add_extra(&mut self, name: &str, help: &str, action: Action) {
+        if self.index_of(name).is_some() {
+            return;
+        }
+        match self.extras.iter_mut().find(|extra| extra.name == name) {
+            Some(extra) => {
+                extra.help = help.to_string();
+                extra.action = action;
+            }
+            None => self.extras.push(Extra {
+                name: name.to_string(),
+                help: help.to_string(),
+                action,
+                chords: Vec::new(),
+            }),
+        }
+    }
+
+    /// The words of the extra that runs `action`, where one does.
+    pub fn extra_help_for(&self, action: Action) -> Option<&str> {
+        self.extras
+            .iter()
+            .find(|extra| extra.action == action)
+            .map(|extra| extra.help.as_str())
+    }
+
+    /// Every name the configuration file made, with its words and chords,
+    /// in the order it made them.
+    pub fn extras(&self) -> impl Iterator<Item = (&str, &str, &[Chord])> {
+        self.extras.iter().map(|extra| {
+            (
+                extra.name.as_str(),
+                extra.help.as_str(),
+                extra.chords.as_slice(),
+            )
+        })
     }
 
     /// Every line of the table.
@@ -440,61 +504,110 @@ impl Keymap {
         self.index.get(name).copied()
     }
 
-    /// The entry of `name`, where it is a name.
-    fn entry(&self, name: &str) -> Option<&Entry> {
-        self.index_of(name).map(|index| &self.entries[index])
+    /// Where `name` is, among the table's names and the extras.
+    fn at(&self, name: &str) -> Option<At> {
+        self.index_of(name).map(At::Table).or_else(|| {
+            self.extras
+                .iter()
+                .position(|extra| extra.name == name)
+                .map(At::Extra)
+        })
+    }
+
+    /// The chords the name at `at` answers to.
+    fn chords_at(&self, at: At) -> &[Chord] {
+        match at {
+            At::Table(index) => &self.entries[index].chords,
+            At::Extra(index) => &self.extras[index].chords,
+        }
+    }
+
+    /// The action the name at `at` runs.
+    fn action_at(&self, at: At) -> Action {
+        match at {
+            At::Table(index) => self.entries[index].bound.action,
+            At::Extra(index) => self.extras[index].action,
+        }
+    }
+
+    /// The context the name at `at` is in; an extra is in none.
+    fn context_at(&self, at: At) -> Option<Context> {
+        match at {
+            At::Table(index) => self.entries[index].row.context(),
+            At::Extra(_) => None,
+        }
     }
 
     /// Makes `chords` the whole of what `name` answers to, and takes each
     /// of them from whichever other name in the same context held it.
     /// Returns the names it took chords from; an unknown name is refused.
-    pub fn bind(&mut self, name: &str, chords: Vec<Chord>) -> Result<Vec<&'static str>, String> {
-        let index = self
-            .index_of(name)
+    pub fn bind(&mut self, name: &str, chords: Vec<Chord>) -> Result<Vec<String>, String> {
+        let at = self
+            .at(name)
             .ok_or_else(|| format!("unknown key name `{name}`"))?;
-        let context = self.entries[index].row.context();
+        let context = self.context_at(at);
         let mut unique = Vec::new();
         for chord in chords {
             if !unique.contains(&chord) {
                 unique.push(chord);
             }
         }
-        let mut displaced = Vec::new();
-        for (other, entry) in self.entries.iter_mut().enumerate() {
-            if other == index || entry.row.context() != context {
+        let mut displaced: Vec<String> = Vec::new();
+        let mut take = |other: &str, held: &mut Vec<Chord>| {
+            let before = held.len();
+            held.retain(|chord| !unique.contains(chord));
+            if held.len() != before && !displaced.iter().any(|each| each == other) {
+                displaced.push(other.to_string());
+            }
+        };
+        for (index, entry) in self.entries.iter_mut().enumerate() {
+            if at == At::Table(index) || entry.row.context() != context {
                 continue;
             }
-            let before = entry.chords.len();
-            entry.chords.retain(|chord| !unique.contains(chord));
-            if entry.chords.len() != before && !displaced.contains(&entry.bound.name) {
-                displaced.push(entry.bound.name);
+            take(entry.bound.name, &mut entry.chords);
+        }
+        if context.is_none() {
+            for (index, extra) in self.extras.iter_mut().enumerate() {
+                if at == At::Extra(index) {
+                    continue;
+                }
+                take(&extra.name, &mut extra.chords);
             }
         }
-        self.entries[index].chords = unique;
+        match at {
+            At::Table(index) => self.entries[index].chords = unique,
+            At::Extra(index) => self.extras[index].chords = unique,
+        }
         Ok(displaced)
-    }
-
-    /// `name` as the table spells it, where it is a name: the one that
-    /// lives as long as the table does.
-    pub fn name_of(&self, name: &str) -> Option<&'static str> {
-        self.entry(name).map(|entry| entry.bound.name)
     }
 
     /// The action `name` runs, where it is a name.
     pub fn action_named(&self, name: &str) -> Option<Action> {
-        self.entry(name).map(|entry| entry.bound.action)
+        self.at(name).map(|at| self.action_at(at))
     }
 
-    /// What the line `name` is on says it does.
-    pub fn help_of(&self, name: &str) -> Option<&'static str> {
-        self.entry(name).map(|entry| entry.row.help)
+    /// What the line `name` is on says it does, or an extra's own words.
+    pub fn help_of(&self, name: &str) -> Option<Cow<'static, str>> {
+        match self.at(name)? {
+            At::Table(index) => Some(Cow::Borrowed(self.entries[index].row.help)),
+            At::Extra(index) => Some(Cow::Owned(self.extras[index].help.clone())),
+        }
     }
 
-    /// The name in `context` that holds `chord`, as its place in `entries`.
-    fn holder(&self, chord: Chord, context: Option<Context>) -> Option<usize> {
-        self.entries
+    /// The name in `context` that holds `chord`.
+    fn holder(&self, chord: Chord, context: Option<Context>) -> Option<At> {
+        let table = self
+            .entries
             .iter()
             .position(|entry| entry.row.context() == context && entry.chords.contains(&chord))
+            .map(At::Table);
+        table.or_else(|| {
+            context.is_none().then_some(())?;
+            self.extras
+                .iter()
+                .position(|extra| extra.chords.contains(&chord))
+                .map(At::Extra)
+        })
     }
 
     /// What `key`, pressed at `position` and held with `mods`, asks for,
@@ -530,6 +643,10 @@ impl Keymap {
                         self.entries
                             .iter()
                             .any(|entry| entry.chords.contains(&chord))
+                            || self
+                                .extras
+                                .iter()
+                                .any(|extra| extra.chords.contains(&chord))
                     };
                     candidates.push(match character.is_ascii_uppercase() && !held(exact) {
                         true => Chord::new(mods, Char(character.to_ascii_lowercase())),
@@ -550,14 +667,30 @@ impl Keymap {
             contexts
                 .clone()
                 .find_map(|context| self.holder(chord, context))
-                .map(|index| self.entries[index].bound.action)
+                .map(|at| self.action_at(at))
         })
     }
 
     /// The chords `name` answers to.
     pub fn chords_of(&self, name: &str) -> &[Chord] {
-        self.entry(name)
-            .map_or(&[], |entry| entry.chords.as_slice())
+        self.at(name).map_or(&[], |at| self.chords_at(at))
+    }
+
+    /// The chords of the name that runs `action`, the table's or an
+    /// extra's: none where no name does.
+    pub fn chords_for(&self, action: Action) -> &[Chord] {
+        let table = self
+            .entries
+            .iter()
+            .position(|entry| entry.bound.action == action)
+            .map(At::Table);
+        let at = table.or_else(|| {
+            self.extras
+                .iter()
+                .position(|extra| extra.action == action)
+                .map(At::Extra)
+        });
+        at.map_or(&[], |at| self.chords_at(at))
     }
 
     /// The chords `name` answers to, as people read them: empty where it
@@ -870,7 +1003,7 @@ mod tests {
         // The chord leaves the name that held it, in the same context only.
         assert_eq!(
             keymap.bind("zoom.in", vec![chord("-"), chord("left")]),
-            Ok(vec!["zoom.out", "pan.left"])
+            Ok(vec!["zoom.out".to_string(), "pan.left".to_string()])
         );
         assert_eq!(keymap.chords_of("zoom.out"), []);
         assert_eq!(keymap.chords_of("pan.left"), []);
@@ -933,6 +1066,48 @@ mod tests {
 
     /// The template, read back line by line, is the keymap it was written
     /// from: the default, and the Mac's on any platform.
+    /// A name the configuration file makes for a command binds as a name
+    /// of the table does: its chords taken from whoever held them, and
+    /// taken from it in turn; a key reaches its action; and its words are
+    /// its own.
+    #[test]
+    fn a_command_name_is_bound_and_displaces_like_any_other() {
+        let mut keymap = Keymap::table();
+        keymap.add_extra("command.redact", "Redact region", Action::Command(0));
+        assert_eq!(keymap.chords_of("command.redact"), []);
+        assert_eq!(
+            keymap.action_named("command.redact"),
+            Some(Action::Command(0))
+        );
+        let held = keymap.chords_of("zoom.in").to_vec();
+        let taken = held[0];
+        assert_eq!(
+            keymap.bind("command.redact", vec![taken]),
+            Ok(vec!["zoom.in".to_string()])
+        );
+        assert!(!keymap.chords_of("zoom.in").contains(&taken));
+        assert_eq!(keymap.chords_for(Action::Command(0)), [taken]);
+        assert_eq!(
+            keymap.help_of("command.redact").as_deref(),
+            Some("Redact region")
+        );
+        assert_eq!(
+            keymap.extra_help_for(Action::Command(0)),
+            Some("Redact region")
+        );
+        let extras: Vec<&str> = keymap.extras().map(|(name, _, _)| name).collect();
+        assert_eq!(extras, ["command.redact"]);
+        // And back: the table's name takes it from the command.
+        assert_eq!(
+            keymap.bind("zoom.in", held.clone()),
+            Ok(vec!["command.redact".to_string()])
+        );
+        assert_eq!(keymap.chords_of("command.redact"), []);
+        // A name the table has is never made again.
+        keymap.add_extra("zoom.in", "Not zoom", Action::Command(1));
+        assert_eq!(keymap.action_named("zoom.in"), Some(Action::ZoomIn));
+    }
+
     #[test]
     fn the_template_reads_back_as_the_defaults() {
         reads_back(Keymap::default());

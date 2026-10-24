@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::app::input::Action;
 use crate::app::keymap::{Chord, Keymap};
+use crate::commands::{self, Command};
 use crate::gestures::{Behavior, Gestures, Slot};
 use crate::image::geo::Corners;
 use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
@@ -68,6 +70,9 @@ pub struct Config {
     pub exiftool: String,
     pub keys: Keymap,
     pub gestures: Gestures,
+    /// The commands its `command.` lines define, in the order each is first
+    /// named; each also a name of `keys`, `command.<name>`.
+    pub commands: Vec<Command>,
 }
 
 impl Default for Config {
@@ -85,6 +90,7 @@ impl Default for Config {
             exiftool: "exiftool".to_string(),
             keys: Keymap::default(),
             gestures: Gestures::default(),
+            commands: Vec::new(),
         }
     }
 }
@@ -301,6 +307,7 @@ impl Config {
         }
         text.push_str(&config.keys.template());
         text.push_str(&config.gestures.template());
+        text.push_str(commands::TEMPLATE);
         text
     }
 
@@ -334,10 +341,24 @@ impl Config {
     /// one context, which is said.
     fn parse(text: &str) -> (Self, Vec<(usize, String)>) {
         let mut config = Self::default();
-        let mut problems = Vec::new();
+        // The commands first, wherever their lines are, so that a `keys.`
+        // or a gesture's line can name one before the file has defined it.
+        let command_lines: Vec<(usize, &str, &str)> = lines(text)
+            .filter_map(|(number, line)| {
+                let (name, value) = line?;
+                Some((number, name.strip_prefix("command.")?, value))
+            })
+            .collect();
+        let (commands, mut problems) = commands::parse(&command_lines);
+        for (index, command) in commands.iter().enumerate() {
+            config
+                .keys
+                .add_extra(&command.key_name(), &command.label, Action::Command(index));
+        }
+        config.commands = commands;
         // Which line set each key's name, for saying which a later line
         // took a chord from.
-        let mut set_on: Vec<(&'static str, usize)> = Vec::new();
+        let mut set_on: Vec<(String, usize)> = Vec::new();
         for (number, line) in lines(text) {
             let Some((name, value)) = line else {
                 problems.push((number, "expected `name = value`".to_string()));
@@ -353,6 +374,9 @@ impl Config {
                 }
                 continue;
             }
+            if name.starts_with("command.") {
+                continue;
+            }
             match SETTINGS.iter().find(|setting| setting.name == name) {
                 Some(setting) => {
                     if let Err(problem) = (setting.set)(&mut config, value) {
@@ -366,6 +390,7 @@ impl Config {
                 None => problems.push((number, format!("unknown setting `{name}`"))),
             }
         }
+        problems.sort_by_key(|(number, _)| *number);
         (config, problems)
     }
 
@@ -378,7 +403,7 @@ impl Config {
         name: &str,
         value: &str,
         number: usize,
-        set_on: &mut Vec<(&'static str, usize)>,
+        set_on: &mut Vec<(String, usize)>,
         problems: &mut Vec<(usize, String)>,
     ) {
         if RETIRED_KEYS.contains(&name) {
@@ -405,7 +430,7 @@ impl Config {
                     let taken: Vec<&str> = chords
                         .iter()
                         .zip(&tokens)
-                        .filter(|(chord, _)| before.chords_of(other).contains(chord))
+                        .filter(|(chord, _)| before.chords_of(&other).contains(chord))
                         .map(|(_, token)| *token)
                         .collect();
                     problems.push((
@@ -416,10 +441,8 @@ impl Config {
                         ),
                     ));
                 }
-                if let Some(static_name) = self.keys.name_of(name) {
-                    set_on.retain(|(each, _)| *each != static_name);
-                    set_on.push((static_name, number));
-                }
+                set_on.retain(|(each, _)| each != name);
+                set_on.push((name.to_string(), number));
             }
             Err(problem) => problems.push((number, problem)),
         }
@@ -755,14 +778,14 @@ fn state_path() -> Option<PathBuf> {
 }
 
 /// The lines of `text` that say something, numbered from one, each as its
-/// name and value with the space around them taken off and a value's
-/// quotes taken off too, or `None` for a line with no `=` in it. Blank
-/// lines and comments are left out.
+/// name and value with the space around them taken off and the quotes
+/// around a whole value taken off too, or `None` for a line with no `=` in
+/// it. Blank lines and comments are left out.
 ///
 /// A comment starts at a `#` that begins the line or follows a space: a
 /// web address holds `#` inside itself, as the default map link does, and
 /// is not cut short there.
-fn lines(text: &str) -> impl Iterator<Item = (usize, Option<(&str, &str)>)> {
+pub(crate) fn lines(text: &str) -> impl Iterator<Item = (usize, Option<(&str, &str)>)> {
     text.lines().enumerate().filter_map(|(index, line)| {
         let comment = line.char_indices().find(|&(at, c)| {
             c == '#'
@@ -777,9 +800,13 @@ fn lines(text: &str) -> impl Iterator<Item = (usize, Option<(&str, &str)>)> {
         }
         let pair = line.split_once('=').map(|(name, value)| {
             let value = value.trim();
+            // A pair around the whole value, and only that: a command's
+            // line of the shell may begin and end with quotes of its own,
+            // `"$HOME/bin/x" "$GAMUT_FILE"`, which are not a pair.
             let value = value
                 .strip_prefix('"')
                 .and_then(|value| value.strip_suffix('"'))
+                .filter(|inside| !inside.contains('"'))
                 .unwrap_or(value);
             (name.trim(), value)
         });
@@ -890,6 +917,9 @@ mod tests {
         let uncommented: String = template
             .lines()
             .map(|line| line.strip_prefix("# ").unwrap_or(line))
+            // An indented line is an example, not a setting at its default:
+            // the commands' block.
+            .filter(|line| !line.starts_with(char::is_whitespace))
             // A name with no chord by default is written with nothing after
             // its `=`.
             .filter(|line| line.contains(" = ") || line.ends_with(" ="))
@@ -955,6 +985,30 @@ mod tests {
         );
     }
 
+    /// A command's key may be bound before the file defines the command, a
+    /// click may run one, and a name no command has is still refused.
+    #[test]
+    fn a_keys_line_binds_a_command_wherever_it_sits() {
+        let (config, problems) = Config::parse(
+            "keys.command.redact = ctrl+shift+r\n\
+             gesture.image.middle.click = command.redact\n\
+             command.redact.label = Redact\n\
+             command.redact.run = ~/bin/redact.sh\n\
+             keys.command.nope = a\n",
+        );
+        let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
+        assert_eq!(lines, [5], "{problems:?}");
+        assert_eq!(config.commands.len(), 1);
+        assert_eq!(
+            config.keys.action_named("command.redact"),
+            Some(Action::Command(0))
+        );
+        assert_eq!(
+            config.keys.spelled("command.redact"),
+            spelled_here("Ctrl+Shift+R")
+        );
+    }
+
     /// A `gesture.` line puts one behavior in one slot; a word its kind does
     /// not take, a surface there is none of and a click naming no key are
     /// problems.
@@ -1011,6 +1065,7 @@ mod tests {
             exiftool: "/opt/exiftool/exiftool".to_string(),
             keys: defaults.keys.clone(),
             gestures: defaults.gestures.clone(),
+            commands: Vec::new(),
         };
         let text: String = SETTINGS
             .iter()

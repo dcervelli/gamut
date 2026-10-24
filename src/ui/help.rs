@@ -21,6 +21,8 @@
 //!
 //! [`Naming`]: super::control::Naming
 
+use std::borrow::Cow;
+
 use egui::{
     Button, Frame, Label, LayerId, PopupAnchor, PopupCloseBehavior, PopupKind, RectAlign, RichText,
     Sense, layers::ShapeIdx, pos2, vec2,
@@ -55,7 +57,7 @@ pub struct Row {
     /// left the line's names bound to none, which the popup says outright
     /// — see [`UNBOUND`].
     pub key: String,
-    pub does: &'static str,
+    pub does: Cow<'static, str>,
     pub when: Option<Condition>,
 }
 
@@ -320,7 +322,7 @@ fn table(pass: &Pass, ui: &mut egui::Ui, sections: &[Section], width: f32) {
                 theme.text_dim
             };
             let key = (!row.key.is_empty()).then(|| RichText::new(&row.key).monospace().color(ink));
-            let does = RichText::new(row.does).color(ink);
+            let does = RichText::new(row.does.as_ref()).color(ink);
             let when = row.when.map(|when| {
                 RichText::new(when.words).color(if when.met {
                     theme.text_dim

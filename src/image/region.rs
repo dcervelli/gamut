@@ -22,7 +22,7 @@
 //! held stays held there, giving up length on the side it governs rather
 //! than the ratio.
 
-use super::orient::Turn;
+use super::orient::{self, Orientation, Turn};
 
 /// A rectangle of image pixels: `width` columns from `x`, `height` rows from
 /// `y`, both at least one.
@@ -646,6 +646,29 @@ impl Region {
         }
         region
     }
+
+    /// The same pixels, each moved by `map`: a turn or a flip of the whole
+    /// picture carries a rectangle to a rectangle, so its two opposite
+    /// corner pixels say where all of it went.
+    fn mapped(self, map: impl Fn([u32; 2]) -> [u32; 2]) -> Self {
+        let [ax, ay] = map([self.x, self.y]);
+        let [bx, by] = map([self.right() - 1, self.bottom() - 1]);
+        Self::between(ax.min(bx), ay.min(by), ax.max(bx) + 1, ay.max(by) + 1)
+    }
+
+    /// The region of a picture turned by `turn` as it lies in the picture
+    /// before the turn, `stored` pixels across and down: [`Region::turned`]
+    /// the other way.
+    pub fn stored(self, turn: Turn, stored: [u32; 2]) -> Self {
+        self.mapped(|at| turn.stored(at, stored))
+    }
+
+    /// The region of a picture decoded upright, `upright` pixels across and
+    /// down, as it lies in the file's own grid before `orientation` turned
+    /// it: what a tool that reads the file's bytes counts in.
+    pub fn raw(self, orientation: Orientation, upright: [u32; 2]) -> Self {
+        self.mapped(|at| orient::raw(orientation, at, upright))
+    }
 }
 
 /// Where a side of a held region goes along its axis: from a boundary,
@@ -669,6 +692,44 @@ fn sane(ratio: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A region marked on a turned picture is the same pixels before the
+    /// turn: [`Region::stored`] undoes [`Region::turned`] at every turn,
+    /// and the region in the file's own grid covers what it covered.
+    #[test]
+    fn a_region_undone_through_the_turn_and_the_tag_covers_the_same_pixels() {
+        let stored = [8, 6];
+        let region = Region {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 2,
+        };
+        let mut turn = Turn::NONE;
+        for _ in 0..4 {
+            let turned = region.turned(turn, stored);
+            assert_eq!(turned.stored(turn, stored), region, "{turn:?}");
+            turn = turn.clockwise();
+        }
+        // The file's own grid, under a tag that turned it a quarter: the
+        // upright picture's top left is the raw picture's bottom left.
+        let corner = Region {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 1,
+        };
+        assert_eq!(
+            corner.raw(Orientation::Rotate90, [8, 6]),
+            Region {
+                x: 0,
+                y: 6,
+                width: 1,
+                height: 2,
+            }
+        );
+        assert_eq!(corner.raw(Orientation::NoTransforms, [8, 6]), corner);
+    }
 
     const IMAGE: [u32; 2] = [100, 60];
 

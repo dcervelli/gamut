@@ -63,6 +63,10 @@ app/           the event loop's state and winit handlers
   tags.rs        Tags: the info panel's Raw Data tab as the application holds it — exiftool's
                  answer kept per file and signature, the run waited for, the filter and its
                  ranking, the folded groups, and the rows built from them (pure, tested)
+  commands.rs    Commands: the configuration file's commands as the application holds them —
+                 the set, the one run in flight and its stop, the dialog's values and those
+                 remembered, each file's last output — and the environment a run is given,
+                 in the file's own pixels, and what a finished run's result file asks
   copying.rs     Copying: the copies of the picture being prepared on threads of their own,
                  each with the Ticket it reports through and tells whether it was superseded by
   input.rs       Action, ROWS (the key table: each line's names, actions and default chords),
@@ -135,6 +139,11 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  dimensions over a level floor, and level_line(), the line across the picture
   tags.rs        the Tags tab: the filter field, the count, the tree of groups and tags in
                  rows of two heights laid out only where in view, and csv() and text()
+  output.rs      the Output tab: the last command's head line and what it printed, a line
+                 to a row laid out only where in view, each copied by a click
+  commands.rs    a command as a frame draws it: Needs, Slot (what RunCommand carries),
+                 Kind and Value (an input's grammar and what it holds), the menu's Item,
+                 and the dialog, drawn with the rename dialog's pieces
   pixel.rs       the pointer's readout: coordinate, swatch, and the pixel's
                  value in whichever of `PixelFormat`'s three ways is in force
   menu.rs        the popup menus' contents: the zoom menu's choices and cells, the
@@ -197,6 +206,9 @@ thumbnail.rs   the freedesktop thumbnail cache: the GLib-spelled URI a file is k
                by, MD5, the chunks a thumbnail carries, and the temporary-then-rename write
 exiftool.rs    exiftool run as a process for the Tags tab: parse() its -X output into Tags
                and Values, Program — where it is found — and run_on_thread()
+commands.rs    the configuration file's commands: parse() of the command. lines, the
+               result file's directives(), and run() / run_on_thread() — a line of the
+               shell in its own process group, its streams capped, its Stopper
 fuzzy.rs       the chooser's matcher behind a trait with skim's own signature; the
                one file that names the fuzzy-matcher crate
 gestures.rs    the mouse's slots — a surface, a button, the wheel or a pinch, with modifiers —
@@ -404,6 +416,7 @@ still agrees with both, so renaming either is editing the constant —
 | Another kind of image a picture carries, shown in its place — a depth map, a matte | an `Auxiliary` variant in `image/auxiliary.rs`, its arms in `DecodedImage::auxiliary` and `carries`, and the decoder that finds it; `App::follow_showing` for when it is asked for, and a toggle as `Control::Depth` is. Everything that reads `Current` then reads it while it is up, since `Current`'s image, stats and display are of whatever is shown: what must read the picture itself asks `Current::picture`, and what is about the file rather than the image seen — what it was left in, how a file arriving stands to it — is worked out in the picture's terms, through `App::picture_view`. An image *applied* to the picture rather than shown in its place (a gain map, a matte as alpha) is carried on the picture's `DecodedImage` and read by `Seen::raster` and the image layer, and is not a `Showing` |
 | What turning the picture does | `image/orient.rs::Turn`, held in `Current::turn` and kept in `app/kept.rs`; `App::turn_picture` turns it, the region (`Region::turned`) and the pan (`View::turn`). The GPU reads through it in `vs_main` of `shaders/image.wgsl`, the CPU through `Current::sample`; see the convention below |
 | What an export writes, or what its dialog says | `ui/export.rs`: `warnings` from the `Facts` `App::open_export` gathers, `judge` for the name, `default_name`; `Resize` for the size's three boxes, which `Command::ExportSize` edits through `App::set_export_size`, `SIDE_MAX` for the largest side. The write is `App::export_shown` in `app/exporting.rs`, through `encode::displayed`, `resample::resize` and `encode::{png_for_file, jpeg}` on `Copying::spawn_aside`, and `App::exported` adopts the file as a paste is |
+| A command of the configuration file's: its grammar, what it is told, what it can ask back, its dialog | `commands.rs` for the `command.` lines (`parse`, `TEMPLATE`), the result file (`directives`) and the run (`run`, the `Stopper`); `ui/commands.rs` for `Needs`, an input's `Kind` — its `read`, `judge` and `environment` — and the dialog; `app/commands.rs` for `App::command_environment` (a new variable; positions go through `Region::stored` / `Region::raw` and `orient::raw` into the file's own pixels), `App::command_finished` (a new directive), `App::press_command` and the dialog's presses; a command's name in the keymap is `Keymap::add_extra`, made in `Config::parse` before the `keys.` lines are read; what makes one dead is `tooltip::disabled`'s `RunCommand` arm from `Conditions::running` and the `Slot`'s needs; the menu is `menu::file_items`, the Mac's the `COMMANDS` list in `app/menubar.rs`; the Output tab is `ui/output.rs`, shown by `App::reveal_info`; and `user-docs/SETTINGS.md`'s Commands section says each to the user |
 | The info panel's Tags tab: what is asked of exiftool, what a row shows, what is copied | `exiftool.rs` for the arguments, `parse` and where the program is looked for; `app/tags.rs` for what is kept, the filter, the folding and the rows; `ui/tags.rs` for the tab's body and `copied`, and `ui/info.rs::tabs` for the switch; `App::request_tags` for when a run is asked for — `Control::InfoTab`, `Control::Info`, and `App::apply` while `App::tags_showing` — and `App::tags_read` for the answer; the setting is `Config::exiftool` |
 | The chooser: what a row shows, how the query is matched, what a key does in it | `ui/chooser.rs` for the popup and the keys it reads before its field can; `app/chooser.rs` for the ranking, the relative paths, the title beside them (`candidate`) and the cursor; a new fact for a row is a field of `thumbnailer::Facts`, read in `thumbnailer::header`, which the file list orders by too, through `Chooser::facts_of`; `App::press` for `Control::Chooser` and `Control::Choose`, and `App::act` for `Command::{Query, Cursor, Visible}`. Its open state is egui's, under `ui::chooser::id()`. A different matcher is a new `impl Matcher` in `fuzzy.rs` |
 | A thumbnail: what is made, where it goes, what the row gets | `thumbnailer.rs` for the stages and the queue, `thumbnail.rs` for the cache's naming, chunks and write; `image/resample.rs` for the filter; `App::hold_thumb` for the texture and `app/chooser.rs::Thumbs` for how many the screen keeps |

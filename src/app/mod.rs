@@ -3,6 +3,7 @@
 mod animation;
 pub mod arranging;
 mod chooser;
+mod commands;
 mod copying;
 mod edits;
 mod exporting;
@@ -122,6 +123,9 @@ pub enum UserEvent {
     /// `menubar`.
     #[cfg(target_os = "macos")]
     Menu(crate::menubar::Chosen),
+    /// A command the configuration file defines has finished — see
+    /// [`commands`]. Boxed: it carries what it printed.
+    Ran(Box<crate::commands::Finished>),
 }
 
 /// How a thread hands the loop a `T`: a function it calls from wherever it
@@ -178,6 +182,12 @@ impl From<walker::Event> for UserEvent {
     }
 }
 
+impl From<crate::commands::Finished> for UserEvent {
+    fn from(finished: crate::commands::Finished) -> Self {
+        UserEvent::Ran(Box::new(finished))
+    }
+}
+
 impl From<exiftool::Delivered> for UserEvent {
     fn from(delivered: exiftool::Delivered) -> Self {
         UserEvent::Tags(Box::new(delivered))
@@ -222,6 +232,8 @@ pub struct Threads {
     pub measured: measuring::Deliver,
     /// How exiftool's reading of a file comes back.
     pub tags: exiftool::Deliver,
+    /// How a command's run comes back.
+    pub ran: crate::commands::Deliver,
     /// The thread walking and watching the directories named.
     pub walker: walker::Walker,
 }
@@ -257,6 +269,7 @@ impl Threads {
             arranged: deliver(proxy()),
             measured: deliver(proxy()),
             tags: deliver(proxy()),
+            ran: deliver(proxy()),
             walker: walker::Walker::new(max_files, waking(proxy())),
         }
     }
@@ -583,6 +596,9 @@ pub struct App {
     renaming: Option<Renaming>,
     /// The export dialog, while it is up.
     exporting: Option<Exporting>,
+    /// The configuration file's commands, the run in flight and its
+    /// dialog — see [`commands`].
+    commands: commands::Commands,
     /// How the desktop's file dialog hands its answer back: what `main`
     /// made from the loop's proxy.
     picker: portal::Deliver,
@@ -662,6 +678,7 @@ impl App {
             arranged: arranged_delivered,
             measured,
             tags: tags_delivered,
+            ran,
             walker,
         } = threads;
         let Options {
@@ -815,6 +832,7 @@ impl App {
             show_beside: None,
             from_command_line: source.is_some() || named_directory,
             said_how_to_restore: false,
+            commands: commands::Commands::new(config.commands, ran),
             keys: Rc::new(config.keys),
             gestures: Rc::new(config.gestures),
             reported_error: false,
@@ -1085,12 +1103,24 @@ impl App {
         }
         if self.panels.side == Some(ui::side::Side::Info) && self.panels.info_tab == tab {
             self.panels.side = None;
+            Effect::Redraw
         } else {
-            self.panels.side = Some(ui::side::Side::Info);
-            self.panels.info_tab = tab;
-            if self.tags_showing() {
-                self.request_tags();
-            }
+            self.reveal_info(tab)
+        }
+    }
+
+    /// Puts the information panel up on `tab`, and leaves it be where it is
+    /// up on that tab already: what a command's output arriving does, which
+    /// must not take down what is being read. Refused where the window has
+    /// no room for it.
+    pub(super) fn reveal_info(&mut self, tab: ui::tags::Tab) -> Effect {
+        if self.refuses(ui::Control::Info) {
+            return Effect::Nothing;
+        }
+        self.panels.side = Some(ui::side::Side::Info);
+        self.panels.info_tab = tab;
+        if self.tags_showing() {
+            self.request_tags();
         }
         Effect::Redraw
     }
@@ -1930,7 +1960,11 @@ impl App {
     /// taken while a file loads is said, and the wait is said again once
     /// that message has had its time.
     fn showing_toast(&self) -> Option<Toast> {
-        let reading = self.reading();
+        // A command running and a read in flight are both still going on;
+        // the read, being about the picture, is said over the command.
+        let reading = self
+            .reading()
+            .or_else(|| self.commands.toast(Instant::now()));
         match (self.toasts.showing(), reading) {
             (Some(message), Some(reading)) if message.raised < reading.raised => Some(reading),
             (Some(message), _) => Some(message.clone()),
@@ -2125,6 +2159,20 @@ impl App {
         };
         let rename = self.rename_input();
         let export = self.export_input();
+        let command = self.command_input();
+        // The Output tab is on the panel where there is a command to have
+        // run, or a run kept for the file on screen.
+        let shown = self.shown_path().filter(|_| self.current.is_some());
+        let output = (!self.commands.set.is_empty()
+            || self.commands.run_on(shown.as_deref()).is_some())
+        .then(|| ui::output::Input {
+            file: self
+                .current
+                .as_ref()
+                .map(|current| current.file.path.clone())
+                .unwrap_or_default(),
+            state: self.commands.output_for(shown.as_deref()),
+        });
         // What reads the picture on screen reads nothing while a thumbnail
         // of another file stands over it.
         let standin = self.standin(sight);
@@ -2166,6 +2214,9 @@ impl App {
             side: self.side_showing(),
             chooser,
             tags,
+            output,
+            commands: self.command_items(conditions),
+            command,
             rename,
             export,
             empty: self.is_empty(),
@@ -2430,6 +2481,7 @@ impl App {
     pub(super) fn reconfigure(&mut self, config: Config, complaint: Option<String>) -> Effect {
         self.keys = Rc::new(config.keys);
         self.gestures = Rc::new(config.gestures);
+        self.commands.replace(config.commands);
         self.open_map_link = config.open_map_link;
         self.open_map_bounds_link = config.open_map_bounds_link;
         // Looked for again where it was not found too, since what the
@@ -3620,6 +3672,7 @@ impl ApplicationHandler<UserEvent> for App {
             self.folder_due(now),
             self.arranging_due(now),
             self.finding_due(now),
+            self.commands.due(now),
         ]
         .into_iter()
         .flatten()
@@ -3658,6 +3711,7 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::Arranged(arranged) => self.arranged_read(arranged),
             UserEvent::Measured(measured) => self.measured(*measured),
             UserEvent::Tags(delivered) => self.tags_read(*delivered),
+            UserEvent::Ran(finished) => self.command_finished(*finished),
             UserEvent::Tree(event) => self.tree_event(event),
             UserEvent::Opened(paths) => {
                 self.open_sent(paths);

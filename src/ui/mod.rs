@@ -9,6 +9,7 @@
 pub mod attitude;
 pub mod chooser;
 pub mod chrome;
+pub mod commands;
 pub mod control;
 pub mod empty;
 pub mod export;
@@ -19,6 +20,7 @@ pub mod info;
 pub mod loupe;
 pub mod menu;
 pub mod minimap;
+pub mod output;
 pub mod rename;
 pub mod scale;
 pub mod side;
@@ -720,6 +722,13 @@ pub struct FrameInput {
     /// The information panel's Tags tab, on every frame it is on screen,
     /// and `None` while it is not.
     pub tags: Option<tags::Input>,
+    /// The information panel's Output tab: `None` where the configuration
+    /// file defines no command, which leaves the tab off the panel.
+    pub output: Option<output::Input>,
+    /// The configuration file's commands, for the foot of the file menu.
+    pub commands: Vec<commands::Item>,
+    /// The command dialog, on every frame it is up.
+    pub command: Option<commands::Input>,
     /// The rename dialog, on every frame it is up, and `None` while it is
     /// not. Its open state is the application's — see `App::renaming` —
     /// which is why it is a modal rather than a popup: nothing egui does
@@ -836,6 +845,9 @@ pub fn show(
     }
     if let Some(export) = &input.export {
         export::show(&mut pass, ui, export);
+    }
+    if let Some(command) = &input.command {
+        commands::show(&mut pass, ui, command);
     }
     pass.commands
 }

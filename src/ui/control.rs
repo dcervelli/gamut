@@ -14,6 +14,7 @@ use crate::image::decode::Reading;
 use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
+use super::commands::{Slot, Value};
 use super::export::{Dimension, Format};
 use super::filmstrip::{Direction, Sort};
 use super::help;
@@ -68,6 +69,20 @@ controls! {
     OpenIn,
     /// An item of that menu, by its place in that list.
     Opener(usize) = 0,
+    /// A command of the configuration file's, by its place in the list the
+    /// same frame was drawn from, with what it needs: an item of the file
+    /// menu, and what its key presses.
+    RunCommand(Slot) = Slot::SAMPLE,
+    /// The cross on the message a running command keeps up, which ends it.
+    StopCommand,
+    /// The command dialog's two buttons.
+    CommandOk,
+    CommandCancel,
+    /// The Output tab's: the whole of the last run's output copied, its log
+    /// opened in the editor, and a line of it copied, by its place.
+    OutputCopy,
+    OutputEdit,
+    OutputRow(usize) = 0,
     /// The transport bar's buttons, on screen only for a file of frames or
     /// pages: play or pause, and one frame or page back or on. `Seek` is a
     /// press on the timeline, at a frame.
@@ -317,6 +332,13 @@ impl Control {
             Control::Copy => "Copy".to_string(),
             Control::OpenIn => "Open in".to_string(),
             Control::Opener(index) => format!("Open in application {index}"),
+            Control::RunCommand(slot) => format!("Run command {}", slot.index + 1),
+            Control::StopCommand => "Stop command".to_string(),
+            Control::CommandOk => "OK".to_string(),
+            Control::CommandCancel => "Cancel".to_string(),
+            Control::OutputCopy => "Copy output".to_string(),
+            Control::OutputEdit => "Open log in editor".to_string(),
+            Control::OutputRow(row) => format!("Copy output line {}", row + 1),
             Control::Play => "Play".to_string(),
             Control::StepBack => "Previous frame".to_string(),
             Control::StepForward => "Next frame".to_string(),
@@ -530,6 +552,9 @@ pub enum Command {
     /// The file list's edge was dragged: the width its thumbnails are
     /// fitted into, which the panel's width is made from.
     FilmstripSlot(f32),
+    /// One of the command dialog's inputs changed: which, by its place, and
+    /// what it now holds.
+    DialogInput(usize, Value),
     /// One of the region panel's four boxes was typed in and let go of —
     /// `Enter`, `Tab` or a click elsewhere — with a number in it: which,
     /// and the number.

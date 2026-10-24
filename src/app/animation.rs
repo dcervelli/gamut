@@ -91,7 +91,7 @@ impl Animation {
         self.playback.head()
     }
 
-    #[cfg(test)]
+    /// How many frames the file holds, as far as the decoder has said.
     pub fn count(&self) -> usize {
         self.playback.count()
     }

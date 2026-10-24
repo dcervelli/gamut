@@ -320,6 +320,16 @@ without one — no `xdg-desktop-portal` and a backend for it running — cannot
 put one up, and the window says so instead. On a Mac it is the standard open
 dialog.
 
+### Your own commands
+
+The configuration file can define commands of your own: a line of the shell
+run on the file on screen, with what you have marked on it, from the foot of
+the file menu, or from a key you bind to `keys.command.<name>`. They have no
+keys until you give them one. The help popup lists them under **Commands**,
+after the table's own keys. While one runs, the others do nothing, and the
+cross on the message at the foot of the window stops it. See
+[Commands](SETTINGS.md#commands) for how to write one.
+
 ### Renaming and deleting
 
 The button before the file's name in the top bar opens a menu of the file

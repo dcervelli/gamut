@@ -448,6 +448,32 @@ impl Georeference {
         self.lifted([a * column + b * row + c, d * column + e * row + f])
     }
 
+    /// The point `at` of the stored raster in the file's own coordinates,
+    /// measured as [`Self::latitude_longitude_at`] measures it: from the
+    /// raster's first corner, in pixels.
+    pub fn model_at(&self, at: [f64; 2]) -> [f64; 2] {
+        let [a, b, c, d, e, f] = self.affine;
+        let shift = self.inset - 0.5;
+        let (column, row) = (at[0] + shift, at[1] + shift);
+        [a * column + b * row + c, d * column + e * row + f]
+    }
+
+    /// The EPSG code of the coordinates the file is placed in, where it
+    /// names one.
+    pub fn code(&self) -> Option<u16> {
+        self.code
+    }
+
+    /// The six numbers that place the stored raster on the ground, in the
+    /// order GDAL's geotransform has them: `[x0, a, b, y0, d, e]`, a point
+    /// `column` across and `row` down from the raster's first corner being
+    /// at `x = x0 + a·column + b·row`, `y = y0 + d·column + e·row`.
+    pub fn transform(&self) -> [f64; 6] {
+        let [a, b, c, d, e, f] = self.affine;
+        let shift = self.inset - 0.5;
+        [c + (a + b) * shift, a, b, f + (d + e) * shift, d, e]
+    }
+
     /// The middle of a stored raster `size` pixels across, as latitude and
     /// longitude.
     pub fn center(&self, size: [u32; 2]) -> Option<[f64; 2]> {
@@ -791,6 +817,23 @@ mod tests {
             size: Some([100, 100]),
             ..Tags::default()
         }
+    }
+
+    /// A point measured from the raster's corner is placed as the pixel
+    /// middles are, half a pixel out from the first one's; the transform
+    /// says the same in GDAL's order, from that corner; and the code is the
+    /// one the file named.
+    #[test]
+    fn the_model_is_given_at_a_fractional_point() {
+        let bern =
+            Georeference::read(&placed(1, 2056, [2_600_000.0, 1_200_000.0], 2.5)).expect("placed");
+        assert_eq!(bern.model_at([0.5, 0.5]), bern.model([0, 0]));
+        assert_eq!(bern.model_at([0.0, 0.0]), [2_599_998.75, 1_200_001.25]);
+        assert_eq!(
+            bern.transform(),
+            [2_599_998.75, 2.5, 0.0, 1_200_001.25, 0.0, -2.5]
+        );
+        assert_eq!(bern.code(), Some(2056));
     }
 
     fn near(have: [f64; 2], want: [f64; 2], within: f64) {

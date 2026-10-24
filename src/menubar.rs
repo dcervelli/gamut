@@ -22,7 +22,7 @@
 //! menu opens, on the main thread, while the application is not running a
 //! handler and so cannot be asked itself.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::RefCell;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, NSObject, NSObjectProtocol, ProtocolObject, Sel};
@@ -107,12 +107,14 @@ pub enum Node {
         tag: Option<usize>,
         nodes: Vec<Node>,
     },
-    /// A menu inside this one whose items are the snapshot's `list`, made
-    /// again each time it opens; choosing one hands back its place in it.
-    /// The snapshot's entry at `tag` says whether it can be opened.
+    /// A menu inside this one whose items are the snapshot's list at
+    /// `list`, made again each time it opens; choosing one hands back the
+    /// list and its place in it. The snapshot's entry at `tag` says whether
+    /// it can be opened.
     List {
         title: String,
         tag: usize,
+        list: usize,
     },
     /// The Services menu, which AppKit fills.
     Services {
@@ -149,11 +151,18 @@ pub struct Shown {
 }
 
 /// Everything the menus read as they open: an entry for each tag, and the
-/// items of the one [`Node::List`].
+/// items of each [`Node::List`], by its `list`.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Snapshot {
     pub shown: Vec<Shown>,
-    pub list: Vec<String>,
+    pub lists: Vec<Vec<Listed>>,
+}
+
+/// An item of a [`Node::List`]: what it says, and whether it can be chosen.
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+pub struct Listed {
+    pub title: String,
+    pub enabled: bool,
 }
 
 /// What was chosen with the pointer.
@@ -161,9 +170,14 @@ pub struct Snapshot {
 pub enum Chosen {
     /// The item at this tag.
     Item(usize),
-    /// The item at this place in the snapshot's list.
-    Listed(usize),
+    /// The item at this place, the second, in the snapshot's list at the
+    /// first.
+    Listed(usize, usize),
 }
+
+/// How a listed item's tag holds both its list and its place in it: the
+/// list times this, and the place.
+const LIST_STRIDE: usize = 1 << 20;
 
 /// How a choice reaches the window: what `main` made from the event loop's
 /// proxy.
@@ -184,8 +198,9 @@ struct Ivars {
     /// Each tag's item, where the tag is an item's: what [`Bar::rekey`]
     /// binds again.
     items: RefCell<Vec<Option<Retained<NSMenuItem>>>>,
-    /// The menu that [`Node::List`] opens, made again from the snapshot.
-    list: OnceCell<Retained<NSMenu>>,
+    /// The menu each [`Node::List`] opens, with its list, made again from
+    /// the snapshot.
+    lists: RefCell<Vec<(usize, Retained<NSMenu>)>>,
 }
 
 define_class!(
@@ -207,11 +222,12 @@ define_class!(
             }
         }
 
-        /// An item of the list.
+        /// An item of a list.
         #[unsafe(method(pick:))]
         fn pick(&self, item: &NSMenuItem) {
             if !self.forward_key() {
-                (self.ivars().deliver)(Chosen::Listed(item.tag() as usize));
+                let tag = item.tag() as usize;
+                (self.ivars().deliver)(Chosen::Listed(tag / LIST_STRIDE, tag % LIST_STRIDE));
             }
         }
 
@@ -255,6 +271,16 @@ define_class!(
                 return Bool::YES;
             }
             let action = item.action();
+            if action == Some(sel!(pick:)) {
+                let tag = item.tag() as usize;
+                let snapshot = self.ivars().snapshot.borrow();
+                let enabled = snapshot
+                    .lists
+                    .get(tag / LIST_STRIDE)
+                    .and_then(|list| list.get(tag % LIST_STRIDE))
+                    .is_some_and(|listed| listed.enabled);
+                return Bool::new(enabled);
+            }
             if action != Some(sel!(choose:)) && action != Some(sel!(open:)) {
                 return Bool::YES;
             }
@@ -278,20 +304,28 @@ define_class!(
     }
 
     unsafe impl NSMenuDelegate for Target {
-        /// The list, made again from what it holds now.
+        /// A list, made again from what it holds now.
         #[unsafe(method(menuNeedsUpdate:))]
         fn menu_needs_update(&self, menu: &NSMenu) {
-            let Some(list) = self.ivars().list.get() else {
+            let list = self
+                .ivars()
+                .lists
+                .borrow()
+                .iter()
+                .find(|(_, held)| std::ptr::eq(menu, &**held))
+                .map(|(list, _)| *list);
+            let Some(list) = list else {
                 return;
             };
-            if !std::ptr::eq(menu, &**list) {
-                return;
-            }
             menu.removeAllItems();
             let mtm = self.mtm();
-            for (index, name) in self.ivars().snapshot.borrow().list.iter().enumerate() {
-                let item = item(mtm, name, None, sel!(pick:), self);
-                item.setTag(index as isize);
+            let snapshot = self.ivars().snapshot.borrow();
+            let Some(listed) = snapshot.lists.get(list) else {
+                return;
+            };
+            for (index, each) in listed.iter().enumerate() {
+                let item = item(mtm, &each.title, None, sel!(pick:), self);
+                item.setTag((list * LIST_STRIDE + index) as isize);
                 menu.addItem(&item);
             }
         }
@@ -344,7 +378,7 @@ impl Bar {
             snapshot: RefCell::default(),
             titles: RefCell::default(),
             items: RefCell::default(),
-            list: OnceCell::new(),
+            lists: RefCell::new(Vec::new()),
         });
         // SAFETY: `init` on an allocated NSObject subclass with its ivars set.
         let target: Retained<Target> = unsafe { msg_send![super(target), init] };
@@ -453,11 +487,11 @@ fn add(menu: &NSMenu, node: &Node, target: &Target, app: &NSApplication, mtm: Ma
             }
             menu.addItem(&holder(mtm, title, *tag, &inner, target));
         }
-        Node::List { title, tag } => {
+        Node::List { title, tag, list } => {
             let inner = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(title));
             inner.setDelegate(Some(ProtocolObject::from_ref(target)));
             menu.addItem(&holder(mtm, title, Some(*tag), &inner, target));
-            let _ = target.ivars().list.set(inner);
+            target.ivars().lists.borrow_mut().push((*list, inner));
         }
         Node::Services { title } => {
             let inner = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(title));

@@ -14,6 +14,7 @@ use crate::image::display::{AutoWindow, Colormap, ToneMap};
 use crate::theme::Theme;
 
 use super::Room;
+use super::commands::Needs;
 use super::control::Control;
 use super::histogram::WINDOWS;
 use super::info::Copyable;
@@ -275,6 +276,20 @@ pub const NOTHING_TO_SWAP: &str = "No region or aspect to swap.";
 /// press would act on.
 pub const STILL_OPENING: &str = "Waiting for file.";
 
+/// What a command says while another is running: one runs at a time.
+pub const COMMAND_RUNNING: &str = "Another command is still running.";
+
+/// What a command needing the pointer says while it is not on the picture,
+/// which it never is when the press comes from the menu.
+pub const NO_POINTER: &str = "Point at the picture and press the command's key.";
+
+/// What a command needing a georeference says on a file with none.
+pub const NO_GEOREFERENCE: &str = "This image is not placed on the ground.";
+
+/// What a command needing the region or the pointer says while one of the
+/// picture's maps is shown in its place, whose pixels are not the file's.
+pub const NOT_ON_A_MAP: &str = "Not while a map is shown in the picture's place.";
+
 /// What holds at the moment, read off the application once: which of the
 /// conditions the keys wait on, for the help popup to dim the keys that
 /// would do nothing; and everything that makes a control dead, for the
@@ -352,6 +367,12 @@ pub struct Conditions {
     /// Whether exiftool's tags for the file on screen are in, which is what
     /// the Raw Data tab's copy button copies.
     pub tags_in: bool,
+    /// Whether one of the configuration file's commands is running, which
+    /// makes every one of them dead until it is over: one at a time.
+    pub running: bool,
+    /// Whether the file on screen places its pixels on the ground at all,
+    /// in whatever coordinates: what a command needing a georeference needs.
+    pub georeferenced: bool,
 }
 
 impl Default for Conditions {
@@ -393,6 +414,8 @@ impl Default for Conditions {
             nothing_open: true,
             arriving: false,
             tags_in: false,
+            running: false,
+            georeferenced: false,
         }
     }
 }
@@ -442,6 +465,8 @@ impl Conditions {
         nothing_open: false,
         arriving: false,
         tags_in: true,
+        running: false,
+        georeferenced: true,
     };
 }
 
@@ -496,9 +521,37 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         heading,
         located,
         geographic,
+        running,
+        georeferenced,
+        pointer_on_picture,
         ..
     } = conditions;
     let said = |said| Some(Refused { said, hint: None });
+    if let Tip::Control(Control::RunCommand(slot)) = tip {
+        if running {
+            return said(COMMAND_RUNNING);
+        }
+        if slot.needs == Needs::Nothing {
+            return None;
+        }
+        if nothing_open {
+            return said(NOTHING_OPEN);
+        }
+        if arriving {
+            return said(STILL_OPENING);
+        }
+        let on_picture = matches!(slot.needs, Needs::Region | Needs::Pointer);
+        if on_picture && map_shown {
+            return said(NOT_ON_A_MAP);
+        }
+        return match slot.needs {
+            Needs::Region if !region_selected => said(NO_REGION),
+            Needs::Pointer if !pointer_on_picture => said(NO_POINTER),
+            Needs::Location if !located => said(NO_LOCATION),
+            Needs::Georeference if !georeferenced => said(NO_GEOREFERENCE),
+            _ => None,
+        };
+    }
     if matches!(tip, Tip::Control(Control::RegionCopy | Control::RegionFit)) && !region_selected {
         return said(NO_REGION);
     }
@@ -688,6 +741,7 @@ pub fn words(tip: Tip) -> Option<String> {
         // the rest of the column's copies do, which no key reaches.
         Tip::Control(Control::InfoTab(Tab::Facts)) => "What the file is",
         Tip::Control(Control::InfoTab(Tab::Tags)) => "Every tag exiftool reads from the file",
+        Tip::Control(Control::InfoTab(Tab::Output)) => "What the last command printed",
         Tip::Control(Control::TagsCopyMenu) => "Copy the tags shown",
         Tip::Control(Control::TagsCopy(Table::Text)) => "Copy the tags shown as plain text",
         Tip::Control(Control::TagsCopy(Table::Csv)) => "Copy the tags shown as CSV",
@@ -763,6 +817,12 @@ pub fn words(tip: Tip) -> Option<String> {
         // No one key does this and only this — Escape dismisses whatever
         // is up, a menu first — so the cross names itself.
         Tip::Control(Control::Dismiss) => "Dismiss this message",
+        // The cross on the message a running command keeps up.
+        Tip::Control(Control::StopCommand) => "Stop the command",
+        // The Output tab's: no key reaches them.
+        Tip::Control(Control::OutputCopy) => "Copy the output",
+        Tip::Control(Control::OutputEdit) => "Open the log in your editor",
+        Tip::Control(Control::OutputRow(_)) => "Copy this line",
         // The histogram panel's, in as few words as will carry them.
         Tip::Control(Control::Marks) => "Mark clipped pixels",
         Tip::Control(Control::Reset) => "Reset the display",
@@ -835,6 +895,10 @@ pub fn words(tip: Tip) -> Option<String> {
         // the program it hands the file to, and there is nothing an
         // interface that has never heard of that program could add to it.
         Tip::Control(Control::Opener(_)) => return None,
+        // A command's item wears its label, which is the configuration
+        // file's; its key, where it has one, is said from the keymap — see
+        // `names` in `app/input.rs`.
+        Tip::Control(Control::RunCommand(_)) => return None,
         // Everything else is named by the key that does the same job — see
         // `App::tooltip` — or wears its own words on screen.
         Tip::Control(
@@ -855,6 +919,8 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::CancelExport
             | Control::RenameTo
             | Control::CancelRename
+            | Control::CommandOk
+            | Control::CommandCancel
             | Control::Back
             | Control::Forward
             | Control::Thumb(_)
