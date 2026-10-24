@@ -372,6 +372,7 @@ pub(super) fn name_field(
             text: field.name,
             refused: field.refused,
             size: vec2(field.width, FIELD_HEIGHT),
+            lines: 1,
             suffix: field.suffix,
         },
     );
@@ -406,20 +407,36 @@ pub(super) struct Boxed<'a> {
     /// A word painted inside the box after what is typed — see
     /// [`NameField::suffix`].
     pub suffix: Option<&'static str>,
+    /// How many lines it shows: one, where `Enter` is left to the caller,
+    /// or more, where `Enter` starts another line and what runs past them
+    /// scrolls. The box is as tall as they are, `size` saying its height
+    /// for one.
+    pub lines: usize,
 }
 
-/// A single line of text in a hand-drawn box, as the chooser's is: the box
-/// outlined in the warning color while what it holds will not do, and in
-/// the hairline otherwise. Hands back egui's output, for the focus and the
-/// selection, and what the field says now where a key changed it. `Enter`
-/// is left to the caller, as a dialog takes it before the field can.
+/// How tall a box of `lines` lines is, one being `one` tall.
+pub(super) fn boxed_height(ui: &egui::Ui, one: f32, lines: usize) -> f32 {
+    let row = ui
+        .ctx()
+        .fonts_mut(|fonts| fonts.row_height(&egui::FontId::proportional(TEXT_SIZE)));
+    one + row * lines.saturating_sub(1) as f32
+}
+
+/// Text in a hand-drawn box, as the chooser's is: the box outlined in the
+/// warning color while what it holds will not do, and in the hairline
+/// otherwise. Hands back egui's output, for the focus and the selection,
+/// and what the field says now where a key changed it. On a single line,
+/// `Enter` is left to the caller, as a dialog takes it before the field
+/// can; on several, it is the field's.
 pub(super) fn boxed_field(
     pass: &mut Pass,
     ui: &mut egui::Ui,
     field: Boxed<'_>,
 ) -> (egui::text_edit::TextEditOutput, Option<String>) {
     let theme = pass.theme;
-    let (rect, _) = ui.allocate_exact_size(field.size, Sense::HOVER);
+    let several = field.lines > 1;
+    let height = boxed_height(ui, field.size.y, field.lines);
+    let (rect, _) = ui.allocate_exact_size(vec2(field.size.x, height), Sense::HOVER);
     let outline = match field.refused {
         true => theme.warning,
         false => theme.border,
@@ -432,7 +449,13 @@ pub(super) fn boxed_field(
         egui::Stroke::new(HAIRLINE, outline),
         egui::StrokeKind::Inside,
     );
-    let mut inner = rect.shrink2(vec2(FIELD_INSET, 0.0));
+    // Several lines are set from the top, the first where a single line's
+    // would be.
+    let row = boxed_height(ui, 0.0, 2);
+    let mut inner = match several {
+        true => rect.shrink2(vec2(FIELD_INSET, ((field.size.y - row) / 2.0).max(0.0))),
+        false => rect.shrink2(vec2(FIELD_INSET, 0.0)),
+    };
     if let Some(suffix) = field.suffix {
         let galley = painter.layout_no_wrap(
             suffix.to_string(),
@@ -447,6 +470,29 @@ pub(super) fn boxed_field(
         painter.galley(at, galley, theme.text_dim.into());
     }
     let mut text = field.text.to_string();
+    if several {
+        let edit = TextEdit::multiline(&mut text)
+            .id(field.id)
+            .frame(Frame::NONE)
+            .font(egui::FontId::proportional(TEXT_SIZE))
+            .text_color(theme.text_primary.into())
+            .desired_width(f32::INFINITY)
+            .desired_rows(field.lines)
+            .margin(egui::Margin::ZERO);
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(egui::Layout::top_down_justified(Align::Min)),
+        );
+        let output = egui::ScrollArea::vertical()
+            .id_salt(field.id.with("scroll"))
+            .max_height(inner.height())
+            .auto_shrink([false, false])
+            .show(&mut child, |ui| edit.show(ui))
+            .inner;
+        let typed = output.response.changed().then_some(text);
+        return (output, typed);
+    }
     let edit = TextEdit::singleline(&mut text)
         .id(field.id)
         .return_key(None)

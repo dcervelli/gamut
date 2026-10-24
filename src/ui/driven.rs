@@ -3730,6 +3730,50 @@ fn the_command_dialog_hands_back_each_value() {
     assert_eq!(asked(&harness), [Command::Press(Control::CommandCancel)]);
 }
 
+/// A box of several lines takes `Enter` as a new line, and `Ctrl+Enter`
+/// (`⌘Enter` on a Mac) runs the command from it, as from anywhere in the
+/// dialog; it is as tall as its lines.
+#[test]
+fn a_box_of_several_lines_keeps_enter_for_itself() {
+    use super::commands::{self, Kind, Row, Value};
+    let mut harness = open(WINDOW, 1, panels());
+    let dialog = |text: &str, opened: bool| {
+        Some(commands::Input {
+            title: "Generate".to_string(),
+            rows: vec![Row {
+                label: "Prompt".to_string(),
+                kind: Kind::text(None, Some(4.0)).unwrap(),
+                value: Value::Text(text.to_string()),
+                refused: None,
+            }],
+            allowed: true,
+            busy: false,
+            opened,
+        })
+    };
+    harness.state_mut().input.command = dialog("a cat", true);
+    harness.run();
+    harness.state_mut().input.command = dialog("a cat", false);
+    harness.run();
+    assert!(harness.ctx.egui_wants_keyboard_input());
+    let one = super::rename::FIELD_HEIGHT;
+    let field = harness.get_by_role(egui::accesskit::Role::MultilineTextInput);
+    assert!(field.rect().height() > one * 2.0, "{:?}", field.rect());
+
+    harness.state_mut().commands.clear();
+    harness.key_press(egui::Key::End);
+    harness.key_press(egui::Key::Enter);
+    harness.step();
+    assert_eq!(
+        asked(&harness),
+        [Command::DialogInput(0, Value::Text("a cat\n".to_string()))]
+    );
+    harness.state_mut().commands.clear();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+    harness.step();
+    assert_eq!(asked(&harness), [Command::Press(Control::CommandOk)]);
+}
+
 /// The Output tab is on the panel only where there are commands: it shows
 /// the last run's head line and its lines, a click on a line copying it.
 #[test]

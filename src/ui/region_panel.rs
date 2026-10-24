@@ -309,6 +309,7 @@ fn held_field(
             refused,
             size,
             suffix: None,
+            lines: 1,
         },
     );
     if let Some(changed) = changed {

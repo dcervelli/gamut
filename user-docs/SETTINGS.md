@@ -245,7 +245,7 @@ that kind takes:
 
 | `kind` | Also takes | Reaches the command as |
 | --- | --- | --- |
-| `"string"`, a line of text | `default`, the text it starts with | What was typed |
+| `"string"`, text | `default`, the text it starts with; and `lines`, how many lines its box shows, 1 to 12, 1 if left out. A box of more than one line takes `Enter` as a new line and scrolls past its last | What was typed, with its line breaks |
 | `"number"` | `min` and `max`, which the dialog keeps a number between, and `default`. All optional, though `min` and `max` go together | The number: `4.5` |
 | `"checkbox"` | `default`, `true` or `false` | `true` or `false` |
 | `"radio"`, a choice of words | `choices`, a list of two or more: `["png", "jpg"]`; and `default`, one of them, the first if left out | The word chosen |
@@ -261,7 +261,9 @@ input = [
 ```
 
 The dialog opens with what you last chose for that command in this
-session. `Enter` runs it, `Esc` closes it.
+session. `Enter` runs it, `Esc` closes it. In a box of several lines,
+`Enter` starts a new line and `Ctrl+Enter` (`⌘Enter` on a Mac) runs it,
+as it does anywhere in the dialog.
 
 #### What a command is told
 

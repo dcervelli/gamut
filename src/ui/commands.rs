@@ -130,9 +130,11 @@ pub struct Input {
 /// What an input of the dialog is, with its default.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Kind {
-    /// Words, as typed.
+    /// Words, as typed: on one line, or on as many as `lines` shows at
+    /// once, where `Enter` starts another.
     Text {
         default: String,
+        lines: usize,
     },
     /// A number typed, judged as it is typed: finite, and inside the range
     /// where there is one.
@@ -168,6 +170,9 @@ pub enum Value {
     Slider(f64),
 }
 
+/// The most lines a box of words shows at once: past it, the box scrolls.
+pub const MAX_LINES: usize = 12;
+
 /// A number as the environment and the dialog write it: as few places as
 /// say it, and no exponent.
 pub fn decimal(value: f64) -> String {
@@ -183,6 +188,28 @@ pub fn decimal(value: f64) -> String {
 pub const KINDS: [&str; 5] = ["string", "number", "checkbox", "radio", "slider"];
 
 impl Kind {
+    /// Words, `default` before anything is typed, on `lines` lines — one
+    /// where none is given, and no more than [`MAX_LINES`].
+    pub fn text(default: Option<&str>, lines: Option<f64>) -> Result<Kind, String> {
+        let lines = match lines {
+            None => 1,
+            Some(lines) if lines.fract() == 0.0 && (1.0..=MAX_LINES as f64).contains(&lines) => {
+                lines as usize
+            }
+            Some(lines) => {
+                return Err(format!(
+                    "lines is a whole number from 1 to {MAX_LINES}, not {}",
+                    decimal(lines)
+                ));
+            }
+        };
+        let default = default.unwrap_or_default().to_string();
+        if lines == 1 && default.contains('\n') {
+            return Err("a default on several lines needs lines to say how many".into());
+        }
+        Ok(Kind::Text { default, lines })
+    }
+
     /// A number, inside `range` where there is one: the default is the
     /// least of the range where none is given, and 0 where there is no
     /// range either.
@@ -242,7 +269,7 @@ impl Kind {
     /// What the input holds before anything is done to it.
     pub fn default_value(&self) -> Value {
         match self {
-            Kind::Text { default } => Value::Text(default.clone()),
+            Kind::Text { default, .. } => Value::Text(default.clone()),
             Kind::Number { default, .. } => Value::Number(decimal(*default)),
             Kind::Checkbox { default } => Value::Checkbox(*default),
             Kind::Radio { default, .. } => Value::Radio(*default),
@@ -254,7 +281,8 @@ impl Kind {
     /// value remembered from before the file was edited still fits.
     pub fn holds(&self, value: &Value) -> bool {
         match (self, value) {
-            (Kind::Text { .. }, Value::Text(_)) | (Kind::Number { .. }, Value::Number(_)) => true,
+            (Kind::Text { lines, .. }, Value::Text(text)) => *lines > 1 || !text.contains('\n'),
+            (Kind::Number { .. }, Value::Number(_)) => true,
             (Kind::Checkbox { .. }, Value::Checkbox(_)) => true,
             (Kind::Radio { choices, .. }, Value::Radio(at)) => *at < choices.len(),
             (Kind::Slider { low, high, .. }, Value::Slider(value)) => {
@@ -393,7 +421,13 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 ui.add_space(GAP);
             }
             for (index, row) in input.rows.iter().enumerate() {
-                ui.horizontal(|ui| {
+                // A box of several lines has its words beside its first.
+                let align = match row.kind {
+                    Kind::Text { lines, .. } if lines > 1 => egui::Align::Min,
+                    _ => egui::Align::Center,
+                };
+                let row_size = vec2(ui.available_width(), FIELD_HEIGHT);
+                ui.allocate_ui_with_layout(row_size, egui::Layout::left_to_right(align), |ui| {
                     ui.set_min_height(FIELD_HEIGHT);
                     ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
                     label(pass, ui, &row.label, words);
@@ -434,12 +468,28 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 }
 
 /// `Enter`, taken before the fields can see it: the command run where
-/// every input will do, nothing where one will not. `Esc` is the modal's.
+/// every input will do, nothing where one will not — except in a box of
+/// several lines, whose `Enter` starts another, and where `Ctrl+Enter`
+/// (`⌘Enter` on a Mac) runs it instead, as it does anywhere in the dialog.
+/// `Esc` is the modal's.
 fn keys(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
-    let entered = ui.input_mut(|keys| keys.consume_key(Modifiers::NONE, Key::Enter));
+    let focused = ui.memory(|memory| memory.focused());
+    let in_lines = input.rows.iter().enumerate().any(|(index, row)| {
+        matches!(row.kind, Kind::Text { lines, .. } if lines > 1)
+            && focused == Some(field_id(index))
+    });
+    let entered = ui.input_mut(|keys| {
+        keys.consume_key(Modifiers::COMMAND, Key::Enter)
+            || (!in_lines && keys.consume_key(Modifiers::NONE, Key::Enter))
+    });
     if entered && input.allowed {
         pass.press(Control::CommandOk);
     }
+}
+
+/// The id of the box the `index`th input is typed into.
+fn field_id(index: usize) -> egui::Id {
+    id().with(("input", index))
 }
 
 /// An input's words, `width` across, cut where they run past it.
@@ -481,7 +531,11 @@ fn widget(
 ) {
     match (&row.kind, &row.value) {
         (_, Value::Text(text) | Value::Number(text)) => {
-            let id = id().with(("input", index));
+            let id = field_id(index);
+            let lines = match row.kind {
+                Kind::Text { lines, .. } => lines,
+                _ => 1,
+            };
             let (output, typed) = rename::boxed_field(
                 pass,
                 ui,
@@ -491,6 +545,7 @@ fn widget(
                     refused: row.refused.is_some(),
                     size: vec2(width, FIELD_HEIGHT),
                     suffix: None,
+                    lines,
                 },
             );
             if let Some(typed) = typed {

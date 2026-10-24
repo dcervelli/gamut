@@ -310,8 +310,8 @@ fn command(out: &mut Out, pending: &Pending) {
 fn kind_fields(kind: &Kind) -> Vec<String> {
     let number = |name: &str, value: f64| format!("{name} = {}", decimal(value));
     match kind {
-        Kind::Text { default } if default.is_empty() => vec!["kind = \"string\"".into()],
-        Kind::Text { default } => vec![
+        Kind::Text { default, .. } if default.is_empty() => vec!["kind = \"string\"".into()],
+        Kind::Text { default, .. } => vec![
             "kind = \"string\"".into(),
             format!("default = {}", string(default)),
         ],
@@ -376,6 +376,7 @@ fn read_kind(value: &str) -> Result<Kind, String> {
     match word {
         "string" => Ok(Kind::Text {
             default: rest.to_string(),
+            lines: 1,
         }),
         "number" => match numbers()?[..] {
             [] => Kind::number(None, None),
@@ -578,7 +579,8 @@ mod tests {
             [
                 Kind::Checkbox { default: true },
                 Kind::Text {
-                    default: "a note".into()
+                    default: "a note".into(),
+                    lines: 1
                 },
                 Kind::number(Some((1.0, 9.0)), None).unwrap(),
             ]

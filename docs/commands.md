@@ -196,6 +196,16 @@ been edited since — and never written to the state file, since what is
 typed into a dialog may be a secret. Reading the configuration again takes
 the dialog down, since the command it asked for may have changed under it.
 
+A string with `lines` above 1 is `rename::boxed_field` given those lines: a
+multiline `TextEdit` in a scroll area, the box as tall as its lines. The
+dialog takes `Enter` before any field can, so `keys` in
+`src/ui/commands.rs` leaves a plain `Enter` alone while such a box has the
+keyboard, asking egui's memory for the focus by the box's id, and takes
+`Modifiers::COMMAND` with `Enter` everywhere — `Ctrl` here, `⌘` on a Mac —
+so that a prompt of several lines still has a key that runs it. A value
+remembered with a line break does not fit a box of one line, should the
+file have changed it to one.
+
 A dialog can hold no text field — checkboxes alone, or only the question
 `confirm` asks — and then egui does not want the keyboard and every key
 would reach the key table too, `Esc` included. So `App::handle_key` does

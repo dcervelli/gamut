@@ -335,6 +335,7 @@ fn read_input(
         "number" => &["min", "max", "default"],
         "radio" => &["choices", "default"],
         "slider" => &["min", "max", "default", "step"],
+        "string" => &["default", "lines"],
         _ => &["default"],
     };
     for (key, value) in fields.iter() {
@@ -381,9 +382,7 @@ fn read_kind<'v>(
     };
     let whole = |made: Result<Kind, String>| made.map_err(|problem| (line, problem));
     match word {
-        "string" => Ok(Kind::Text {
-            default: words("default")?.unwrap_or_default().to_string(),
-        }),
+        "string" => whole(Kind::text(words("default")?, number("lines")?)),
         "number" => {
             let range = match (number("min")?, number("max")?) {
                 (Some(low), Some(high)) => Some((low, high)),
@@ -441,7 +440,7 @@ pub const TEMPLATE: &str = "\n\
 # key and gesture, since every line after a [table] belongs to it. Every
 # field but run may be left out; needs is file, region, pointer, location,
 # georeference or none. An input is a string, number, checkbox, radio or
-# slider. A script asks the window to show an image it made, or to say
+# slider; a string with lines above 1 is a box of that many lines. A script asks the window to show an image it made, or to say
 # something, with open, message and error lines in the file $GAMUT_RESULT
 # names: the name, an equals sign, and the rest of the line, unquoted. What
 # it prints is shown, never obeyed. With output set to \"replace\", it writes
@@ -455,7 +454,7 @@ pub const TEMPLATE: &str = "\n\
 #   shown = false
 #   input = [
 #     { name = \"blur\", label = \"Blur radius\", kind = \"slider\", min = 1, max = 50, default = 10 },
-#     { name = \"note\", kind = \"string\", default = \"Redacted\" },
+#     { name = \"note\", kind = \"string\", default = \"Redacted\", lines = 1 },
 #     { name = \"count\", kind = \"number\", min = 1, max = 10, default = 3 },
 #     { name = \"solid\", kind = \"checkbox\", default = true },
 #     { name = \"format\", kind = \"radio\", choices = [\"png\", \"jpg\", \"webp\"], default = \"jpg\" },
@@ -957,7 +956,8 @@ mod tests {
                     default: 1
                 },
                 Kind::Text {
-                    default: "hello".into()
+                    default: "hello".into(),
+                    lines: 1
                 },
             ]
         );
@@ -993,7 +993,46 @@ mod tests {
         assert_eq!(problems[9].1, "command.norun has no run");
         assert_eq!(
             problems[8].1,
-            "command.ok input `t`: a string takes default, not step"
+            "command.ok input `t`: a string takes default, lines, not step"
+        );
+    }
+
+    /// A string may take several lines, a whole number of them up to
+    /// `MAX_LINES`; a default on several lines needs them.
+    #[test]
+    fn a_string_takes_its_lines() {
+        let (commands, problems) = parsed(
+            "[command.a]\n\
+             run = \"true\"\n\
+             input = [\n\
+               { name = \"prompt\", kind = \"string\", lines = 4, default = \"one\\ntwo\" },\n\
+               { name = \"none\", kind = \"string\", lines = 0 },\n\
+               { name = \"half\", kind = \"string\", lines = 2.5 },\n\
+               { name = \"split\", kind = \"string\", default = \"one\\ntwo\" },\n\
+             ]\n",
+        );
+        assert_eq!(
+            commands[0]
+                .inputs
+                .iter()
+                .map(|i| i.kind.clone())
+                .collect::<Vec<_>>(),
+            [Kind::Text {
+                default: "one\ntwo".into(),
+                lines: 4
+            }]
+        );
+        let said: Vec<&str> = problems
+            .iter()
+            .map(|(_, problem)| problem.as_str())
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "command.a input `none`: lines is a whole number from 1 to 12, not 0",
+                "command.a input `half`: lines is a whole number from 1 to 12, not 2.5",
+                "command.a input `split`: a default on several lines needs lines to say how many",
+            ]
         );
     }
 
