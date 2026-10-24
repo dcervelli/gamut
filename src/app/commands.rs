@@ -14,10 +14,10 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use super::App;
-use super::edits::Replacing;
+use super::edits::{Made, Making, Replacing};
 use super::files::SLOW_READ;
 use super::input::Effect;
-use crate::commands::{self, Command, Directive, Finished, Launch, Status, Stopper};
+use crate::commands::{self, Command, Directive, Finished, Launch, Output, Status, Stopper};
 use crate::image::auxiliary::Showing;
 use crate::image::exif;
 use crate::image::orient::{self, Orientation};
@@ -44,6 +44,9 @@ pub(super) struct Commands {
     /// for it to open with next time. This session's only: what is typed
     /// into a dialog may be a secret, and nothing here is written down.
     remembered: HashMap<String, Vec<Value>>,
+    /// Whether each command that may replace its file was last let go
+    /// with the box that says it is to ticked, by name.
+    replace_remembered: HashMap<String, bool>,
     /// Each file's last run, by the file it ran on — `None` for one run
     /// with nothing open — and the order they were kept in.
     outputs: HashMap<Option<PathBuf>, Arc<Run>>,
@@ -67,9 +70,76 @@ struct Running {
     stopper: Stopper,
     /// Whether the window ended it.
     stopped: bool,
-    /// Where its output is to take the file's place: the file, and where
-    /// the output goes.
-    replacing: Option<Replacing>,
+    /// Where its output is to go once it is over: in the file's place, or
+    /// a new file of its own.
+    writing: Option<Writing>,
+}
+
+/// What becomes of a run's output once it is over.
+#[derive(Debug)]
+enum Writing {
+    Replacing(Replacing),
+    Making(Making),
+}
+
+impl Writing {
+    /// The directory made for the output, taken away once the run is over.
+    fn dir(&self) -> &Path {
+        match self {
+            Writing::Replacing(replacing) => &replacing.dir,
+            Writing::Making(making) => &making.dir,
+        }
+    }
+
+    /// What the command is told to write: `GAMUT_OUTPUT`.
+    fn output(&self) -> &Path {
+        match self {
+            Writing::Replacing(replacing) => &replacing.output,
+            Writing::Making(making) => &making.output,
+        }
+    }
+}
+
+/// Where a run's output, once it is over, has gone.
+enum Landed {
+    /// In the place of the file it ran on, which is here.
+    Replaced(PathBuf),
+    Made(Made),
+}
+
+impl Landed {
+    fn path(&self) -> &Path {
+        match self {
+            Landed::Replaced(path) => path,
+            Landed::Made(made) => &made.path,
+        }
+    }
+}
+
+/// Where a run is to put what it writes, as its dialog was let go with.
+#[derive(Clone, Debug, PartialEq)]
+enum Target {
+    /// Wherever it likes.
+    Own,
+    /// In the place of the file on screen.
+    Replace,
+    /// A new file in `folder` called `name`.
+    New { folder: PathBuf, name: String },
+}
+
+/// The dialog's name for the new file a command makes.
+struct Naming {
+    /// Where the file goes: the folder of the file on screen, or the
+    /// pictures folder with nothing open, and `None` where there is none.
+    folder: Option<PathBuf>,
+    /// What the field says.
+    name: String,
+    verdict: ui::export::Verdict,
+    /// For a command that may replace its file: whether it is to, and why
+    /// it cannot be, where it cannot.
+    replace: Option<(bool, Option<String>)>,
+    /// The file's own name, shown in the field while it is to be replaced.
+    own: String,
 }
 
 /// The dialog while it is up: which command it is for, and what each
@@ -80,6 +150,8 @@ pub(super) struct Asking {
     /// Whether this is its first frame, when its first field takes the
     /// keyboard.
     opened: bool,
+    /// The new file's name, for a command that makes one.
+    naming: Option<Naming>,
 }
 
 impl Commands {
@@ -89,6 +161,7 @@ impl Commands {
             running: None,
             asking: None,
             remembered: HashMap::new(),
+            replace_remembered: HashMap::new(),
             outputs: HashMap::new(),
             logs: HashMap::new(),
             order: VecDeque::new(),
@@ -172,16 +245,16 @@ impl Commands {
         self.asking = None;
     }
 
-    /// The window closing. A run that was to replace its file is ended,
-    /// since nothing will be left to put its output in the file's place, and
-    /// the directory made for that output taken away; any other run is
-    /// left to finish on its own.
+    /// The window closing. A run whose output the window was to put in
+    /// place — the file's, or a new file's — is ended, since nothing will be
+    /// left to do that, and the directory made for the output taken away;
+    /// any other run is left to finish on its own.
     pub(super) fn abandon(&mut self) {
         if let Some(running) = &self.running
-            && let Some(replacing) = &running.replacing
+            && let Some(writing) = &running.writing
         {
             running.stopper.stop();
-            let _ = std::fs::remove_dir_all(&replacing.dir);
+            let _ = std::fs::remove_dir_all(writing.dir());
         }
     }
 }
@@ -312,12 +385,16 @@ impl App {
             return Effect::Nothing;
         }
         let asks = command.asks();
+        let target = match command.output {
+            Output::Replace => Target::Replace,
+            _ => Target::Own,
+        };
         self.close_menus();
         if asks {
             self.open_command_dialog(slot.index);
             return Effect::Redraw;
         }
-        self.start_command(slot.index, &[])
+        self.start_command(slot.index, &[], target)
     }
 
     /// Puts up the dialog of the command at `index`, with the values it
@@ -345,11 +422,102 @@ impl App {
             }
             _ => defaults,
         };
+        let naming = command.output.makes().then(|| self.naming(index));
         self.commands.asking = Some(Asking {
             index,
             values,
             opened: true,
+            naming,
         });
+    }
+
+    /// The new file's name as the dialog of the command at `index` opens
+    /// with it: where it goes, and what it is called, which is not taken
+    /// there — and for a command that may replace its file instead, whether
+    /// it is to, as it was last let go with, where it can.
+    fn naming(&self, index: usize) -> Naming {
+        let command = &self.commands.set[index];
+        let file = self.shown_path().filter(|_| self.current.is_some());
+        let folder = match &file {
+            Some(file) => file.parent().map(Path::to_path_buf),
+            None => crate::pasted::directory().ok(),
+        };
+        let taken = |name: &str| {
+            folder
+                .as_deref()
+                .is_some_and(|folder| super::exporting::taken(folder, name))
+        };
+        let own = file.as_deref().map(super::edits::name_of);
+        let offered = commands::offered_name(command, file.as_deref(), taken);
+        let replace = (command.output == Output::Choose).then(|| {
+            let why = match &file {
+                _ if self.trash.is_none() => Some(super::edits::NO_TRASH.to_string()),
+                Some(file)
+                    if std::fs::symlink_metadata(file).is_ok_and(|meta| meta.is_symlink()) =>
+                {
+                    Some(format!(
+                        "{} is a link, so it can't be replaced.",
+                        super::edits::name_of(file)
+                    ))
+                }
+                Some(_) => None,
+                None => Some(ui::tooltip::NOTHING_OPEN.to_string()),
+            };
+            let on = why.is_none()
+                && self
+                    .commands
+                    .replace_remembered
+                    .get(&command.name)
+                    .copied()
+                    .unwrap_or(false);
+            (on, why)
+        });
+        Naming {
+            verdict: ui::export::judge(&offered, taken),
+            folder,
+            name: offered,
+            replace,
+            own: own.unwrap_or_default(),
+        }
+    }
+
+    /// The dialog's name for the new file was typed in: what is wrong with
+    /// it now, if anything, the folder asked whether it is taken.
+    pub(super) fn set_command_name(&mut self, name: String) -> Effect {
+        let Some(naming) = self
+            .commands
+            .asking
+            .as_mut()
+            .and_then(|asking| asking.naming.as_mut())
+        else {
+            return Effect::Nothing;
+        };
+        let folder = naming.folder.clone();
+        naming.verdict = ui::export::judge(&name, |typed| {
+            folder
+                .as_deref()
+                .is_some_and(|folder| super::exporting::taken(folder, typed))
+        });
+        naming.name = name;
+        Effect::Redraw
+    }
+
+    /// The dialog's box that has the command replace its file was ticked or
+    /// cleared, where it can be.
+    pub(super) fn set_command_replace(&mut self, on: bool) -> Effect {
+        let replace = self
+            .commands
+            .asking
+            .as_mut()
+            .and_then(|asking| asking.naming.as_mut())
+            .and_then(|naming| naming.replace.as_mut());
+        match replace {
+            Some((was, None)) if *was != on => {
+                *was = on;
+                Effect::Redraw
+            }
+            _ => Effect::Nothing,
+        }
     }
 
     /// An input of the dialog changed.
@@ -386,11 +554,20 @@ impl App {
         let Some(command) = self.commands.set.get(asking.index) else {
             return false;
         };
-        command
-            .inputs
-            .iter()
-            .zip(&asking.values)
-            .all(|(input, value)| input.kind.judge(value).is_none())
+        let named = match &asking.naming {
+            None => true,
+            Some(Naming {
+                replace: Some((true, None)),
+                ..
+            }) => true,
+            Some(naming) => naming.folder.is_some() && naming.verdict.allows(),
+        };
+        named
+            && command
+                .inputs
+                .iter()
+                .zip(&asking.values)
+                .all(|(input, value)| input.kind.judge(value).is_none())
     }
 
     /// The dialog's OK: the values remembered for next time, the dialog
@@ -429,10 +606,33 @@ impl App {
                 )
             })
             .collect();
+        let target = match (command.output, asking.naming) {
+            (Output::Replace, _) => Target::Replace,
+            (
+                _,
+                Some(Naming {
+                    replace: Some((true, None)),
+                    ..
+                }),
+            ) => Target::Replace,
+            (_, Some(naming)) => match naming.folder {
+                Some(folder) => Target::New {
+                    folder,
+                    name: naming.name,
+                },
+                None => return Effect::Redraw,
+            },
+            (_, None) => Target::Own,
+        };
+        if command.output == Output::Choose {
+            self.commands
+                .replace_remembered
+                .insert(command.name.clone(), target == Target::Replace);
+        }
         self.commands
             .remembered
             .insert(command.name.clone(), asking.values);
-        self.start_command(asking.index, &inputs)
+        self.start_command(asking.index, &inputs, target)
             .also(Effect::Redraw)
     }
 
@@ -458,18 +658,46 @@ impl App {
                 refused: input.kind.judge(value),
             })
             .collect();
+        let naming = asking.naming.as_ref().map(|naming| {
+            let replacing = matches!(naming.replace, Some((true, _)));
+            let line = match (&naming.folder, naming.verdict.message()) {
+                _ if replacing => Some((REPLACED.to_string(), ui::rename::Tone::Note)),
+                (None, _) => Some((NOWHERE.to_string(), ui::rename::Tone::Refusal)),
+                (Some(_), Some(refused)) => Some(refused),
+                (Some(folder), None) => Some((
+                    format!("In {}", crate::shown_path(folder)),
+                    ui::rename::Tone::Note,
+                )),
+            };
+            ui::commands::Naming {
+                name: match replacing {
+                    true => naming.own.clone(),
+                    false => naming.name.clone(),
+                },
+                line,
+                refused: !replacing && !naming.verdict.allows(),
+                replace: naming.replace.clone(),
+            }
+        });
         Some(ui::commands::Input {
             title: command.label.clone(),
             rows,
             allowed: allowed && !busy,
             busy,
             opened: std::mem::take(&mut asking.opened),
+            naming,
         })
     }
 
     /// Runs the command at `index` with `inputs` in its environment beside
-    /// everything the window knows, on a thread of its own.
-    fn start_command(&mut self, index: usize, inputs: &[(String, String)]) -> Effect {
+    /// everything the window knows, on a thread of its own, its output to
+    /// go to `target` once it is over.
+    fn start_command(
+        &mut self,
+        index: usize,
+        inputs: &[(String, String)],
+        target: Target,
+    ) -> Effect {
         if self.commands.running() {
             return Effect::Nothing;
         }
@@ -519,19 +747,26 @@ impl App {
         // The file as the list spells it, which what is done to it once the
         // run is over finds it by; the absolute path is the script's.
         let listed = self.files.shown_path().map(Path::to_path_buf);
-        let replacing = match (command.replaces, &about, listed) {
-            (true, Some(file), Some(listed)) => {
+        let writing = match (target, &about, listed) {
+            (Target::Own, _, _) => None,
+            (Target::Replace, Some(file), Some(listed)) => {
                 match self.prepare_replacing(&command.label, file, listed, id) {
-                    Some(replacing) => Some(replacing),
+                    Some(replacing) => Some(Writing::Replacing(replacing)),
                     None => return Effect::Redraw,
                 }
             }
-            _ => None,
+            (Target::Replace, _, _) => return Effect::Nothing,
+            (Target::New { folder, name }, _, _) => {
+                match self.prepare_making(&command.label, folder, name, id) {
+                    Some(making) => Some(Writing::Making(making)),
+                    None => return Effect::Redraw,
+                }
+            }
         };
-        if let Some(replacing) = &replacing {
+        if let Some(writing) = &writing {
             env.push((
                 "GAMUT_OUTPUT".into(),
-                replacing.output.display().to_string(),
+                writing.output().display().to_string(),
             ));
         }
         self.commands.runs = id;
@@ -544,7 +779,7 @@ impl App {
             started: Instant::now(),
             stopper: stopper.clone(),
             stopped: false,
-            replacing,
+            writing,
         });
         commands::run_on_thread(
             Launch {
@@ -598,7 +833,7 @@ impl App {
             );
             return None;
         };
-        let dir = match commands::make_output_dir(file, id) {
+        let dir = match commands::make_output_dir(file.parent().unwrap_or(Path::new("")), id) {
             Ok(dir) => dir,
             Err(error) => {
                 self.toast(
@@ -613,12 +848,57 @@ impl App {
                 return None;
             }
         };
-        let output = dir.join(file.file_name().unwrap_or_default());
+        let extension = file
+            .extension()
+            .map(|extension| extension.to_string_lossy());
+        let output = dir.join(commands::output_name(extension.as_deref()));
         Some(Replacing {
             file: listed,
             dir,
             output,
             was,
+        })
+    }
+
+    /// What run `id` of `label`, which makes a new file called `name` in
+    /// `folder`, is given to write its output to: in a directory made in
+    /// that folder, which is made itself where it is not there yet, as the
+    /// pictures folder a paste goes in need not be. `None`, with the reason
+    /// said, where neither can be made.
+    fn prepare_making(
+        &mut self,
+        label: &str,
+        folder: PathBuf,
+        name: String,
+        id: u64,
+    ) -> Option<Making> {
+        let made =
+            std::fs::create_dir_all(&folder).and_then(|()| commands::make_output_dir(&folder, id));
+        let dir = match made {
+            Ok(dir) => dir,
+            Err(error) => {
+                self.toast(
+                    format!(
+                        "{label} failed to start: {}",
+                        crate::escape_controls(&format!(
+                            "making a directory in {}: {error}",
+                            crate::shown_path(&folder)
+                        ))
+                    ),
+                    Level::Error,
+                );
+                return None;
+            }
+        };
+        let extension = Path::new(&name)
+            .extension()
+            .map(|extension| extension.to_string_lossy().into_owned());
+        let output = dir.join(commands::output_name(extension.as_deref()));
+        Some(Making {
+            dir,
+            output,
+            folder,
+            name,
         })
     }
 
@@ -801,8 +1081,8 @@ impl App {
             Some(running) if running.id == finished.id => self.commands.running.take(),
             _ => None,
         };
-        let (stopped, cwd, replacing) = match running {
-            Some(running) => (running.stopped, Some(running.cwd), running.replacing),
+        let (stopped, cwd, writing) = match running {
+            Some(running) => (running.stopped, Some(running.cwd), running.writing),
             None => (false, None, None),
         };
         let label = finished.label.clone();
@@ -863,12 +1143,20 @@ impl App {
         // replacement says is said over it.
         let mut refused: Vec<String> = Vec::new();
         let mut effect = Effect::Redraw;
-        // The file replaced before anything the result file asks is done,
-        // so that an `open` of it finds the new one.
-        let unreplaced = finished.status == Status::Exited(0)
-            && replacing
-                .as_ref()
-                .is_some_and(|replacing| !self.replace_file(&label, replacing));
+        // The output put in place before anything the result file asks is
+        // done, so that an `open` of it finds it there.
+        let landed = match (&finished.status, &writing) {
+            (Status::Exited(0), Some(Writing::Replacing(replacing))) => Some(
+                self.replace_file(&label, replacing)
+                    .then(|| Landed::Replaced(replacing.file.clone())),
+            ),
+            (Status::Exited(0), Some(Writing::Making(making))) => {
+                Some(self.make_file(&label, making).map(Landed::Made))
+            }
+            _ => None,
+        };
+        let unplaced = matches!(landed, Some(None));
+        let landed = landed.flatten();
         match finished.status {
             Status::Unstarted(reason) => {
                 self.toast(
@@ -883,10 +1171,10 @@ impl App {
             Status::Killed => {
                 self.toast(format!("{label} failed: ended by a signal"), Level::Error)
             }
-            // The file left as it was, and why said: nothing the result
+            // The output not put in place, and why said: nothing the result
             // file asks for is done, since what it says was about a file
             // that did not arrive.
-            Status::Exited(0) if unreplaced => {}
+            Status::Exited(0) if unplaced => {}
             Status::Exited(0) => {
                 let mut said = false;
                 for directive in asked {
@@ -899,7 +1187,8 @@ impl App {
                             self.toast(crate::escape_controls(&words), Level::Error);
                         }
                         Directive::Open(path) => {
-                            match self.open_made(&path, cwd.as_deref(), replacing.as_ref()) {
+                            let scratch = writing.as_ref().zip(landed.as_ref());
+                            match self.open_made(&path, cwd.as_deref(), scratch) {
                                 Ok(opened) => effect = effect.also(opened),
                                 Err(why) => {
                                     self.toast(format!("{label}: {why}"), Level::Error);
@@ -918,10 +1207,12 @@ impl App {
                     self.toast(format!("{label} done."), Level::Message);
                 }
                 // Said last, over whatever the script said: the original
-                // being in the trash, and undo bringing it back, is what
-                // has to be read.
-                if let Some(replacing) = &replacing {
-                    self.said_replaced(&label, &replacing.file);
+                // being in the trash, or the new file's name, and undo
+                // taking it back, is what has to be read.
+                match &landed {
+                    Some(Landed::Replaced(file)) => self.said_replaced(&label, file),
+                    Some(Landed::Made(made)) => self.toast(made.said.clone(), Level::Message),
+                    None => {}
                 }
             }
             Status::Exited(code) => {
@@ -940,8 +1231,8 @@ impl App {
                 self.toast(words, Level::Error);
             }
         }
-        if let Some(replacing) = replacing {
-            let _ = std::fs::remove_dir_all(replacing.dir);
+        if let Some(writing) = &writing {
+            let _ = std::fs::remove_dir_all(writing.dir());
         }
         let reveal = reveal || !refused.is_empty();
         lines.extend(refused.into_iter().map(|why| Line {
@@ -970,16 +1261,17 @@ impl App {
     /// screen, as an export joins it, where it is one the window reads.
     /// What is wrong with it otherwise, for the caller to say.
     ///
-    /// `scratch` is where a run that replaced its file wrote, which is
-    /// taken away once the run is over. Its output is the file it replaced
-    /// by now, so an `open` of `GAMUT_OUTPUT` is an `open` of that; anything
-    /// else in there is refused, since it would join the list only to be
-    /// gone from under it a moment later.
+    /// `scratch` is where a run whose output the window put in place wrote,
+    /// which is taken away once the run is over, and where the output went.
+    /// An `open` of `GAMUT_OUTPUT` is an `open` of where it went — the file
+    /// it replaced, or the new file — and anything else in there is refused,
+    /// since it would join the list only to be gone from under it a moment
+    /// later.
     fn open_made(
         &mut self,
         path: &str,
         cwd: Option<&Path>,
-        scratch: Option<&Replacing>,
+        scratch: Option<(&Writing, &Landed)>,
     ) -> Result<Effect, String> {
         let path = expand_home(path);
         let path = match cwd {
@@ -988,8 +1280,10 @@ impl App {
         };
         let name = super::edits::name_of(&path);
         let path = match scratch {
-            Some(scratch) if lexically(&path) == lexically(&scratch.output) => scratch.file.clone(),
-            Some(scratch) if lexically(&path).starts_with(lexically(&scratch.dir)) => {
+            Some((writing, landed)) if lexically(&path) == lexically(writing.output()) => {
+                landed.path().to_path_buf()
+            }
+            Some((writing, _)) if lexically(&path).starts_with(lexically(writing.dir())) => {
                 return Err(format!(
                     "{name} was left in the folder made for its output, \
                      which is taken away when it ends."
@@ -1062,6 +1356,13 @@ impl App {
         Effect::Nothing
     }
 }
+
+/// What the dialog says under the name while the command is to replace
+/// the file rather than make a new one.
+const REPLACED: &str = "The original goes to the trash.";
+
+/// What the dialog says under the name with nowhere to put the new file.
+const NOWHERE: &str = "Nowhere to put it: HOME is unset.";
 
 /// What the toast says once the Output tab's output is copied, and a line
 /// of it.

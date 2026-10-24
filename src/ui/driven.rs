@@ -3670,6 +3670,7 @@ fn the_command_dialog_hands_back_each_value() {
             allowed: refused.is_none(),
             busy: false,
             opened,
+            naming: None,
         })
     };
     harness.state_mut().input.command = dialog("3", None, true);
@@ -3749,6 +3750,7 @@ fn a_box_of_several_lines_keeps_enter_for_itself() {
             allowed: true,
             busy: false,
             opened,
+            naming: None,
         })
     };
     harness.state_mut().input.command = dialog("a cat", true);
@@ -3770,6 +3772,69 @@ fn a_box_of_several_lines_keeps_enter_for_itself() {
     );
     harness.state_mut().commands.clear();
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Enter);
+    harness.step();
+    assert_eq!(asked(&harness), [Command::Press(Control::CommandOk)]);
+}
+
+/// A command that makes a new file has a row for its name under the
+/// inputs, typed into as any field is, with the line under it, and for one
+/// that may replace its file the box that says it is to, which empties the
+/// field of what can be typed while it is ticked.
+#[test]
+fn the_command_dialog_asks_for_the_new_files_name() {
+    use super::commands::{self, Naming};
+    use super::rename::Tone;
+    let mut harness = open(WINDOW, 1, panels());
+    let dialog = |replace: Option<(bool, Option<String>)>, opened: bool| {
+        Some(commands::Input {
+            title: "Watermark".to_string(),
+            rows: Vec::new(),
+            allowed: true,
+            busy: false,
+            opened,
+            naming: Some(Naming {
+                name: "a-watermark.jpg".to_string(),
+                line: Some(("In ~/Pictures".to_string(), Tone::Note)),
+                refused: false,
+                replace,
+            }),
+        })
+    };
+    harness.state_mut().input.command = dialog(Some((false, None)), true);
+    harness.run();
+    harness.state_mut().input.command = dialog(Some((false, None)), false);
+    harness.run();
+    assert!(
+        harness.ctx.egui_wants_keyboard_input(),
+        "the name takes the keys"
+    );
+
+    harness.state_mut().commands.clear();
+    harness.event(egui::Event::Text("x".to_string()));
+    harness.step();
+    assert_eq!(
+        asked(&harness),
+        [Command::DialogName("x.jpg".to_string())],
+        "the stem was selected, and is typed over"
+    );
+    harness.state_mut().commands.clear();
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::CheckBox, commands::REPLACE)
+        .click();
+    harness.run();
+    assert_eq!(asked(&harness), [Command::DialogReplace(true)]);
+
+    let why = "a.png is a link, so it can't be replaced.".to_string();
+    harness.state_mut().input.command = dialog(Some((false, Some(why))), false);
+    harness.run();
+    assert!(
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::CheckBox, commands::REPLACE)
+            .accesskit_node()
+            .is_disabled()
+    );
+    harness.state_mut().commands.clear();
+    harness.key_press(egui::Key::Enter);
     harness.step();
     assert_eq!(asked(&harness), [Command::Press(Control::CommandOk)]);
 }

@@ -154,13 +154,17 @@ the file to replace and never writes over it: it writes to `GAMUT_OUTPUT`,
 and the window makes the swap. A script that edited the file in place could
 not be undone, and one that named its own target could replace anything.
 
-`GAMUT_OUTPUT` is the file's own name inside a directory made fresh for the
-run beside the file, `.gamut-<pid>-<run>` from `commands::make_output_dir`.
-Beside it, so that it is on the file's filesystem and the swap is a
-rename; a directory, so that the output keeps the file's name and with it
-the extension a tool such as ImageMagick picks the format by; hidden, so
-that `listing::contents`, which skips hidden directories, never lists the
-output as an image that arrived. `App::prepare_replacing` makes it on the
+`GAMUT_OUTPUT` is `output.<ext>`, the file's own extension, inside a
+directory made fresh for the run beside the file, `.gamut-<pid>-<run>` from
+`commands::make_output_dir`. Beside it, so that it is on the file's
+filesystem and the swap is a rename; a directory, so that the name is the
+window's own and nothing else's; hidden, so that `listing::contents`, which
+skips hidden directories, never lists the output as an image that arrived.
+The name is `commands::output_name`'s rather than the file's, so that no
+name a person chose reaches the script's arguments: ImageMagick reads a `%`
+in an output name as a frame number and a `[` as a selection, and a file
+called `100%.jpg` would be written somewhere else. The extension is kept,
+since it is what such a tool picks the format by. `App::prepare_replacing` makes it on the
 loop before the run starts, refusing a link, whose replacement would be a
 file where the link was, and records the file's `watch::Signature`. The
 directory is removed whole when the run is over, however it ended.
@@ -182,6 +186,43 @@ again only if it is still the file on screen.
 The window's message about the replacement is raised last, over any
 `message` the script wrote: the toast has one slot, and that the original
 is in the trash and how to undo is the thing a reader must not miss.
+
+## A new file
+
+`output = "new"` is the same arrangement for a file that was not there:
+the script writes to `GAMUT_OUTPUT` and the window puts it in place, as
+`App::make_file` in `src/app/edits.rs`. The window owns the destination for
+the reasons it owns a replacement's — the script never picks a name, so it
+can never write over anything, and the new file is an undo step
+(`Edit::Created`, as an export and a paste are) — and so that a script
+need not number its files against what the folder holds: the dialog judges
+the name as it is typed, with `ui::export::judge` and the folder asked,
+and the place is taken by `rename_no_replace`, counting up past a name
+taken while the run went on rather than failing a run that did its work.
+
+The folder is the file on screen's, or `pasted::directory()` with nothing
+open, which is made where it is not there yet; the scratch directory goes
+in it, for the rename. `App::naming` works out what the dialog opens with,
+`commands::offered_name` the name: the configuration's `name` with
+`{stem}` filled in, or the file's stem and the command's name with the
+file's extension, counted up past the folder's names as the export dialog's
+`default_name` is. A command that needs nothing offers its own name and no
+extension: one that generates or fetches a picture does not know its
+format until it has it.
+
+So a name's extension is a request, not a fact. `GAMUT_OUTPUT` carries the
+extension asked for, or none, and once the run is over
+`decode::extension_for` names the file by what the leading bytes say it is
+— the extension asked for where the format answers to it, the format's own
+where it does not or none was asked. A `.png` holding a JPEG opens in fewer
+places than the same file called `.jpg`, and refusing a minute's
+generation over a suffix would be worse than correcting it and saying so.
+
+`output = "choose"` is either, as the dialog's box says. The box is dead
+where `prepare_replacing` would refuse — no trash, or a link — so that the
+refusal is seen before the run rather than after it, and is remembered for
+the session by the command's name, as the inputs are. The name typed is
+not remembered: it names one file.
 
 ## The dialog
 

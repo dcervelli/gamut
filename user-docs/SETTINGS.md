@@ -226,7 +226,8 @@ digits, `_` and `-`.
 | `needs` | What it cannot run without: `"file"` (the default), `"region"`, `"pointer"`, `"location"` (a photo that says where it was taken), `"georeference"` (a map placed on the ground), or `"none"`, which runs from the empty window too. Without it, the item is dead and its tooltip says why |
 | `confirm` | `true` asks before running, even with nothing to ask |
 | `shown` | `true` writes the picture as you see it, turned, exposed and toned, to a PNG for the command to read, in `GAMUT_SHOWN` |
-| `output` | `"replace"` has the command change the file itself: it writes its version to `GAMUT_OUTPUT`, which takes the file's place, the original going to the trash. See [Changing the file itself](#changing-the-file-itself) |
+| `output` | What becomes of what the command writes to `GAMUT_OUTPUT`. `"replace"` has it take the file's place, the original going to the trash: see [Changing the file itself](#changing-the-file-itself). `"new"` makes it a new file, under a name the dialog asks for, and `"choose"` has the dialog ask which of the two: see [Making a new file](#making-a-new-file). Left out, the command writes wherever it likes |
+| `name` | For `"new"` and `"choose"`, the name the dialog offers the new file under, `{stem}` standing for the file's own name without its extension: `"{stem}-small.jpg"`. Left out, it is the file's name with the command's after it, `IMG_1234-watermark.jpg`, or the command's name alone for one that needs nothing |
 | `input` | What to ask before it runs: one `[[command.<name>.input]]` table for each, below. The window puts up a dialog with every input in the order the file has them |
 
 A `run` line in single quotes is read exactly as written, which suits a
@@ -367,8 +368,8 @@ startup files, so a program installed by Homebrew is found only because
 
 A command with `output = "replace"` changes the file it runs on, and the
 change can be undone. It never writes over the file: it writes the new
-version to the path in `GAMUT_OUTPUT`, which has the file's own name, in a
-hidden folder beside it. Once the command exits cleanly, `gamut` puts that
+version to the path in `GAMUT_OUTPUT`, which ends in the file's own
+extension, in a hidden folder beside it. Once the command exits cleanly, `gamut` puts that
 in the file's place, keeps the original in the trash, and shows the new
 version. **Undo** (`Ctrl+Z`, `⌘Z` on a Mac) puts the original back, and the
 edited file goes to the trash in its turn, so neither way loses a file.
@@ -389,6 +390,39 @@ loses it, the EXIF orientation included, and a photo held on its side then
 shows on its side. Write the format the file is already in, since the name
 does not change. A command that replaces needs a file, so it cannot have
 `needs = "none"`, and it cannot run on a link.
+
+#### Making a new file
+
+A command with `output = "new"` makes a new file, and its dialog asks what
+to call it, under its inputs, with the folder it goes in written beneath.
+The command writes to the path in `GAMUT_OUTPUT`, in a hidden folder there,
+and once it exits cleanly, `gamut` gives what it wrote the name you typed,
+adds it to the list beside the file on screen, and shows it. **Undo** moves
+it to the trash.
+
+The new file goes in the folder of the file on screen, or, with nothing
+open, in your pictures folder, where a paste goes. A name already in the
+folder is refused as you type it, and nothing is ever written over: if a
+file of that name arrives while the command runs, the new one is called
+`name-2.jpg` instead, and the window says so.
+
+The extension you type says which format to write: `GAMUT_OUTPUT` ends in
+it, which is what ImageMagick goes by. If the command writes another format
+anyway, the new file is named for what it is, and the window says so. A
+name with no extension leaves the format to the command: `GAMUT_OUTPUT`
+then has none, and the file is named for whatever it wrote. A command that
+needs nothing offers its own name with no extension, so that one that
+fetches or generates a picture does not have to know its format ahead of
+time.
+
+With `output = "choose"`, the dialog also has a **Replace the original**
+box, which does what `"replace"` does instead; the name is then the file's
+own. The box is unticked the first time and as you left it after, and dead
+where the file cannot be replaced.
+
+A new file that is empty, or that `gamut` cannot read, is not made, and the
+window says why. As when replacing, an `open` of `GAMUT_OUTPUT` shows the
+new file, and the window's message about it is what it says afterward.
 
 #### Examples
 
@@ -452,19 +486,35 @@ magick "$GAMUT_FILE" \
 '''
 ```
 
-Sign the picture in its lower right corner. `-auto-orient` first, since the
-corner is the one you see:
+Sign the picture in its lower right corner, as a new file or in place.
+`-auto-orient` first, since the corner is the one you see:
 
 ```
 [command.sign]
 label = "Watermark"
+output = "choose"
+name = "{stem}-signed.jpg"
 input = [{ name = "text", label = "Text", kind = "string", default = "© Your Name" }]
 run = '''
-out="$GAMUT_DIR/$GAMUT_STEM-signed.jpg"
 magick "$GAMUT_FILE" -auto-orient -gravity southeast -pointsize 48 \
-  -fill "rgba(255,255,255,0.6)" -annotate +32+32 "$GAMUT_INPUT_TEXT" "$out" \
-  && echo "open = $out" >> "$GAMUT_RESULT"
+  -fill "rgba(255,255,255,0.6)" -annotate +32+32 "$GAMUT_INPUT_TEXT" "$GAMUT_OUTPUT"
 '''
+```
+
+Make a test picture of any size, from the empty window too, in the
+folder on screen or your pictures folder:
+
+```
+[command.placeholder]
+label = "Placeholder"
+needs = "none"
+output = "new"
+name = "placeholder.png"
+input = [
+  { name = "width", label = "Width", kind = "number", min = 1, max = 10000, default = 1920 },
+  { name = "height", label = "Height", kind = "number", min = 1, max = 10000, default = 1080 },
+]
+run = 'magick -size "${GAMUT_INPUT_WIDTH}x${GAMUT_INPUT_HEIGHT}" plasma: "$GAMUT_OUTPUT"'
 ```
 
 Save exactly what is on screen, exposure and false color included:

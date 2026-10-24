@@ -555,6 +555,11 @@ pub enum Command {
     /// One of the command dialog's inputs changed: which, by its place, and
     /// what it now holds.
     DialogInput(usize, Value),
+    /// The command dialog's name for the new file was typed in.
+    DialogName(String),
+    /// The command dialog's box that has the command replace its file
+    /// rather than make a new one was ticked, or cleared.
+    DialogReplace(bool),
     /// One of the region panel's four boxes was typed in and let go of —
     /// `Enter`, `Tab` or a click elsewhere — with a number in it: which,
     /// and the number.

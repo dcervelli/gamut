@@ -87,8 +87,14 @@ pub enum Refusal {
     Empty,
     Slash,
     NotAName,
+    /// Longer than a name in a folder can be.
+    Long,
     Taken,
 }
+
+/// The most bytes a name in a folder can have, on the filesystems the
+/// program meets: `NAME_MAX`.
+pub const NAME_MAX: usize = 255;
 
 impl Refusal {
     /// The line under the field. `slash` is the dialog's own sentence
@@ -99,6 +105,7 @@ impl Refusal {
             Refusal::Empty => "Type a name.",
             Refusal::Slash => slash,
             Refusal::NotAName => "That is not a name a file can have.",
+            Refusal::Long => "That name is too long.",
             Refusal::Taken => TAKEN,
         }
     }
@@ -113,8 +120,13 @@ pub fn judge_name(typed: &str, exists: impl FnOnce(&str) -> bool) -> Result<(), 
     if typed.contains('/') {
         return Err(Refusal::Slash);
     }
-    if typed == "." || typed == ".." || typed.contains('\0') {
+    // A control character — a line break above all — is a name the file
+    // system takes and every shell loop over the folder trips on.
+    if typed == "." || typed == ".." || typed.chars().any(char::is_control) {
         return Err(Refusal::NotAName);
+    }
+    if typed.len() > NAME_MAX {
+        return Err(Refusal::Long);
     }
     if exists(typed) {
         return Err(Refusal::Taken);
@@ -150,6 +162,8 @@ pub enum Tone {
     Refusal,
     /// It will, but here is what it changes.
     Caution,
+    /// Nothing wrong: something worth knowing, in the dim ink.
+    Note,
 }
 
 impl Verdict {
@@ -528,6 +542,7 @@ pub(super) fn line(pass: &mut Pass, ui: &mut egui::Ui, width: f32, said: Option<
     let ink = match tone {
         Tone::Refusal => theme.warning,
         Tone::Caution => theme.caution,
+        Tone::Note => theme.text_dim,
     };
     let galley = ui.ctx().fonts_mut(|fonts| {
         fonts.layout_job({
@@ -597,6 +612,14 @@ mod tests {
         assert_eq!(
             judge("a.png", ".", never),
             Verdict::Refused(Refusal::NotAName)
+        );
+        assert_eq!(
+            judge("a.png", "two\nlines.png", never),
+            Verdict::Refused(Refusal::NotAName)
+        );
+        assert_eq!(
+            judge("a.png", &format!("{}.png", "a".repeat(NAME_MAX)), never),
+            Verdict::Refused(Refusal::Long)
         );
         assert_eq!(
             judge("a.png", "b.png", |name| name == "b.png"),

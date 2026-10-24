@@ -85,6 +85,34 @@ pub(super) struct Replacing {
     pub(super) was: Signature,
 }
 
+/// A run of a command that makes a new file, as the window holds it until
+/// the run is over: where its output is written, and the folder and name
+/// the file is to have.
+#[derive(Debug)]
+pub(super) struct Making {
+    /// The directory made for the output, in the folder the file goes in,
+    /// taken away whole once the run is over, however it went.
+    pub(super) dir: PathBuf,
+    /// What the command is told to write: `GAMUT_OUTPUT`.
+    pub(super) output: PathBuf,
+    /// Where the new file goes.
+    pub(super) folder: PathBuf,
+    /// The name it was asked for under — without an extension where the
+    /// command is to say what it writes.
+    pub(super) name: String,
+}
+
+/// A new file a command made, put in place: where, and what the window
+/// says about it.
+pub(super) struct Made {
+    pub(super) path: PathBuf,
+    pub(super) said: String,
+}
+
+/// How many names a new file is tried under, its own and then each with a
+/// number after its stem, before the window gives up.
+const NAMES_TRIED: u32 = 100;
+
 /// The rename dialog while it is up: which file, what the field says, and
 /// what is wrong with it.
 pub(super) struct Renaming {
@@ -302,6 +330,109 @@ impl App {
         });
         self.file_replaced(file);
         true
+    }
+
+    /// A run that was to make a new file has exited cleanly: its output put
+    /// in the folder under the name it was asked for — with the extension
+    /// of what it wrote, where that differs, and a number after the stem
+    /// where the name has been taken since — joined to the list and shown.
+    /// Refused where the output is empty or will not read. What the window
+    /// says about it is handed back, for the caller to say once it has
+    /// done what the run's result file asked; a refusal is said here.
+    pub(super) fn make_file(&mut self, label: &str, making: &Making) -> Option<Made> {
+        let Making {
+            output,
+            folder,
+            name,
+            ..
+        } = making;
+        let refused = match fs::symlink_metadata(output) {
+            Ok(written) if written.is_file() && written.len() > 0 => None,
+            _ => Some(format!("{label} wrote nothing.")),
+        }
+        .or_else(|| {
+            crate::image::decode::probe(output)
+                .is_err()
+                .then(|| format!("{label} wrote a file that can't be read."))
+        });
+        if let Some(refused) = refused {
+            self.toast(refused, Level::Error);
+            return None;
+        }
+        let asked = Path::new(name);
+        let stem = asked
+            .file_stem()
+            .map_or_else(|| name.clone(), |stem| stem.to_string_lossy().into_owned());
+        let asked_extension = asked
+            .extension()
+            .map(|extension| extension.to_string_lossy().into_owned());
+        let extension = crate::image::decode::extension_for(output, asked_extension.as_deref());
+        let corrected = asked_extension
+            .as_ref()
+            .zip(extension.as_ref())
+            .is_some_and(|(asked, written)| asked != written);
+        let called = |count: u32| {
+            let stem = match count {
+                1 => stem.clone(),
+                n => format!("{stem}-{n}"),
+            };
+            match &extension {
+                Some(extension) => format!("{stem}.{extension}"),
+                None => stem,
+            }
+        };
+        let mut placed = None;
+        for count in 1..=NAMES_TRIED {
+            let path = folder.join(called(count));
+            match rename_no_replace(output, &path) {
+                Ok(()) => {
+                    placed = Some((path, count));
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    let error = anyhow::Error::from(error).context(format!(
+                        "putting what {label} wrote at {}",
+                        crate::shown_path(&path)
+                    ));
+                    super::input::report(&error);
+                    self.toast(super::input::briefly(&error), Level::Error);
+                    return None;
+                }
+            }
+        }
+        let Some((path, count)) = placed else {
+            self.toast(
+                format!(
+                    "{label} wrote a file, but {} and the next {} names are taken.",
+                    crate::escape_controls(&called(1)),
+                    NAMES_TRIED - 1
+                ),
+                Level::Error,
+            );
+            return None;
+        };
+        let made = name_of(&path);
+        let why = match (corrected, count) {
+            (true, _) => format!(
+                ", since it wrote {}",
+                extension
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_ascii_uppercase()
+            ),
+            (false, 1) => String::new(),
+            (false, _) => format!(", since {} was taken", crate::escape_controls(&called(1))),
+        };
+        self.from_command_line = false;
+        self.created(path.clone());
+        let request = self.files.adopt(path.clone(), crate::loader::Source::Disk);
+        let _ = self.send(request);
+        self.list_changed();
+        Some(Made {
+            said: format!("{label} made {made}{why}.{}", to_undo(&self.keys)),
+            path,
+        })
     }
 
     /// Says that `label` replaced `file`, and how to take it back.

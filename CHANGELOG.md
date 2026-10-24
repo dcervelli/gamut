@@ -42,6 +42,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   the original back, the edited file going to the trash in its turn. The
   file is left alone when the command fails, writes nothing or something
   that cannot be read, or when the file changed while it ran.
+- Commands that make a new file, with `output = "new"`: the dialog asks
+  for its name, offering the file's own with the command's after it or the
+  configuration's `name`, and the command writes to `GAMUT_OUTPUT`, which
+  joins the list under that name and is shown. The new file goes beside the
+  file on screen, or among your pictures with nothing open; is named for
+  the format the command wrote; never goes over another file; and goes to
+  the trash on undo. `output = "choose"` has the dialog ask whether to make
+  a new file or replace the original.
 
 ### Changed
 

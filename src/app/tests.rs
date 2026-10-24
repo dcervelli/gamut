@@ -5861,7 +5861,11 @@ output = "replace"
 
     let run = app.commands.run_on(Some(&file)).expect("kept");
     let output = PathBuf::from(&run.lines[0].text);
-    assert_eq!(output.file_name(), file.file_name(), "keeps the name");
+    assert_eq!(
+        output.file_name().and_then(|name| name.to_str()),
+        Some("output.png"),
+        "the window's name, with the file's extension"
+    );
     assert_eq!(output.parent().and_then(Path::parent), Some(dir.as_path()));
     assert_eq!(
         said(&app),
@@ -6013,6 +6017,212 @@ fn an_open_of_a_file_that_will_not_read_is_refused() {
     finish(&mut app, &received);
     assert_eq!(said(&app), "junk: j.png can't be read.");
     assert_eq!(app.files.len(), 1);
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// The dialog of a command that makes a new file, its name row as drawn.
+fn naming_of(app: &mut App) -> ui::commands::Naming {
+    app.command_input()
+        .expect("the dialog is up")
+        .naming
+        .expect("it asks for a name")
+}
+
+/// A command that makes a new file asks for its name, offering the file's
+/// stem with the command's name after it, and says where it goes; what it
+/// writes to `GAMUT_OUTPUT` joins the list under that name once it exits
+/// cleanly, is shown, and is said with how to undo it, which takes it to
+/// the trash. An `open` of `GAMUT_OUTPUT` opens the new file.
+#[test]
+fn a_command_makes_a_new_file_under_the_name_asked_for() {
+    let (mut app, dir) = app_over("command-new", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    std::fs::create_dir_all(dir.join("made")).unwrap();
+    write_png(&dir.join("made"), "wider.png", 6, 2);
+    let received = with_commands(
+        &mut app,
+        r#"[command.small]
+run = 'cp made/wider.png "$GAMUT_OUTPUT"; echo "$GAMUT_OUTPUT"; echo "open = $GAMUT_OUTPUT" >> "$GAMUT_RESULT"'
+output = "new"
+"#,
+    );
+    let _ = app.perform(input::Action::Command(0));
+    let naming = naming_of(&mut app);
+    assert_eq!(naming.name, "a-small.png");
+    assert_eq!(
+        naming.line,
+        Some((
+            format!("In {}", crate::shown_path(&dir)),
+            ui::rename::Tone::Note
+        ))
+    );
+    assert_eq!(naming.replace, None);
+    let _ = app.act(ui::Command::DialogName("a.png".into()));
+    assert!(naming_of(&mut app).refused, "taken");
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    assert!(app.command_input().is_some(), "OK does nothing");
+    let _ = app.act(ui::Command::DialogName("line\nbreak.png".into()));
+    assert!(naming_of(&mut app).refused, "not a name");
+    let _ = app.act(ui::Command::DialogName("b.png".into()));
+    assert!(!naming_of(&mut app).refused);
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    assert!(app.command_input().is_none());
+    finish(&mut app, &received);
+
+    let made = dir.join("b.png");
+    assert_eq!(decode::probe(&made).unwrap(), Some((6, 2)));
+    assert_eq!(
+        said(&app),
+        spelled_here("small made b.png. Ctrl+Z to undo.")
+    );
+    let run = app.commands.run_on(Some(&dir.join("a.png"))).expect("kept");
+    assert_eq!(
+        PathBuf::from(&run.lines[0].text).file_name(),
+        Some(std::ffi::OsStr::new("output.png")),
+        "the window's own name, with the extension asked for"
+    );
+    assert_eq!(output_dirs(&dir), Vec::<PathBuf>::new());
+    assert_eq!(app.files.paths(), [dir.join("a.png"), made.clone()]);
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.files.shown_path(), Some(made.as_path()));
+
+    assert_eq!(app.perform(input::Action::Undo), Effect::Redraw);
+    assert_eq!(said(&app), "Moved b.png to the trash.");
+    assert!(!made.exists());
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// A new file is named for what was written, whatever extension was asked
+/// for, and has a number after its stem where its name was taken while the
+/// command ran; a command that needs nothing, with no extension asked for,
+/// has its file named for what it wrote.
+#[test]
+fn a_new_file_is_named_for_what_was_written_and_never_over_another() {
+    let (mut app, dir) = app_over("command-new-named", &[("a.png", 4, 3)]);
+    std::fs::create_dir_all(dir.join("made")).unwrap();
+    write_png(&dir.join("made"), "p.png", 6, 2);
+    ::image::RgbImage::new(3, 3)
+        .save(dir.join("made/j.jpg"))
+        .unwrap();
+    let received = with_commands(
+        &mut app,
+        r#"[command.jpeg]
+run = 'cp made/j.jpg "$GAMUT_OUTPUT"'
+output = "new"
+name = "{stem}-small.png"
+[command.late]
+run = 'cp made/p.png "$GAMUT_OUTPUT"; cp made/p.png late.png'
+output = "new"
+name = "late.png"
+[command.gen]
+run = 'cp made/p.png "$GAMUT_OUTPUT"'
+needs = "none"
+output = "new"
+"#,
+    );
+    let run = |app: &mut App, index: usize| {
+        let _ = app.perform(input::Action::Command(index));
+        let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+        assert!(app.commands.running(), "{index}: {}", said(app));
+        finish(app, &received);
+        let said = said(app);
+        answer(app, Reload::Fresh);
+        said
+    };
+    assert_eq!(naming_of_command(&mut app, 0), "a-small.png");
+    assert_eq!(
+        run(&mut app, 0),
+        spelled_here("jpeg made a-small.jpg, since it wrote JPG. Ctrl+Z to undo.")
+    );
+    assert_eq!(
+        decode::probe(&dir.join("a-small.jpg")).unwrap(),
+        Some((3, 3))
+    );
+    assert_eq!(
+        run(&mut app, 1),
+        spelled_here("late made late-2.png, since late.png was taken. Ctrl+Z to undo.")
+    );
+    assert_eq!(naming_of_command(&mut app, 2), "gen");
+    assert_eq!(
+        run(&mut app, 2),
+        spelled_here("gen made gen.png. Ctrl+Z to undo.")
+    );
+    assert_eq!(output_dirs(&dir), Vec::<PathBuf>::new());
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// The name the dialog of the command at `index` offers, the dialog put
+/// down again.
+fn naming_of_command(app: &mut App, index: usize) -> String {
+    let _ = app.perform(input::Action::Command(index));
+    let name = naming_of(app).name;
+    let _ = app.act(ui::Command::Press(ui::Control::CommandCancel));
+    name
+}
+
+/// A command that may replace its file or make a new one does whichever
+/// its dialog's box says, the box remembered for the next time; the box is
+/// dead, and says why, where the file cannot be replaced.
+#[test]
+fn a_command_replaces_its_file_or_makes_a_new_one_as_asked() {
+    let (mut app, dir) = app_over("command-choose", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    std::fs::create_dir_all(dir.join("made")).unwrap();
+    write_png(&dir.join("made"), "wider.png", 6, 2);
+    let received = with_commands(
+        &mut app,
+        r#"[command.mark]
+run = 'cp made/wider.png "$GAMUT_OUTPUT"'
+output = "choose"
+"#,
+    );
+    let _ = app.perform(input::Action::Command(0));
+    let naming = naming_of(&mut app);
+    assert_eq!(naming.replace, Some((false, None)));
+    assert_eq!(naming.name, "a-mark.png");
+    let _ = app.act(ui::Command::DialogReplace(true));
+    let naming = naming_of(&mut app);
+    assert_eq!(naming.name, "a.png", "the file's own, while it is replaced");
+    assert_eq!(
+        naming.line,
+        Some((
+            "The original goes to the trash.".to_string(),
+            ui::rename::Tone::Note
+        ))
+    );
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    finish(&mut app, &received);
+    assert_eq!(
+        said(&app),
+        spelled_here("mark changed a.png. The original is in the trash. Ctrl+Z to undo.")
+    );
+    assert_eq!(decode::probe(&dir.join("a.png")).unwrap(), Some((6, 2)));
+    assert_eq!(app.files.len(), 1);
+    answer(&mut app, Reload::InPlace);
+
+    // Remembered; cleared, it makes a new file.
+    let _ = app.perform(input::Action::Command(0));
+    assert_eq!(naming_of(&mut app).replace, Some((true, None)));
+    let _ = app.act(ui::Command::DialogReplace(false));
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    finish(&mut app, &received);
+    assert_eq!(
+        said(&app),
+        spelled_here("mark made a-mark.png. Ctrl+Z to undo.")
+    );
+    assert_eq!(app.files.len(), 2);
+    answer(&mut app, Reload::Fresh);
+
+    // No trash to keep the original in: the box is dead, and cleared.
+    app.trash = None;
+    let _ = app.perform(input::Action::Command(0));
+    let naming = naming_of(&mut app);
+    assert_eq!(
+        naming.replace,
+        Some((false, Some(crate::app::edits::NO_TRASH.to_string())))
+    );
+    let _ = app.act(ui::Command::DialogReplace(true));
+    assert_eq!(naming_of(&mut app).replace.map(|(on, _)| on), Some(false));
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 

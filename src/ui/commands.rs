@@ -125,7 +125,40 @@ pub struct Input {
     /// Whether this is its first frame, when its first field takes the
     /// keyboard.
     pub opened: bool,
+    /// The name of the file it makes, for a command that makes one.
+    pub naming: Option<Naming>,
 }
+
+/// The name a command's new file is to have, as the dialog shows it under
+/// the inputs.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Naming {
+    /// What the field says: the name typed, or the file's own while it is
+    /// to be replaced instead.
+    pub name: String,
+    /// The line under the field: what is wrong with the name, or where the
+    /// file goes.
+    pub line: Option<(String, Tone)>,
+    /// Whether what the field says will not do, which outlines it.
+    pub refused: bool,
+    /// For a command that may instead replace its file: whether it is to,
+    /// and why the box that says so cannot be ticked, where it cannot.
+    pub replace: Option<(bool, Option<String>)>,
+}
+
+impl Naming {
+    /// Whether the file is to be replaced rather than a new one made, and
+    /// the field has nothing to take.
+    pub fn replacing(&self) -> bool {
+        matches!(self.replace, Some((true, _)))
+    }
+}
+
+/// What the name row is called.
+pub const NAME: &str = "Name";
+
+/// What the box that has the command replace its file says.
+pub const REPLACE: &str = "Replace the original";
 
 /// What an input of the dialog is, with its default.
 #[derive(Clone, PartialEq, Debug)]
@@ -445,11 +478,22 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 if let Some(refused) = row.refused {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
-                        ui.add_space(words);
+                        ui.add_space(words + GAP);
                         rename::line(pass, ui, field, Some((refused.to_string(), Tone::Refusal)));
                     });
                 }
                 ui.add_space(GAP / 2.0);
+            }
+            if let Some(naming) = &input.naming {
+                naming_rows(
+                    pass,
+                    ui,
+                    naming,
+                    words,
+                    field,
+                    first.is_none(),
+                    input.opened,
+                );
             }
             ui.add_space(GAP / 2.0);
             if input.busy {
@@ -465,6 +509,68 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
             );
         },
     );
+}
+
+/// The new file's name under the inputs: its words and its field, the
+/// line under it, and for a command that may replace its file instead, the
+/// box that says it is to. `primary` where no input is typed into, so that
+/// the field takes the keyboard, its stem selected as the rename dialog's
+/// is as it opens.
+fn naming_rows(
+    pass: &mut Pass,
+    ui: &mut egui::Ui,
+    naming: &Naming,
+    words: f32,
+    field: f32,
+    primary: bool,
+    opened: bool,
+) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(FIELD_HEIGHT);
+        ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
+        label(pass, ui, NAME, words);
+        let replacing = naming.replacing();
+        ui.add_enabled_ui(!replacing, |ui| {
+            rename::name_field(
+                pass,
+                ui,
+                rename::NameField {
+                    id: id().with("name"),
+                    name: &naming.name,
+                    refused: naming.refused,
+                    width: field,
+                    suffix: None,
+                    opened: opened && primary && !replacing,
+                    primary: primary && !replacing,
+                },
+                Command::DialogName,
+            );
+        });
+    });
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
+        ui.add_space(words + GAP);
+        rename::line(pass, ui, field, naming.line.clone());
+    });
+    if let Some((on, dead)) = &naming.replace {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
+            ui.add_space(words + GAP);
+            let mut checked = *on;
+            ui.allocate_ui(vec2(field, ROW), |ui| {
+                let response =
+                    ui.add_enabled(dead.is_none(), egui::Checkbox::new(&mut checked, REPLACE));
+                let response = match dead {
+                    Some(why) => response.on_disabled_hover_text(why),
+                    None => response,
+                };
+                if response.changed() {
+                    pass.commands.push(Command::DialogReplace(checked));
+                }
+            });
+        });
+    }
+    ui.add_space(GAP / 2.0);
 }
 
 /// `Enter`, taken before the fields can see it: the command run where

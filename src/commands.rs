@@ -42,17 +42,76 @@ pub struct Command {
     pub confirm: bool,
     /// Whether the picture as shown is written out for it to read.
     pub shown: bool,
-    /// Whether what it writes to `GAMUT_OUTPUT` takes the place of the file
-    /// it ran on: `output = "replace"`.
-    pub replaces: bool,
+    /// What becomes of what it writes to `GAMUT_OUTPUT`.
+    pub output: Output,
+    /// The name its new file is offered under, `{stem}` standing for the
+    /// file's own: `name = "{stem}-small.jpg"`. Only for an output that
+    /// makes a new file; where none is given, the dialog makes one up.
+    pub new_name: Option<String>,
     /// What its dialog asks for, in the order the file lists them.
     pub inputs: Vec<Input>,
 }
 
+/// What becomes of what a command writes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Output {
+    /// Nothing: the command writes wherever it likes, if anywhere, and
+    /// says `open` for the window to show it.
+    #[default]
+    Own,
+    /// `"replace"`: what it writes to `GAMUT_OUTPUT` takes the place of the
+    /// file it ran on.
+    Replace,
+    /// `"new"`: what it writes to `GAMUT_OUTPUT` becomes a new file under
+    /// the name its dialog asks for.
+    New,
+    /// `"choose"`: either, as its dialog is told.
+    Choose,
+}
+
+impl Output {
+    /// What the configuration file writes for each, `Own` being left out.
+    const WORDS: [(&str, Output); 3] = [
+        ("replace", Output::Replace),
+        ("new", Output::New),
+        ("choose", Output::Choose),
+    ];
+
+    /// Whether it can make a new file, whose name its dialog asks for.
+    pub fn makes(self) -> bool {
+        matches!(self, Output::New | Output::Choose)
+    }
+
+    /// Whether it can take the place of the file it ran on.
+    pub fn replaces(self) -> bool {
+        matches!(self, Output::Replace | Output::Choose)
+    }
+}
+
+/// What a command's `name` stands for the file's own name without its
+/// extension by.
+pub const STEM: &str = "{stem}";
+
+/// What is wrong with `name` as the name a command's new file is offered
+/// under, if anything: a name of a file in a folder, holding no `{…}` but
+/// [`STEM`].
+fn name_problem(name: &str) -> Option<String> {
+    if name.contains('/') || name.chars().any(char::is_control) {
+        return Some("is a file's name, with no / and no control characters".into());
+    }
+    if name == "." || name == ".." {
+        return Some(format!("{name} is not a file's name"));
+    }
+    let rest = name.replace(STEM, "");
+    (rest.contains('{') || rest.contains('}'))
+        .then(|| format!("holds a {{ or }} that is not {STEM}, the one name it can hold"))
+}
+
 impl Command {
-    /// Whether pressing it opens its dialog rather than running it.
+    /// Whether pressing it opens its dialog rather than running it: it has
+    /// something to ask, or a name for a new file to have typed.
     pub fn asks(&self) -> bool {
-        self.confirm || !self.inputs.is_empty()
+        self.confirm || !self.inputs.is_empty() || self.output.makes()
     }
 
     /// The name its key is bound by.
@@ -90,7 +149,7 @@ fn input_name(name: &str) -> bool {
 }
 
 /// What a command's table takes.
-const FIELDS: &str = "label, run, needs, confirm, shown, output or input";
+const FIELDS: &str = "label, run, needs, confirm, shown, output, name or input";
 
 /// A problem, and the line it is said on.
 type Problem = (usize, String);
@@ -146,11 +205,13 @@ fn read_command(
         needs: Needs::default(),
         confirm: false,
         shown: false,
-        replaces: false,
+        output: Output::Own,
+        new_name: None,
         inputs: Vec::new(),
     };
     let mut run = None;
     let mut output_at = line;
+    let mut name_at = line;
     for (key, value) in fields.iter() {
         let field: &str = key.get_ref();
         let at = lines.of(value.span());
@@ -183,14 +244,25 @@ fn read_command(
             "shown" => flag(value).map(|on| command.shown = on),
             "output" => words(value).and_then(|word| {
                 output_at = at;
-                match word.as_str() {
-                    "replace" => {
-                        command.replaces = true;
+                match Output::WORDS.iter().find(|(each, _)| *each == word) {
+                    Some((_, output)) => {
+                        command.output = *output;
                         Ok(())
                     }
-                    other => Err(format!(
-                        "command.{name}.output is \"replace\", or left out, not \"{other}\""
+                    None => Err(format!(
+                        "command.{name}.output is \"replace\", \"new\" or \"choose\", \
+                         or left out, not \"{word}\""
                     )),
+                }
+            }),
+            "name" => words(value).and_then(|given| {
+                name_at = at;
+                match name_problem(&given) {
+                    Some(problem) => Err(format!("command.{name}.name {problem}")),
+                    None => {
+                        command.new_name = Some(given);
+                        Ok(())
+                    }
                 }
             }),
             "input" => {
@@ -217,15 +289,44 @@ fn read_command(
         return None;
     };
     // What it replaces is the file it ran on, so it needs one.
-    if command.replaces && command.needs == Needs::Nothing {
+    if command.output.replaces() && command.needs == Needs::Nothing {
+        let (instead, output) = match command.output {
+            Output::Choose => ("it makes a new file instead", Output::New),
+            _ => ("it runs without replacing", Output::Own),
+        };
         problems.push((
             output_at,
             format!(
                 "command.{name} replaces the file it runs on, so it cannot need none; \
-                 it runs without replacing"
+                 {instead}"
             ),
         ));
-        command.replaces = false;
+        command.output = output;
+    }
+    if command.new_name.is_some() && !command.output.makes() {
+        problems.push((
+            name_at,
+            format!(
+                "command.{name}.name is the name of the new file that output \"new\" \
+                 or \"choose\" makes"
+            ),
+        ));
+        command.new_name = None;
+    }
+    if command.needs == Needs::Nothing
+        && command
+            .new_name
+            .as_deref()
+            .is_some_and(|given| given.contains(STEM))
+    {
+        problems.push((
+            name_at,
+            format!(
+                "command.{name}.name holds {STEM}, the file's own name, \
+                 and command.{name} needs none"
+            ),
+        ));
+        command.new_name = None;
     }
     Some(Command { run, ..command })
 }
@@ -445,7 +546,10 @@ pub const TEMPLATE: &str = "\n\
 # names: the name, an equals sign, and the rest of the line, unquoted. What
 # it prints is shown, never obeyed. With output set to \"replace\", it writes
 # its version of the file to $GAMUT_OUTPUT, which then takes the file's
-# place: the original goes to the trash, and undo brings it back.
+# place: the original goes to the trash, and undo brings it back. With
+# \"new\", what it writes there becomes a new file, under the name its dialog
+# asks for, which name offers, {stem} being the file's own; with \"choose\",
+# the dialog asks which of the two.
 #   [command.redact]
 #   label = \"Redact region\"
 #   run = \"~/bin/redact.sh\"
@@ -614,15 +718,61 @@ fn make_run_dir(id: u64) -> io::Result<PathBuf> {
     fresh_dir(&runs, &format!("{}-{id}", std::process::id()))
 }
 
-/// Where run `id` of a command that replaces `file` writes what is to take
-/// its place: a directory of its own, made fresh beside the file — on its
-/// filesystem, so that the file can be replaced by a rename, and hidden,
+/// Where run `id` of a command whose output the window puts in place —
+/// in the place of a file in `folder`, or as a new file there — has it
+/// written: a directory of its own, made fresh in that folder — on its
+/// filesystem, so that the output is put in place by a rename, and hidden,
 /// so that nothing that lists the folder's images lists what is in it.
-/// What is written there keeps the file's name, and so the extension a
-/// tool that writes many formats picks one by.
-pub fn make_output_dir(file: &Path, id: u64) -> io::Result<PathBuf> {
-    let beside = file.parent().unwrap_or(Path::new(""));
-    fresh_dir(beside, &format!(".{PROGRAM}-{}-{id}", std::process::id()))
+pub fn make_output_dir(folder: &Path, id: u64) -> io::Result<PathBuf> {
+    fresh_dir(folder, &format!(".{PROGRAM}-{}-{id}", std::process::id()))
+}
+
+/// What the output is called in that directory: a name of the window's,
+/// so that nothing typed reaches the command's arguments — a `%` or a
+/// `[` is a pattern to ImageMagick — with `extension`, where there is one,
+/// which a tool that writes many formats picks one by.
+pub fn output_name(extension: Option<&str>) -> String {
+    match extension {
+        Some(extension) => format!("output.{extension}"),
+        None => "output".to_string(),
+    }
+}
+
+/// The name a command that makes a new file offers it under, before
+/// anything is typed: its `name`, `{stem}` made the stem of `file`, the
+/// file on screen; or the file's stem with the command's name after it and
+/// its extension, and the command's name alone for one that needs nothing,
+/// whose file is its own to say the format of. Counted up past whatever
+/// `taken` says is in the folder already.
+pub fn offered_name(
+    command: &Command,
+    file: Option<&Path>,
+    taken: impl Fn(&str) -> bool,
+) -> String {
+    let part = |of: Option<&std::ffi::OsStr>| of.map(|part| part.to_string_lossy().into_owned());
+    let stem = file.and_then(|file| part(file.file_stem()));
+    let extension = file.and_then(|file| part(file.extension()));
+    let made = match (&command.new_name, &stem) {
+        (Some(name), _) => name.replace(STEM, stem.as_deref().unwrap_or_default()),
+        (None, Some(stem)) if command.needs != Needs::Nothing => match &extension {
+            Some(extension) => format!("{stem}-{}.{extension}", command.name),
+            None => format!("{stem}-{}", command.name),
+        },
+        (None, _) => command.name.clone(),
+    };
+    if !taken(&made) {
+        return made;
+    }
+    let made = Path::new(&made);
+    let stem = part(made.file_stem()).unwrap_or_default();
+    let extension = part(made.extension());
+    (2..)
+        .map(|count| match &extension {
+            Some(extension) => format!("{stem}-{count}.{extension}"),
+            None => format!("{stem}-{count}"),
+        })
+        .find(|name| !taken(name))
+        .unwrap_or_default()
 }
 
 /// A directory under `parent` called `base`, or `base` with a number after
@@ -1052,8 +1202,8 @@ mod tests {
         assert!(problems[0].1.contains("goes above the first [command]"));
     }
 
-    /// `output = "replace"` is the one output there is, and a command that
-    /// needs nothing has no file to replace: it is taken without.
+    /// An output is one of three words, and a command that needs nothing
+    /// has no file to replace: it is taken without.
     #[test]
     fn a_command_replaces_its_file_where_it_has_one() {
         let (commands, problems) = parsed(
@@ -1068,14 +1218,100 @@ mod tests {
              needs = \"none\"\n\
              output = \"replace\"\n",
         );
-        let replaces: Vec<(&str, bool)> = commands
+        let replaces: Vec<(&str, Output)> = commands
             .iter()
-            .map(|c| (c.name.as_str(), c.replaces))
+            .map(|c| (c.name.as_str(), c.output))
             .collect();
-        assert_eq!(replaces, [("strip", true), ("odd", false), ("none", false)]);
+        assert_eq!(
+            replaces,
+            [
+                ("strip", Output::Replace),
+                ("odd", Output::Own),
+                ("none", Output::Own)
+            ]
+        );
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
         assert_eq!(lines, [6, 10], "{problems:?}");
         assert!(problems[1].1.contains("cannot need none"), "{problems:?}");
+    }
+
+    /// A command that makes a new file may say its name, holding the
+    /// file's own as `{stem}` where it has a file; a name anywhere else, or
+    /// one that is not a name, is said and left out. One that may replace
+    /// its file, needing none, makes a new one instead.
+    #[test]
+    fn a_new_files_name_is_read_where_one_is_made() {
+        let (commands, problems) = parsed(
+            "[command.mark]\n\
+             run = \"mark.sh\"\n\
+             output = \"choose\"\n\
+             name = \"{stem}-marked.jpg\"\n\
+             [command.make]\n\
+             run = \"make.sh\"\n\
+             needs = \"none\"\n\
+             output = \"new\"\n\
+             name = \"{stem}.png\"\n\
+             [command.own]\n\
+             run = \"own.sh\"\n\
+             name = \"own.png\"\n\
+             [command.bad]\n\
+             run = \"bad.sh\"\n\
+             output = \"new\"\n\
+             name = \"a/{name}.png\"\n\
+             [command.braces]\n\
+             run = \"braces.sh\"\n\
+             output = \"new\"\n\
+             name = \"{when}.png\"\n\
+             [command.either]\n\
+             run = \"either.sh\"\n\
+             needs = \"none\"\n\
+             output = \"choose\"\n",
+        );
+        let read: Vec<(&str, Output, Option<&str>)> = commands
+            .iter()
+            .map(|c| (c.name.as_str(), c.output, c.new_name.as_deref()))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("mark", Output::Choose, Some("{stem}-marked.jpg")),
+                ("make", Output::New, None),
+                ("own", Output::Own, None),
+                ("bad", Output::New, None),
+                ("braces", Output::New, None),
+                ("either", Output::New, None),
+            ]
+        );
+        assert!(commands[0].asks() && commands[1].asks() && !commands[2].asks());
+        let said: Vec<(usize, &str)> = problems
+            .iter()
+            .map(|(line, problem)| (*line, problem.as_str()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                (
+                    9,
+                    "command.make.name holds {stem}, the file's own name, and command.make needs none"
+                ),
+                (
+                    12,
+                    "command.own.name is the name of the new file that output \"new\" or \"choose\" makes"
+                ),
+                (
+                    16,
+                    "command.bad.name is a file's name, with no / and no control characters"
+                ),
+                (
+                    20,
+                    "command.braces.name holds a { or } that is not {stem}, the one name it can hold"
+                ),
+                (
+                    24,
+                    "command.either replaces the file it runs on, so it cannot need none; it makes a new file instead"
+                ),
+            ]
+        );
     }
 
     /// A line of the shell keeps every quote it was written with.

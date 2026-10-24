@@ -878,6 +878,31 @@ pub fn probe(path: &Path) -> Result<Option<(u32, u32)>> {
     Opened::new(path)?.dimensions()
 }
 
+/// The extension a file holding what is at `path` is to be named with:
+/// `asked`, where it is one the format its leading bytes say is known by,
+/// and that format's own otherwise — for a file a command wrote, whose name
+/// is the window's to give. `None` where nothing reads it.
+pub fn extension_for(path: &Path, asked: Option<&str>) -> Option<String> {
+    let opened = Opened::new(path).ok()?;
+    let format = opened.format();
+    let decoder = opened.decoder;
+    // A decoder of one format answers to all its extensions; one of several
+    // says which, and that is the extension, but for the family of netpbm's.
+    let known: &[&str] = if format == decoder.name() {
+        decoder.extensions()
+    } else if format == "netpbm" {
+        &["pnm", "pbm", "pgm", "ppm", "pam"]
+    } else {
+        std::slice::from_ref(&format)
+    };
+    if let Some(asked) = asked
+        && known.iter().any(|each| each.eq_ignore_ascii_case(asked))
+    {
+        return Some(asked.to_string());
+    }
+    Some(known.first().copied().unwrap_or(format).to_string())
+}
+
 /// The format of `path`, as the decoder that owns it says — see
 /// [`Opened::format`]. `None` where nothing claims it, or where it cannot
 /// be opened at all — the panel then says nothing rather than something

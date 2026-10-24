@@ -2929,6 +2929,8 @@ impl App {
             ui::Command::DialogInput(input, value) => {
                 return self.set_command_input(input, value);
             }
+            ui::Command::DialogName(name) => return self.set_command_name(name),
+            ui::Command::DialogReplace(on) => return self.set_command_replace(on),
             ui::Command::ExportSize(dimension, text) => self.set_export_size(dimension, text),
             ui::Command::Cursor(step) => self.chooser.step(step),
             ui::Command::Visible(rows) => {
