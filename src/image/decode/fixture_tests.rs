@@ -1043,6 +1043,32 @@ const FIXTURES: &[Fixture] = &[
         tolerance: LOSSY,
         ..PLAIN
     },
+    Fixture {
+        file: "tiff-webp.tif",
+        covers: "WebP compression, lossless, with alpha, in tiles the last row of which is short",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Ramp,
+        nodata: None,
+        tolerance: EXACT,
+        ..PLAIN
+    },
+    Fixture {
+        file: "tiff-webp-opaque.tif",
+        covers: "WebP compression of four samples whose alpha is opaque, which libtiff leaves out of every full tile's WebP and keeps in the padded ones",
+        channels: Channels::Rgba,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Straight,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+        ..PLAIN
+    },
     // -------------------------------------------------------- Radiance
     Fixture {
         file: "hdr-rgbe.hdr",

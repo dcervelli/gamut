@@ -25,6 +25,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A TIFF holding several bands of gray, as a GIS writes a stack of a
   satellite's bands or a classifier's probabilities, opens with each band
   as a page, named in the bar where the file describes it. It was refused.
+- WebP-compressed TIFFs open, as GDAL writes an orthophoto with
+  `COMPRESS=WEBP`, an alpha band included.
 
 ### Changed
 
