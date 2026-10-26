@@ -9,6 +9,7 @@ mod exporting;
 mod files;
 mod filmstrip;
 pub mod folder;
+mod ground;
 mod gui;
 pub mod input;
 mod kept;
@@ -42,6 +43,7 @@ use crate::image::DecodedImage;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{self, CameraJpeg, Reading, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
+use crate::image::exif::Exif;
 use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Source};
@@ -1664,6 +1666,27 @@ impl App {
         Some((view, size))
     }
 
+    /// The view a file arriving with `exif`, `stored` pixels as stored and
+    /// shown under `turn`, lines up with the picture on screen by — where
+    /// both are georeferenced in one system and the ground on screen
+    /// overlaps it.
+    fn on_the_same_ground(&self, exif: &Exif, stored: [u32; 2], turn: Turn) -> Option<View> {
+        let current = self.current.as_ref()?;
+        let (view, _) = self.picture_view()?;
+        let (picture, _) = current.picture();
+        let from = ground::Placed {
+            geo: current.exif.georeference.as_ref()?,
+            stored: [picture.width, picture.height],
+            turn: current.turn,
+        };
+        let to = ground::Placed {
+            geo: exif.georeference.as_ref()?,
+            stored,
+            turn,
+        };
+        ground::aligned(view, from, to, self.viewport())
+    }
+
     /// A read asked for `asked` has landed. Where the preference has moved
     /// since and the picture on screen has another rendering to move to, it
     /// is read again in the one asked for now.
@@ -2939,7 +2962,15 @@ impl App {
         {
             self.marking.clear();
         }
-        self.view = arriving_view(arrival, kept.as_ref(), self.view, shown_size, size);
+        // Another file of the ground on screen lines up with it, ahead of
+        // anything its arrival or what it was left in would make of the
+        // view: the comparison is of the place, wherever its pixels are.
+        let on_the_ground = match stepping {
+            true => self.on_the_same_ground(&exif, [image.width, image.height], turn),
+            false => None,
+        };
+        self.view = on_the_ground
+            .unwrap_or_else(|| arriving_view(arrival, kept.as_ref(), self.view, shown_size, size));
         if arrival != Arrival::Reread {
             // A move under way was about the picture that has just left, and
             // there is nothing for it to carry the eye across any more.

@@ -8,6 +8,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- Stepping between two georeferenced files in the same coordinate system
+  lines them up on the ground: when the file arriving covers any of the
+  ground on screen, that ground stays in the middle of the window at the
+  same scale, whatever the two files' sizes and resolutions.
 - The info panel's Image section gives the density the file says it has —
   *600 dpi* — and the size the picture prints at at that density, naming
   the sheet where it is one: *420 × 297 mm · A3*. A size no sheet is is
