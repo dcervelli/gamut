@@ -1846,6 +1846,42 @@ fn stepping_to_an_image_of_the_same_size_keeps_the_view() {
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
+/// A file of the same shape at another size is the same comparison made
+/// at another resolution — one map of the ground at twice the detail of
+/// another: the detail under the center of the window stays there, at the
+/// size it was on screen, and the display is the file's own.
+#[test]
+fn stepping_to_an_image_of_the_same_shape_rescales_the_view() {
+    let (mut app, dir) = app_over("shape", &[("a.png", 32, 24), ("b.png", 64, 48)]);
+    app.view
+        .set_zoom_at(4.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
+    app.view.pan_by(-40.0, 30.0, app.image_size(), VIEWPORT);
+    let before = app.view.placement(app.image_size(), VIEWPORT);
+    let centered = before.image_point(VIEWPORT.center());
+    if let Some(current) = app.current.as_mut() {
+        current.display.set_exposure(1.0);
+    }
+
+    let _ = app.step(true);
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.image_size(), [64.0, 48.0]);
+    let after = app.view.placement(app.image_size(), VIEWPORT);
+    let landed = after.image_point(VIEWPORT.center());
+    assert!(
+        (after.width - before.width).abs() < 1e-3,
+        "the same size on screen: {after:?} {before:?}"
+    );
+    assert!(
+        (landed[0] - centered[0] * 2.0).abs() < 1e-3
+            && (landed[1] - centered[1] * 2.0).abs() < 1e-3,
+        "the same detail at the center: {landed:?} {centered:?}"
+    );
+    let current = app.current.as_ref().unwrap();
+    assert_eq!(current.display.exposure_stops(), 0.0, "its own display");
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
 /// A file coming back at the size of the one it is arriving beside is a
 /// comparison, and it is made where the eye is: the pan and zoom carry
 /// over from the picture leaving the screen, whatever this file was left
@@ -4765,6 +4801,14 @@ fn an_arrival_is_named_by_what_it_stands_to() {
             Reload::Fresh,
             b,
             large,
+            Some((a, small)),
+            Arrival::Matched,
+            true,
+        ),
+        (
+            Reload::Fresh,
+            b,
+            [6.0, 16.0],
             Some((a, small)),
             Arrival::Anew,
             true,

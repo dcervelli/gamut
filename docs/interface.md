@@ -277,8 +277,12 @@ under a directory that is being written to.
 `]` and `[` keep the pan and zoom of the picture on screen when the file they
 land on is one they have not opened before and is the same size — a directory
 of frames or of exposures is a set to be compared, and the comparison only
-works if the same detail stays under the same pixels. A file of another size
-that has not been seen is a different picture, and is fitted.
+works if the same detail stays under the same pixels. A file of the same shape
+at another size — the same ground mapped at two resolutions, a picture beside
+its reduced copy — is the same comparison at another scale, so the view is
+rescaled to it (`Arrival::Matched`, through `View::rescale`): the detail at the
+center of the window stays there, at the size it was on screen. A file of
+another shape that has not been seen is a different picture, and is fitted.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window full`, `--exposure -1.5`, `--output hdr`,

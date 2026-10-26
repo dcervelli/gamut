@@ -152,8 +152,10 @@ rather than resetting them.
 
 A file being opened for the first time keeps the pan and zoom when it is the
 same size as the one on screen, so a directory of frames or exposures stays
-comparable under the same pixels. One of a different size is a different
-image, and is fitted. Files that cannot be decoded are stepped over. The list is whatever
+comparable under the same pixels. One of the same shape at another size, such
+as a map of the same ground at twice the detail, keeps the same spot in the
+middle of the window at the same size on screen. One of a different shape is
+a different image, and is fitted. Files that cannot be decoded are stepped over. The list is whatever
 was named at startup, in name order to begin with and in whatever order the
 file list's menus put it in after that; naming a directory puts the images in it
 on the list, and keeps it up to date as images are added to that directory or

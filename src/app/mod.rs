@@ -2824,7 +2824,7 @@ impl App {
         // left in: an exposure set on the camera's JPEG means nothing to
         // linear sensor counts, and the other way about.
         let kept = match arrival {
-            Arrival::Beside | Arrival::Anew => self
+            Arrival::Beside | Arrival::Matched | Arrival::Anew => self
                 .kept
                 .left(&file.path)
                 .filter(|left| left.rendering == rendering)
@@ -2930,7 +2930,11 @@ impl App {
         if stepping
             || matches!(
                 arrival,
-                Arrival::Rescaled | Arrival::Reshaped | Arrival::Anew | Arrival::Rerendered
+                Arrival::Rescaled
+                    | Arrival::Reshaped
+                    | Arrival::Matched
+                    | Arrival::Anew
+                    | Arrival::Rerendered
             )
         {
             self.marking.clear();
@@ -2943,7 +2947,7 @@ impl App {
         }
         // And what else could open the file arriving, read here with the rest
         // of what the file itself says about it.
-        if matches!(arrival, Arrival::Beside | Arrival::Anew) {
+        if matches!(arrival, Arrival::Beside | Arrival::Matched | Arrival::Anew) {
             self.openers = openers::for_file(&file.path);
         }
         self.current = Some(Current {
@@ -3474,6 +3478,11 @@ enum Arrival {
     /// Another file, of the same size as the picture on screen: the view
     /// carries over, the display is its own.
     Beside,
+    /// Another file of the same shape as the picture on screen at another
+    /// size — the same ground mapped at two resolutions, say: the view is
+    /// rescaled so the same detail stays where it was, at the size it was
+    /// on screen, and the display is its own.
+    Matched,
     /// Another file of another size, or a file into an empty window: put
     /// back as it was left, or fitted afresh.
     Anew,
@@ -3504,6 +3513,7 @@ fn arrival(
         (true, false) if same_shape => Arrival::Rescaled,
         (true, false) => Arrival::Reshaped,
         (false, true) => Arrival::Beside,
+        (false, false) if same_shape => Arrival::Matched,
         (false, false) => Arrival::Anew,
     };
     (arrival, stepping)
@@ -3546,10 +3556,11 @@ fn arriving_view(
             fitted.reset();
             fitted
         }
-        // The same scene rendered again, or at another size: the detail
-        // under the center of the window stays there, at the size it was
-        // on screen.
-        (Arrival::Rerendered | Arrival::Rescaled, _) => {
+        // The same scene rendered again, or at another size, or another
+        // file of the same shape — which is the same case as one of the
+        // same size, made at another resolution: the detail under the
+        // center of the window stays there, at the size it was on screen.
+        (Arrival::Rerendered | Arrival::Rescaled | Arrival::Matched, _) => {
             let mut rescaled = view;
             if let Some(from) = shown_size {
                 rescaled.rescale(from, size);

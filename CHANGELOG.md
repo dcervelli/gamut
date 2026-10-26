@@ -35,6 +35,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- Stepping to a file of the same shape as the one on screen at another
+  size, such as a map of the same ground at twice the detail, keeps the
+  same spot in the middle of the window at the same size on screen, as a
+  file of the same size keeps the pan and zoom. It used to be fitted.
 - The picture can be dragged past its edge, until the edge reaches the
   middle of the window, so an edge can be pulled out from under whatever is
   covering it. A fitted or small picture can be dragged that far too. The
