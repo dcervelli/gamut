@@ -34,6 +34,7 @@ fn the_camera_switch_says_what_a_press_brings_up() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera,
+        blocked: Vec::new(),
         conditions,
     };
     let lines = |namer: Namer| {
@@ -78,6 +79,7 @@ fn the_gain_map_toggle_on_a_profile_says_where_the_map_comes_from() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        blocked: Vec::new(),
         conditions,
     };
     let title = |conditions| {
@@ -280,6 +282,7 @@ fn the_open_buttons_name_the_keys_that_open_the_dialog() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        blocked: Vec::new(),
         conditions: Conditions::ALIVE,
     };
     assert_eq!(
@@ -324,6 +327,7 @@ fn the_open_buttons_name_the_keys_that_open_the_dialog() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        blocked: Vec::new(),
         conditions: Conditions {
             picking: true,
             ..Conditions::ALIVE
@@ -718,6 +722,7 @@ fn the_handles_say_which_keys_step_them() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        blocked: Vec::new(),
         conditions: Conditions {
             openable: false,
             data: false,
@@ -756,6 +761,7 @@ fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        blocked: Vec::new(),
         conditions: Conditions::ALIVE,
     };
     let tooltip = namer
@@ -830,6 +836,7 @@ fn a_copy_cell_is_named_by_its_words_and_its_key() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        blocked: Vec::new(),
         conditions: Conditions::ALIVE,
     };
     assert_eq!(
@@ -920,6 +927,7 @@ fn the_count_says_where_it_is_and_what_a_press_on_it_opens() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        blocked: Vec::new(),
         conditions: Conditions::ALIVE,
     };
     let tooltip = namer

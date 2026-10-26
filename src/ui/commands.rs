@@ -94,6 +94,10 @@ impl Slot {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Item {
     pub label: String,
+    /// The submenu it goes in, by its title — its command's label, for a
+    /// command with variants and each of them — and `None` for an item of
+    /// the menu itself.
+    pub submenu: Option<String>,
     pub asks: bool,
     pub slot: Slot,
     /// Whether a press on it would be taken: what it needs is there, and
@@ -105,6 +109,9 @@ pub struct Item {
 /// is, what it holds and what is wrong with that.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Row {
+    /// Its place among the command's inputs, which the dialog's changes
+    /// to it are sent by: the dialog leaves out those it does not ask for.
+    pub input: usize,
     pub label: String,
     pub kind: Kind,
     pub value: Value,
@@ -322,6 +329,54 @@ impl Kind {
                 (*low..=*high).contains(value)
             }
             _ => false,
+        }
+    }
+
+    /// What the configuration file's `value` is as one this kind holds —
+    /// what a variant sets the input to — or what is wrong with it.
+    pub fn value_of(&self, value: &crate::settings::document::Value) -> Result<Value, String> {
+        use crate::settings::document::{flag, number, shown, text};
+        let held = match self {
+            Kind::Text { .. } => text(value).map(|text| Value::Text(text.to_string())),
+            Kind::Number { .. } => number(value).map(|number| Value::Number(decimal(number))),
+            Kind::Checkbox { .. } => flag(value).map(Value::Checkbox),
+            Kind::Radio { choices, .. } => {
+                let Some(word) = text(value) else {
+                    return Err(format!("a choice is a string, not {}", shown(value)));
+                };
+                let Some(at) = choices.iter().position(|choice| choice == word) else {
+                    return Err(format!("`{word}` is not a choice: {}", choices.join(", ")));
+                };
+                Some(Value::Radio(at))
+            }
+            Kind::Slider { .. } => number(value).map(Value::Slider),
+        };
+        let Some(held) = held else {
+            let what = match self {
+                Kind::Text { .. } => "a string",
+                Kind::Checkbox { .. } => "true or false",
+                _ => "a number",
+            };
+            return Err(format!("it is {what}, not {}", shown(value)));
+        };
+        match self {
+            Kind::Slider { low, high, .. } if !self.holds(&held) => Err(format!(
+                "it is between {} and {}",
+                decimal(*low),
+                decimal(*high)
+            )),
+            Kind::Text { .. } if !self.holds(&held) => {
+                Err("it is on one line, as the input is".into())
+            }
+            _ => match self.judge(&held) {
+                Some(Refusal::Outside { low, high }) => Err(format!(
+                    "it is between {} and {}",
+                    decimal(low),
+                    decimal(high)
+                )),
+                Some(Refusal::NotANumber) => Err("it is a number".into()),
+                None => Ok(held),
+            },
         }
     }
 
@@ -659,7 +714,7 @@ fn widget(
                     Value::Number(_) => Value::Number(typed),
                     _ => Value::Text(typed),
                 };
-                pass.commands.push(Command::DialogInput(index, value));
+                pass.commands.push(Command::DialogInput(row.input, value));
             }
             if opened {
                 let mut state = output.state;
@@ -680,7 +735,7 @@ fn widget(
             ui.allocate_ui(vec2(width, ROW), |ui| {
                 if ui.checkbox(&mut checked, "").changed() {
                     pass.commands
-                        .push(Command::DialogInput(index, Value::Checkbox(checked)));
+                        .push(Command::DialogInput(row.input, Value::Checkbox(checked)));
                 }
             });
         }
@@ -691,7 +746,7 @@ fn widget(
                     for (at, choice) in choices.iter().enumerate() {
                         if ui.radio(at == *chosen, choice).clicked() && at != *chosen {
                             pass.commands
-                                .push(Command::DialogInput(index, Value::Radio(at)));
+                                .push(Command::DialogInput(row.input, Value::Radio(at)));
                         }
                     }
                 });
@@ -725,7 +780,7 @@ fn widget(
             if let Some(asked) = asked {
                 let snapped = snap(f64::from(asked), *low, *high, *step);
                 pass.commands
-                    .push(Command::DialogInput(index, Value::Slider(snapped)));
+                    .push(Command::DialogInput(row.input, Value::Slider(snapped)));
             }
             ui.add_sized(
                 vec2(SLIDER_VALUE, ROW),

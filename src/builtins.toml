@@ -1,0 +1,144 @@
+# The commands that come with gamut, and the programs they run, written as
+# the configuration file writes them: `commands::builtins` reads this, and
+# `commands::with_builtins` puts each after the configuration's own, unless
+# a table of the same name replaces it or `command.<name> = false` turns it
+# off. `--print-config` prints it, commented out, for a user to copy from.
+#
+# Each script is POSIX sh, run by `sh -c` on Linux and on a Mac alike; what
+# differs between the two is asked of `uname`. A program it runs reaches it
+# as $GAMUT_PROGRAM_<NAME>, found by gamut before the command could be
+# pressed, so a script never looks for one itself.
+
+[program.magick]
+label = "ImageMagick"
+# What ImageMagick 7 writes on every platform without a delegate of its own:
+# a raw it cannot write at all, and a HEIC only where it was built with
+# libheif.
+writes = ["jpg", "png", "tif", "webp", "bmp", "gif"]
+
+[program.exiftool]
+label = "ExifTool"
+# What it writes metadata into and keeps the picture of. A raw it can write
+# too, but taking its metadata away loses what develops it.
+writes = ["jpg", "png", "tif", "webp", "heic", "avif", "jxl"]
+
+# The region blacked out, as a copy or in the picture itself. The region
+# arrives in the file's own pixels, so no -auto-orient is wanted, and the
+# result keeps the photo's orientation and the rest of its metadata. A JPEG
+# is compressed again, at the quality ImageMagick reads off the original.
+[command.redact]
+label = "Redact"
+needs = "region"
+output = "choose"
+programs = ["magick"]
+variant = [
+  { name = "redact-copy", label = "Redact to a copy", output = "new" },
+  { name = "redact-in-place", label = "Redact in place", output = "replace" },
+]
+run = '''
+set -eu
+# ImageMagick's rectangle names its last pixel, not the edge past it.
+right=$((GAMUT_REGION_X + GAMUT_REGION_WIDTH - 1))
+bottom=$((GAMUT_REGION_Y + GAMUT_REGION_HEIGHT - 1))
+"$GAMUT_PROGRAM_MAGICK" "$GAMUT_FILE" -fill black -stroke none \
+    -draw "rectangle $GAMUT_REGION_X,$GAMUT_REGION_Y $right,$bottom" "$GAMUT_OUTPUT" || {
+    echo "error = ImageMagick could not redact $GAMUT_NAME" >> "$GAMUT_RESULT"
+    exit 1
+}
+'''
+
+# A line of text laid over one corner or the middle, mixed into the pixels
+# under it by ImageMagick's Overlay rather than painted over them, so the
+# picture's own texture shows through. The corner is the one seen: the copy
+# is stood upright by its EXIF orientation, which is then written as 1, and
+# turned as gamut shows it while the text goes on, then turned back.
+[command.watermark]
+label = "Watermark"
+output = "choose"
+programs = ["magick"]
+input = [
+  { name = "text", label = "Text", kind = "string", default = "©" },
+  { name = "size", label = "Size, % of height", kind = "slider", min = 1, max = 25, default = 6 },
+  { name = "position", label = "Position", kind = "radio", choices = ["UL", "UR", "C", "LL", "LR"], default = "LR" },
+]
+run = '''
+set -eu
+say_error() {
+    echo "error = $1" >> "$GAMUT_RESULT"
+    exit 1
+}
+[ -n "$GAMUT_INPUT_TEXT" ] || say_error "No text to write"
+case "$GAMUT_INPUT_POSITION" in
+    UL) gravity=NorthWest ;;
+    UR) gravity=NorthEast ;;
+    C) gravity=Center ;;
+    LL) gravity=SouthWest ;;
+    *) gravity=SouthEast ;;
+esac
+
+# The height the text is a share of is the picture's as seen: across a
+# quarter turn of the file's orientation or of gamut's, width and height
+# trade places.
+width=$GAMUT_WIDTH
+height=$GAMUT_HEIGHT
+case "${GAMUT_ORIENTATION:-1}" in
+    5 | 6 | 7 | 8) t=$width; width=$height; height=$t ;;
+esac
+turn=${GAMUT_TURN:-0}
+case "$turn" in
+    90 | 270) t=$width; width=$height; height=$t ;;
+esac
+
+# The slider's number may arrive as 6 or 6.5; the point size is whole.
+points=$(awk -v h="$height" -v s="$GAMUT_INPUT_SIZE" 'BEGIN { p = int(h * s / 100 + 0.5); print (p < 4 ? 4 : p) }')
+margin=$((points / 2))
+outline=$((points / 16 + 1))
+[ "$gravity" = Center ] && margin=0
+
+# A bold sans by its file, since ImageMagick knows fonts by no name every
+# system shares: fontconfig's answer, or the Arial Bold every Mac carries;
+# ImageMagick's default where there is neither.
+if [ "$(uname)" = Darwin ]; then
+    font="/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+else
+    font=$(fc-match -f '%{file}' 'sans:bold' 2> /dev/null || true)
+fi
+set --
+[ -n "$font" ] && [ -f "$font" ] && set -- -font "$font"
+
+# The text goes through a file rather than the command line, so that a %
+# or a backslash in it is written as typed rather than read as an escape.
+text_file=$(mktemp)
+trap 'rm -f "$text_file"' EXIT
+printf '%s' "$GAMUT_INPUT_TEXT" > "$text_file"
+
+# The layer is the picture's size, clear but for the text: a dark outline,
+# the light letters over it. Overlay then lightens the picture under the
+# letters and darkens it around them.
+"$GAMUT_PROGRAM_MAGICK" "$GAMUT_FILE[0]" -auto-orient -rotate "$turn" \
+    \( +clone -alpha transparent -background none \
+       -gravity "$gravity" -pointsize "$points" "$@" \
+       -fill none -stroke "rgba(0,0,0,0.6)" -strokewidth "$outline" \
+       -annotate "+$margin+$margin" "@$text_file" \
+       -fill "rgba(255,255,255,0.8)" -stroke none \
+       -annotate "+$margin+$margin" "@$text_file" \) \
+    -compose Overlay -composite \
+    -rotate "-$turn" "$GAMUT_OUTPUT" ||
+    say_error "ImageMagick could not write the picture"
+'''
+
+# Every tag taken out, the location included, keeping the orientation and
+# the color profile the picture needs to look right. ExifTool writes only
+# the format it read, so a copy is offered under the file's own extension.
+[command.strip]
+label = "Strip metadata"
+output = "choose"
+programs = ["exiftool"]
+run = '''
+set -eu
+"$GAMUT_PROGRAM_EXIFTOOL" -q -q -all= -tagsfromfile @ -Orientation -ColorSpaceTags \
+    -o "$GAMUT_OUTPUT" "$GAMUT_FILE" || {
+    echo "error = ExifTool could not strip $GAMUT_NAME" >> "$GAMUT_RESULT"
+    exit 1
+}
+'''

@@ -1680,6 +1680,9 @@ pub(super) struct Namer {
     /// Which of a raw's pictures is on screen, where the file carries the
     /// camera's JPEG: what the camera's switch says.
     camera: Option<Rendering>,
+    /// Why each command cannot be run now, by its place in the set, where
+    /// something of its own stands in the way — see `App::command_blocked`.
+    blocked: Vec<Option<String>>,
 }
 
 impl Naming for Namer {
@@ -1696,6 +1699,14 @@ impl Naming for Namer {
         // the surface switch on a monitor with no room above white — refuses
         // the press, so the label says why rather than naming the thing and
         // the key beside it, neither of which is going to happen.
+        if let Tip::Control(Control::RunCommand(slot)) = at
+            && let Some(Some(why)) = self.blocked.get(slot.index)
+        {
+            return Some(ui::Tooltip {
+                title: vec![why.clone()],
+                hints: Vec::new(),
+            });
+        }
         if let Some(refused) = ui::tooltip::disabled(at, self.conditions) {
             return Some(ui::Tooltip {
                 title: vec![refused.said.to_string()],
@@ -2226,6 +2237,12 @@ impl App {
                     index,
                     needs: command.needs,
                 };
+                // A key has no item to wear why it was refused, so a
+                // refusal of the command's own is said.
+                if let Some(why) = self.command_blocked(index) {
+                    self.toast(why, Level::Error);
+                    return Effect::Redraw;
+                }
                 return self.press(Control::RunCommand(slot));
             }
             // An open menu takes the key: dismissing a popup is what Escape
@@ -2742,6 +2759,9 @@ impl App {
                     CameraJpeg::Present(_) => Some(current.rendering),
                     CameraJpeg::Only(_) | CameraJpeg::Missing | CameraJpeg::Unavailable => None,
                 }),
+            blocked: (0..self.commands.set.len())
+                .map(|index| self.command_blocked(index))
+                .collect(),
         }
     }
 
@@ -2817,6 +2837,8 @@ impl App {
     /// no one could see would be worse than one that does nothing.
     pub(super) fn refuses(&self, control: Control) -> bool {
         ui::tooltip::disabled(Tip::Control(control), self.conditions()).is_some()
+            || matches!(control, Control::RunCommand(slot)
+                if self.command_blocked(slot.index).is_some())
     }
 
     /// Whether the horizon grid's spacing means anything now: the grid can

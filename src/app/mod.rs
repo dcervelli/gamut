@@ -832,7 +832,12 @@ impl App {
             show_beside: None,
             from_command_line: source.is_some() || named_directory,
             said_how_to_restore: false,
-            commands: commands::Commands::new(config.commands, ran),
+            commands: commands::Commands::new(
+                config.commands,
+                config.programs,
+                config.exiftool.clone(),
+                ran,
+            ),
             keys: Rc::new(config.keys),
             gestures: Rc::new(config.gestures),
             reported_error: false,
@@ -2507,7 +2512,8 @@ impl App {
     pub(super) fn reconfigure(&mut self, config: Config, complaint: Option<String>) -> Effect {
         self.keys = Rc::new(config.keys);
         self.gestures = Rc::new(config.gestures);
-        self.commands.replace(config.commands);
+        self.commands
+            .replace(config.commands, config.programs, config.exiftool.clone());
         self.open_map_link = config.open_map_link;
         self.open_map_bounds_link = config.open_map_bounds_link;
         // Looked for again where it was not found too, since what the

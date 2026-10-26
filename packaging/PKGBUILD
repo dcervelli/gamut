@@ -36,7 +36,9 @@ optdepends=('libx11: running under X11'
             'libxcursor: running under X11'
             'libxi: running under X11'
             'libxkbcommon-x11: running under X11'
-            'xdg-desktop-portal: the file dialog behind the empty window'"'"'s open buttons')
+            'xdg-desktop-portal: the file dialog behind the empty window'"'"'s open buttons'
+            'imagemagick: the built-in Redact and Watermark commands'
+            'perl-image-exiftool: the Tags tab, and the built-in Strip metadata command')
 makedepends=('cargo' 'pkgconf')
 options=('!debug')
 

@@ -550,26 +550,53 @@ pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
         for (control, label) in items {
             menu_item(pass, ui, control, label, true);
         }
-        // The configuration file's commands, after a rule: each item its
-        // label, trailing off where it asks before it runs, with its key.
+        // The configuration file's commands, after a rule, a command with
+        // variants a submenu of them.
         let commands = pass.input.commands.clone();
         if !commands.is_empty() {
             ui.separator();
         }
-        for item in commands {
-            let label = match item.asks {
-                true => format!("{}\u{2026}", item.label),
-                false => item.label,
+        let mut at = 0;
+        while at < commands.len() {
+            let Some(title) = &commands[at].submenu else {
+                command_item(pass, ui, &commands[at]);
+                at += 1;
+                continue;
             };
-            menu_item(
-                pass,
-                ui,
-                Control::RunCommand(item.slot),
-                label,
-                item.enabled,
-            );
+            // A command's variants follow it, so its submenu is the run of
+            // items that go in it.
+            let run = commands[at..]
+                .iter()
+                .take_while(|item| item.submenu.as_ref() == Some(title))
+                .count();
+            let items = &commands[at..at + run];
+            let enabled = items.iter().any(|item| item.enabled);
+            ui.add_enabled_ui(enabled, |ui| {
+                ui.menu_button(title, |ui| {
+                    for item in items {
+                        command_item(pass, ui, item);
+                    }
+                });
+            });
+            at += run;
         }
     });
+}
+
+/// One of the configuration file's commands on the file menu: its label,
+/// trailing off where it asks before it runs, with its key.
+fn command_item(pass: &mut Pass, ui: &mut Ui, item: &crate::ui::commands::Item) {
+    let label = match item.asks {
+        true => format!("{}\u{2026}", item.label),
+        false => item.label.clone(),
+    };
+    menu_item(
+        pass,
+        ui,
+        Control::RunCommand(item.slot),
+        label,
+        item.enabled,
+    );
 }
 
 /// One item of the file menu, `label` on it and its key beside it; drawn

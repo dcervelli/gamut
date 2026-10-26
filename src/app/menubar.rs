@@ -659,6 +659,7 @@ impl App {
             .map(|opener| Listed {
                 title: opener.name.clone(),
                 enabled: true,
+                submenu: None,
             })
             .collect();
         let commands: Vec<Listed> = self
@@ -670,6 +671,7 @@ impl App {
                     false => item.label,
                 },
                 enabled: item.enabled,
+                submenu: item.submenu,
             })
             .collect();
         // In the order of their places, `OPENERS` then `COMMANDS`.

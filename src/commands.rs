@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::settings::document::{self, Lines, Table, Value, shown};
-use crate::ui::commands::{KINDS, Kind, Needs};
+use crate::ui::commands::{KINDS, Kind, Needs, Value as Held};
 use crate::{PROGRAM, xdg};
 
 /// One command, as the configuration file defines it.
@@ -48,8 +48,23 @@ pub struct Command {
     /// file's own: `name = "{stem}-small.jpg"`. Only for an output that
     /// makes a new file; where none is given, the dialog makes one up.
     pub new_name: Option<String>,
-    /// What its dialog asks for, in the order the file lists them.
+    /// Its inputs, in the order the file lists them: what its dialog asks
+    /// for, and what it is given without asking.
     pub inputs: Vec<Input>,
+    /// For a variant, the name of the command it is a variant of, whose
+    /// table it is written in: what its dialog's values are remembered
+    /// under, and what the menu gathers it with.
+    pub base: Option<String>,
+    /// Whether the menus offer it. One they do not is still run by its key.
+    pub menu: bool,
+    /// The programs it runs, by name: each looked for before it can run,
+    /// and handed to it as `GAMUT_PROGRAM_<NAME>`.
+    pub programs: Vec<String>,
+    /// The extensions what it writes to `GAMUT_OUTPUT` can have: those
+    /// every program of its that says what it writes can write, in the
+    /// first's order; `None` where none says. Worked out by [`resolve`]
+    /// once the programs are known.
+    pub writes: Option<Vec<String>>,
 }
 
 /// What becomes of what a command writes.
@@ -109,9 +124,32 @@ fn name_problem(name: &str) -> Option<String> {
 
 impl Command {
     /// Whether pressing it opens its dialog rather than running it: it has
-    /// something to ask, or a name for a new file to have typed.
+    /// an input to ask for, or whether to replace its file or make a new
+    /// one, or a name for a new file to have typed, or is to ask
+    /// regardless. A variant asks only what it leaves open, so one that
+    /// makes a new file with nothing else to ask runs at once, under the
+    /// name it offers.
     pub fn asks(&self) -> bool {
-        self.confirm || !self.inputs.is_empty() || self.output.makes()
+        self.confirm
+            || self.output == Output::Choose
+            || (self.output == Output::New && self.base.is_none())
+            || self.asked().next().is_some()
+    }
+
+    /// The inputs its dialog asks for, by their places among its inputs:
+    /// every one neither hidden nor set by the variant it is.
+    pub fn asked(&self) -> impl Iterator<Item = (usize, &Input)> {
+        self.inputs
+            .iter()
+            .enumerate()
+            .filter(|(_, input)| input.asked())
+    }
+
+    /// What its dialog's values are remembered under: the command's own
+    /// name, or for a variant its base's, so that every variant of a
+    /// command opens with what any of them was last let go with.
+    pub fn family(&self) -> &str {
+        self.base.as_deref().unwrap_or(&self.name)
     }
 
     /// The name its key is bound by.
@@ -128,6 +166,26 @@ pub struct Input {
     pub name: String,
     pub label: String,
     pub kind: Kind,
+    /// Whether the dialog leaves it out, the command given its default or
+    /// what a variant sets it to.
+    pub hidden: bool,
+    /// What a variant sets it to, which the dialog does not ask for.
+    pub set: Option<Held>,
+}
+
+impl Input {
+    /// Whether the dialog asks for it.
+    pub fn asked(&self) -> bool {
+        !self.hidden && self.set.is_none()
+    }
+
+    /// What the command is given for it where the dialog does not ask:
+    /// what the variant sets, or its default.
+    pub fn given(&self) -> Held {
+        self.set
+            .clone()
+            .unwrap_or_else(|| self.kind.default_value())
+    }
 }
 
 /// Whether `name` is a command's name: lower-case letters, digits, `_` and
@@ -149,7 +207,11 @@ fn input_name(name: &str) -> bool {
 }
 
 /// What a command's table takes.
-const FIELDS: &str = "label, run, needs, confirm, shown, output, name or input";
+const FIELDS: &str =
+    "label, run, needs, confirm, shown, output, name, menu, programs, input or variant";
+
+/// What a variant's table takes.
+const VARIANT_FIELDS: &str = "name, label, set, output, confirm or menu";
 
 /// A problem, and the line it is said on.
 type Problem = (usize, String);
@@ -158,8 +220,9 @@ type Problem = (usize, String);
 /// writes them, and each thing in it that could not be used, by line. A
 /// command with no `run` is left out, and so is an input that does not
 /// read; the rest of each is taken.
-pub fn parse(table: &Table, lines: &Lines) -> (Vec<Command>, Vec<Problem>) {
+pub fn parse(table: &Table, lines: &Lines) -> Parsed {
     let mut commands = Vec::new();
+    let mut off = Vec::new();
     let mut problems = Vec::new();
     for (key, value) in table.iter() {
         let name: &str = key.get_ref();
@@ -171,33 +234,358 @@ pub fn parse(table: &Table, lines: &Lines) -> (Vec<Command>, Vec<Problem>) {
             ));
             continue;
         }
+        // A built-in command turned off, which `with_builtins` checks the
+        // name of.
+        if document::flag(value.get_ref()) == Some(false) {
+            off.push((name.to_string(), line));
+            continue;
+        }
         let Value::Table(fields) = value.get_ref() else {
             problems.push((
                 line,
                 format!(
-                    "command.{name} is a table of its fields, [command.{name}], not {}",
+                    "command.{name} is a table of its fields, [command.{name}], or false \
+                     to turn a built-in command off, not {}",
                     shown(value.get_ref())
                 ),
             ));
             continue;
         };
-        if let Some(command) = read_command(name, line, fields, lines, &mut problems) {
+        for (command, at) in read_command(name, line, fields, lines, &mut problems) {
+            // The name a key is bound by, so no two may share one. A
+            // command left out takes its variants with it.
+            if commands
+                .iter()
+                .any(|each: &Command| each.name == command.name)
+            {
+                problems.push((
+                    at,
+                    format!(
+                        "command.{name}: `{}` is already a command's name",
+                        command.name
+                    ),
+                ));
+                if command.base.is_none() {
+                    break;
+                }
+                continue;
+            }
             commands.push(command);
         }
     }
     problems.sort_by_key(|(line, _)| *line);
-    (commands, problems)
+    Parsed {
+        commands,
+        off,
+        problems,
+    }
 }
 
-/// One command, from its table; `line` is where it is first named, which a
-/// missing `run` is said on.
+/// What a file's `command` table defines.
+#[derive(Debug, Default)]
+pub struct Parsed {
+    /// Its commands, in the order it writes them, each followed by its
+    /// variants.
+    pub commands: Vec<Command>,
+    /// The built-in commands it turns off, `command.<name> = false`, each
+    /// with its line.
+    pub off: Vec<(String, usize)>,
+    pub problems: Vec<Problem>,
+}
+
+/// A program a command runs, as a `[program.<name>]` table describes it.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Program {
+    /// What it is called on `PATH`, and what a command's `programs` names
+    /// it by.
+    pub name: String,
+    /// What the window calls it: `ImageMagick`.
+    pub label: String,
+    /// Where it is, where that is not on `PATH`.
+    pub path: Option<String>,
+    /// The extensions of the files it can write, in lower case; `None`
+    /// where the table does not say.
+    pub writes: Option<Vec<String>>,
+}
+
+/// The variable a program named `name` reaches a command in:
+/// `GAMUT_PROGRAM_MAGICK`.
+pub fn variable_of(name: &str) -> String {
+    format!(
+        "GAMUT_PROGRAM_{}",
+        name.to_ascii_uppercase().replace('-', "_")
+    )
+}
+
+/// What a program's table takes.
+const PROGRAM_FIELDS: &str = "label, path or writes";
+
+/// The programs the file's `program` table describes, in its order, and
+/// each thing in it that could not be used, by line.
+pub fn parse_programs(table: &Table, lines: &Lines) -> (Vec<Program>, Vec<Problem>) {
+    let mut programs = Vec::new();
+    let mut problems = Vec::new();
+    for (key, value) in table.iter() {
+        let name: &str = key.get_ref();
+        let line = lines.of(key.span());
+        if !command_name(name) {
+            problems.push((
+                line,
+                format!("`{name}` is not a program's name: a-z, 0-9, _ and - only"),
+            ));
+            continue;
+        }
+        let Value::Table(fields) = value.get_ref() else {
+            problems.push((
+                line,
+                format!(
+                    "program.{name} is a table of its fields, [program.{name}], not {}",
+                    shown(value.get_ref())
+                ),
+            ));
+            continue;
+        };
+        let mut program = Program {
+            name: name.to_string(),
+            label: name.to_string(),
+            path: None,
+            writes: None,
+        };
+        for (key, value) in fields.iter() {
+            let field: &str = key.get_ref();
+            let at = lines.of(value.span());
+            let value = value.get_ref();
+            let words = || match document::text(value) {
+                Some(words) if !words.is_empty() => Ok(words.to_string()),
+                _ => Err(format!(
+                    "program.{name}.{field} is a string, not {}",
+                    shown(value)
+                )),
+            };
+            let outcome = match field {
+                "label" => words().map(|label| program.label = label),
+                "path" => words().map(|path| program.path = Some(path)),
+                "writes" => read_extensions(value)
+                    .map(|writes| program.writes = Some(writes))
+                    .map_err(|problem| format!("program.{name}.writes {problem}")),
+                other => Err(format!(
+                    "unknown field `{other}` of program.{name}: {PROGRAM_FIELDS}"
+                )),
+            };
+            if let Err(problem) = outcome {
+                problems.push((at, problem));
+            }
+        }
+        programs.push(program);
+    }
+    (programs, problems)
+}
+
+/// A list of programs' names, `["magick", "exiftool"]`, or what is wrong
+/// with it, after the field's name.
+fn read_program_names(value: &Value) -> Result<Vec<String>, String> {
+    let names = match value {
+        Value::Array(items) => items
+            .iter()
+            .map(|item| document::text(item.get_ref()).map(str::to_string))
+            .collect::<Option<Vec<String>>>(),
+        _ => None,
+    };
+    match names {
+        Some(names) if names.iter().all(|name| command_name(name)) => Ok(names),
+        Some(_) => Err("names programs as a command is named: a-z, 0-9, _ and - only".into()),
+        None => Err(format!(
+            "is a list of programs' names, [\"magick\"], not {}",
+            shown(value)
+        )),
+    }
+}
+
+/// A list of extensions, `["jpg", "png"]`, in lower case and without the
+/// dot, or what is wrong with it, after the field's name.
+fn read_extensions(value: &Value) -> Result<Vec<String>, String> {
+    let extensions = match value {
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                document::text(item.get_ref())
+                    .map(|extension| extension.trim_start_matches('.').to_ascii_lowercase())
+            })
+            .collect::<Option<Vec<String>>>(),
+        _ => None,
+    };
+    match extensions {
+        Some(extensions)
+            if !extensions.is_empty()
+                && extensions.iter().all(|extension| {
+                    !extension.is_empty() && extension.chars().all(|c| c.is_ascii_alphanumeric())
+                }) =>
+        {
+            Ok(extensions)
+        }
+        _ => Err(format!(
+            "is a list of extensions, [\"jpg\", \"png\"], not {}",
+            shown(value)
+        )),
+    }
+}
+
+/// The extensions that name one format, each spelled two ways.
+const ALIASES: [(&str, &str); 3] = [("jpg", "jpeg"), ("tif", "tiff"), ("heic", "heif")];
+
+/// Whether `a` and `b` are extensions of one format: the same in any case,
+/// or each the other's alias.
+pub fn same_extension(a: &str, b: &str) -> bool {
+    let (a, b) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
+    a == b
+        || ALIASES
+            .iter()
+            .any(|(one, other)| (a == *one && b == *other) || (a == *other && b == *one))
+}
+
+/// Whether `extension` is among `writes`.
+pub fn writes_extension(writes: &[String], extension: &str) -> bool {
+    writes.iter().any(|each| same_extension(each, extension))
+}
+
+/// The commands a configuration ends with: its own, then each built-in
+/// that none of its own replaces — a command of the same name replacing a
+/// built-in with its variants, and a built-in variant of the same name as
+/// one of its own left out — or turns off; and its programs, each replacing
+/// a built-in of the same name. Each command's `writes` is then worked out
+/// from the programs. A built-in turned off that is not one is said.
+pub fn with_builtins(
+    parsed: Parsed,
+    programs: Vec<Program>,
+    builtins: &Builtins,
+) -> (Vec<Command>, Vec<Program>, Vec<Problem>) {
+    let Parsed {
+        mut commands,
+        off,
+        mut problems,
+    } = parsed;
+    for (name, line) in &off {
+        let known = builtins.commands.iter().any(|each| each.name == *name);
+        if !known {
+            problems.push((
+                *line,
+                format!("command.{name} = false turns off a built-in command, and there is none called {name}"),
+            ));
+        }
+    }
+    let own: Vec<String> = commands.iter().map(|each| each.name.clone()).collect();
+    commands.extend(
+        builtins
+            .commands
+            .iter()
+            .filter(|each| {
+                let family = each.family();
+                !own.iter().any(|name| name == family || *name == each.name)
+                    && !off.iter().any(|(name, _)| name == family)
+            })
+            .cloned(),
+    );
+    let mut programs_kept = programs;
+    for builtin in &builtins.programs {
+        if !programs_kept.iter().any(|each| each.name == builtin.name) {
+            programs_kept.push(builtin.clone());
+        }
+    }
+    resolve(&mut commands, &programs_kept);
+    problems.sort_by_key(|(line, _)| *line);
+    (commands, programs_kept, problems)
+}
+
+/// Works out each command's `writes` from `programs`.
+pub fn resolve(commands: &mut [Command], programs: &[Program]) {
+    for command in commands {
+        let mut writes: Option<Vec<String>> = None;
+        for name in &command.programs {
+            let Some(says) = programs
+                .iter()
+                .find(|program| program.name == *name)
+                .and_then(|program| program.writes.as_ref())
+            else {
+                continue;
+            };
+            writes = Some(match writes {
+                None => says.clone(),
+                Some(held) => held
+                    .into_iter()
+                    .filter(|each| writes_extension(says, each))
+                    .collect(),
+            });
+        }
+        command.writes = writes;
+    }
+}
+
+/// The commands and programs that come with the program, read from
+/// [`BUILTINS`].
+#[derive(Clone, Debug, Default)]
+pub struct Builtins {
+    pub commands: Vec<Command>,
+    pub programs: Vec<Program>,
+}
+
+/// The built-in commands and the programs they run, as a configuration
+/// file writes them.
+pub const BUILTINS: &str = include_str!("builtins.toml");
+
+/// What the template ends with: [`BUILTINS`] commented out, its own
+/// opening comment, which is for whoever changes it, left off.
+pub fn builtins_template() -> String {
+    let mut text = String::from(
+        "\n# The built-in commands, and the programs they run. A [command.<name>]\n\
+         # table of your own replaces the one of that name with its variants,\n\
+         # setting command.<name> to false above the first table turns it off,\n\
+         # and a [program.<name>] table replaces that program's.\n",
+    );
+    let body = BUILTINS
+        .lines()
+        .skip_while(|line| line.starts_with('#'))
+        .skip_while(|line| line.is_empty());
+    for line in body {
+        match line {
+            "" => text.push_str("#\n"),
+            line => text.push_str(&format!("#   {line}\n")),
+        }
+    }
+    text
+}
+
+/// [`BUILTINS`] read, once.
+pub fn builtins() -> &'static Builtins {
+    static READ: std::sync::OnceLock<Builtins> = std::sync::OnceLock::new();
+    READ.get_or_init(|| {
+        let lines = Lines::new(BUILTINS);
+        let root = document::table(BUILTINS);
+        let field = |name: &str| match root.get_ref().get(name).map(|value| value.get_ref()) {
+            Some(Value::Table(table)) => Some(table.clone()),
+            _ => None,
+        };
+        let commands = field("command")
+            .map(|table| parse(&table, &lines).commands)
+            .unwrap_or_default();
+        let programs = field("program")
+            .map(|table| parse_programs(&table, &lines).0)
+            .unwrap_or_default();
+        let mut commands = commands;
+        resolve(&mut commands, &programs);
+        Builtins { commands, programs }
+    })
+}
+
+/// One command, from its table, and then each of its variants, each with
+/// the line it is named on; `line` is where the command is first named,
+/// which a missing `run` is said on. Nothing where it has no `run`.
 fn read_command(
     name: &str,
     line: usize,
     fields: &Table,
     lines: &Lines,
     problems: &mut Vec<Problem>,
-) -> Option<Command> {
+) -> Vec<(Command, usize)> {
     let mut command = Command {
         name: name.to_string(),
         label: name.to_string(),
@@ -208,10 +596,15 @@ fn read_command(
         output: Output::Own,
         new_name: None,
         inputs: Vec::new(),
+        base: None,
+        menu: true,
+        programs: Vec::new(),
+        writes: None,
     };
     let mut run = None;
     let mut output_at = line;
     let mut name_at = line;
+    let mut variants = None;
     for (key, value) in fields.iter() {
         let field: &str = key.get_ref();
         let at = lines.of(value.span());
@@ -265,8 +658,18 @@ fn read_command(
                     }
                 }
             }),
+            "menu" => flag(value).map(|on| command.menu = on),
+            "programs" => read_program_names(value)
+                .map(|names| command.programs = names)
+                .map_err(|problem| format!("command.{name}.programs {problem}")),
             "input" => {
                 command.inputs = read_inputs(name, at, value, lines, problems);
+                Ok(())
+            }
+            // Read once the inputs are, which it may set, wherever the
+            // table writes it.
+            "variant" => {
+                variants = Some((value, at));
                 Ok(())
             }
             // Every line after a `[command.…]` header is that command's,
@@ -286,24 +689,22 @@ fn read_command(
     }
     let Some(run) = run else {
         problems.push((line, format!("command.{name} has no run")));
-        return None;
+        return Vec::new();
     };
-    // What it replaces is the file it ran on, so it needs one.
-    if command.output.replaces() && command.needs == Needs::Nothing {
-        let (instead, output) = match command.output {
-            Output::Choose => ("it makes a new file instead", Output::New),
-            _ => ("it runs without replacing", Output::Own),
-        };
-        problems.push((
-            output_at,
-            format!(
-                "command.{name} replaces the file it runs on, so it cannot need none; \
-                 {instead}"
-            ),
-        ));
-        command.output = output;
-    }
-    if command.new_name.is_some() && !command.output.makes() {
+    command.run = run;
+    command.output = held_output(
+        &command,
+        &format!("command.{name}"),
+        command.output,
+        output_at,
+        problems,
+    );
+    let variants = match variants {
+        Some((value, at)) => read_variants(&command, at, value, lines, problems),
+        None => Vec::new(),
+    };
+    let makes = command.output.makes() || variants.iter().any(|(each, _)| each.output.makes());
+    if command.new_name.is_some() && !makes {
         problems.push((
             name_at,
             format!(
@@ -328,7 +729,215 @@ fn read_command(
         ));
         command.new_name = None;
     }
-    Some(Command { run, ..command })
+    let new_name = command.new_name.clone();
+    let mut read = vec![(command, line)];
+    read.extend(variants.into_iter().map(|(variant, at)| {
+        (
+            Command {
+                new_name: new_name.clone(),
+                ..variant
+            },
+            at,
+        )
+    }));
+    read
+}
+
+/// `output` as `command`'s, or what it comes to with what is said of it:
+/// what a command replaces is the file it ran on, so one that needs none
+/// cannot replace. `called` is how the problem names it, at `at`.
+fn held_output(
+    command: &Command,
+    called: &str,
+    output: Output,
+    at: usize,
+    problems: &mut Vec<Problem>,
+) -> Output {
+    if !output.replaces() || command.needs != Needs::Nothing {
+        return output;
+    }
+    let (instead, output) = match output {
+        Output::Choose => ("it makes a new file instead", Output::New),
+        _ => ("it runs without replacing", Output::Own),
+    };
+    problems.push((
+        at,
+        format!(
+            "{called} replaces the file it runs on, so it cannot need none; \
+             {instead}"
+        ),
+    ));
+    output
+}
+
+/// A command's variants: an array of tables, written
+/// `[[command.<name>.variant]]` or `variant = [{ … }, …]`, each the command
+/// under a name of its own with some of its inputs set, and its output,
+/// its confirmation and its place in the menus its own where it says.
+fn read_variants(
+    base: &Command,
+    line: usize,
+    value: &Value,
+    lines: &Lines,
+    problems: &mut Vec<Problem>,
+) -> Vec<(Command, usize)> {
+    let command = &base.name;
+    let Value::Array(items) = value else {
+        problems.push((
+            line,
+            format!(
+                "command.{command}.variant is a list of variants, each \
+                 [[command.{command}.variant]], not {}",
+                shown(value)
+            ),
+        ));
+        return Vec::new();
+    };
+    let mut variants = Vec::new();
+    for item in items.iter() {
+        let at = lines.of(item.span());
+        let Value::Table(fields) = item.get_ref() else {
+            problems.push((
+                at,
+                format!(
+                    "a variant of command.{command} is a table, not {}",
+                    shown(item.get_ref())
+                ),
+            ));
+            continue;
+        };
+        if let Some(variant) = read_variant(base, at, fields, lines, problems) {
+            variants.push((variant, at));
+        }
+    }
+    variants
+}
+
+/// One variant of `base`, from its table at `line`; `None` where it has no
+/// name a command can have. Whatever else is wrong with it is said and
+/// left out, the rest taken.
+fn read_variant(
+    base: &Command,
+    line: usize,
+    fields: &Table,
+    lines: &Lines,
+    problems: &mut Vec<Problem>,
+) -> Option<Command> {
+    let command = &base.name;
+    let Some(named) = fields.get("name") else {
+        problems.push((line, format!("a variant of command.{command} has no name")));
+        return None;
+    };
+    let name = match document::text(named.get_ref()) {
+        Some(name) if command_name(name) => name.to_string(),
+        _ => {
+            problems.push((
+                lines.of(named.span()),
+                format!(
+                    "{} is not a variant's name: a-z, 0-9, _ and - only",
+                    shown(named.get_ref())
+                ),
+            ));
+            return None;
+        }
+    };
+    let called = format!("command.{command} variant `{name}`");
+    let mut variant = Command {
+        name: name.clone(),
+        label: name.clone(),
+        base: Some(command.clone()),
+        // Its own place in the menus, whether or not its base has one.
+        menu: true,
+        confirm: base.confirm,
+        ..base.clone()
+    };
+    for (key, value) in fields.iter() {
+        let field: &str = key.get_ref();
+        let at = lines.of(value.span());
+        let value = value.get_ref();
+        let outcome = match field {
+            "name" => Ok(()),
+            "label" => match document::text(value) {
+                Some(label) if !label.is_empty() => {
+                    variant.label = label.to_string();
+                    Ok(())
+                }
+                _ => Err(format!("{called}: label is words, not {}", shown(value))),
+            },
+            "confirm" | "menu" => match document::flag(value) {
+                Some(on) => {
+                    match field {
+                        "confirm" => variant.confirm = on,
+                        _ => variant.menu = on,
+                    }
+                    Ok(())
+                }
+                None => Err(format!(
+                    "{called}: {field} is true or false, not {}",
+                    shown(value)
+                )),
+            },
+            "output" => match document::text(value)
+                .and_then(|word| Output::WORDS.iter().find(|(each, _)| *each == word))
+            {
+                Some((_, output)) => {
+                    variant.output = held_output(base, &called, *output, at, problems);
+                    Ok(())
+                }
+                None => Err(format!(
+                    "{called}: output is \"replace\", \"new\" or \"choose\", not {}",
+                    shown(value)
+                )),
+            },
+            "set" => {
+                read_set(&mut variant, &called, at, value, lines, problems);
+                Ok(())
+            }
+            other => Err(format!("{called} has no field `{other}`: {VARIANT_FIELDS}")),
+        };
+        if let Err(problem) = outcome {
+            problems.push((at, problem));
+        }
+    }
+    Some(variant)
+}
+
+/// A variant's `set`: a table of its inputs by name, each value one its
+/// kind holds, which the dialog then does not ask for.
+fn read_set(
+    variant: &mut Command,
+    called: &str,
+    line: usize,
+    value: &Value,
+    lines: &Lines,
+    problems: &mut Vec<Problem>,
+) {
+    let Value::Table(values) = value else {
+        problems.push((
+            line,
+            format!(
+                "{called}: set is a table of inputs by name, \
+                 {{ size = 10 }}, not {}",
+                shown(value)
+            ),
+        ));
+        return;
+    };
+    for (key, value) in values.iter() {
+        let name: &str = key.get_ref();
+        let at = lines.of(value.span());
+        let Some(input) = variant.inputs.iter_mut().find(|input| input.name == name) else {
+            problems.push((
+                at,
+                format!("{called} sets `{name}`, which is not one of the command's inputs"),
+            ));
+            continue;
+        };
+        match input.kind.value_of(value.get_ref()) {
+            Ok(held) => input.set = Some(held),
+            Err(problem) => problems.push((at, format!("{called} sets `{name}`: {problem}"))),
+        }
+    }
 }
 
 /// A command's inputs: an array of tables, written `[[command.<name>.input]]`
@@ -439,9 +1048,19 @@ fn read_input(
         "string" => &["default", "lines"],
         _ => &["default"],
     };
+    let hidden = match field("hidden") {
+        None => false,
+        Some((value, at)) => document::flag(value).unwrap_or_else(|| {
+            problems.push((
+                at,
+                said(format!("hidden is true or false, not {}", shown(value))),
+            ));
+            false
+        }),
+    };
     for (key, value) in fields.iter() {
         let key: &str = key.get_ref();
-        if !["name", "label", "kind"].contains(&key) && !takes.contains(&key) {
+        if !["name", "label", "kind", "hidden"].contains(&key) && !takes.contains(&key) {
             problems.push((
                 lines.of(value.span()),
                 said(format!("a {word} takes {}, not {key}", takes.join(", "))),
@@ -453,6 +1072,8 @@ fn read_input(
             name: name.to_string(),
             label,
             kind,
+            hidden,
+            set: None,
         }),
         Ok(_) => Err(problems),
         Err((at, problem)) => {
@@ -541,10 +1162,16 @@ pub const TEMPLATE: &str = "\n\
 # key and gesture, since every line after a [table] belongs to it. Every
 # field but run may be left out; needs is file, region, pointer, location,
 # georeference or none. An input is a string, number, checkbox, radio or
-# slider; a string with lines above 1 is a box of that many lines. A script asks the window to show an image it made, or to say
-# something, with open, message and error lines in the file $GAMUT_RESULT
-# names: the name, an equals sign, and the rest of the line, unquoted. What
-# it prints is shown, never obeyed. With output set to \"replace\", it writes
+# slider; a string with lines above 1 is a box of that many lines, and a
+# hidden input is never asked for. A variant is the command under a name of
+# its own with some inputs set, which its dialog does not ask for, and
+# with its own label, output, confirm and menu where it says; with nothing
+# left to ask, it runs at once. A command or a variant whose menu is false
+# is left out of the menus. A script asks the window to show an image it made, to
+# say something, or to step to the next file or the previous, with open,
+# message, error and step lines in the file $GAMUT_RESULT names: the name,
+# an equals sign, and the rest of the line, unquoted. What it prints is
+# shown, never obeyed. With output set to \"replace\", it writes
 # its version of the file to $GAMUT_OUTPUT, which then takes the file's
 # place: the original goes to the trash, and undo brings it back. With
 # \"new\", what it writes there becomes a new file, under the name its dialog
@@ -562,6 +1189,10 @@ pub const TEMPLATE: &str = "\n\
 #     { name = \"count\", kind = \"number\", min = 1, max = 10, default = 3 },
 #     { name = \"solid\", kind = \"checkbox\", default = true },
 #     { name = \"format\", kind = \"radio\", choices = [\"png\", \"jpg\", \"webp\"], default = \"jpg\" },
+#     { name = \"then\", kind = \"radio\", choices = [\"stay\", \"next\"], hidden = true },
+#   ]
+#   variant = [
+#     { name = \"redact-fast\", label = \"Redact, solid\", set = { solid = true, then = \"next\" } },
 #   ]
 ";
 /// One thing the result file asks the window to do.
@@ -571,6 +1202,9 @@ pub enum Directive {
     Open(String),
     Message(String),
     Error(String),
+    /// Step on from the file it ran on, to the next on the list or with
+    /// `false` the previous.
+    Step(bool),
 }
 
 /// What the result file `text` asks for, line by line, and each line that
@@ -589,7 +1223,15 @@ pub fn directives(text: &str) -> (Vec<Directive>, Vec<(usize, String)>) {
             "open" => asked.push(Directive::Open(value.to_string())),
             "message" => asked.push(Directive::Message(value.to_string())),
             "error" => asked.push(Directive::Error(value.to_string())),
-            other => problems.push((number, format!("unknown `{other}`: open, message or error"))),
+            "step" => match value {
+                "next" => asked.push(Directive::Step(true)),
+                "previous" => asked.push(Directive::Step(false)),
+                _ => problems.push((number, format!("step is next or previous, not `{value}`"))),
+            },
+            other => problems.push((
+                number,
+                format!("unknown `{other}`: open, message, error or step"),
+            )),
         }
     }
     (asked, problems)
@@ -740,10 +1382,11 @@ pub fn output_name(extension: Option<&str>) -> String {
 
 /// The name a command that makes a new file offers it under, before
 /// anything is typed: its `name`, `{stem}` made the stem of `file`, the
-/// file on screen; or the file's stem with the command's name after it and
-/// its extension, and the command's name alone for one that needs nothing,
-/// whose file is its own to say the format of. Counted up past whatever
-/// `taken` says is in the folder already.
+/// file on screen; or the file's stem with the command's name after it — a
+/// variant's command's — and its extension, or where the command's programs
+/// do not write that, the first they do; and that name alone for one that
+/// needs nothing, whose file is its own to say the format of. Counted up
+/// past whatever `taken` says is in the folder already.
 pub fn offered_name(
     command: &Command,
     file: Option<&Path>,
@@ -754,11 +1397,25 @@ pub fn offered_name(
     let extension = file.and_then(|file| part(file.extension()));
     let made = match (&command.new_name, &stem) {
         (Some(name), _) => name.replace(STEM, stem.as_deref().unwrap_or_default()),
-        (None, Some(stem)) if command.needs != Needs::Nothing => match &extension {
-            Some(extension) => format!("{stem}-{}.{extension}", command.name),
-            None => format!("{stem}-{}", command.name),
-        },
-        (None, _) => command.name.clone(),
+        (None, Some(stem)) if command.needs != Needs::Nothing => {
+            // The file's own extension, where its programs write it, and
+            // the first they do write where not.
+            let extension = match (&command.writes, extension) {
+                (Some(writes), extension)
+                    if !extension
+                        .as_deref()
+                        .is_some_and(|extension| writes_extension(writes, extension)) =>
+                {
+                    writes.first().cloned().or(extension)
+                }
+                (_, extension) => extension,
+            };
+            match &extension {
+                Some(extension) => format!("{stem}-{}.{extension}", command.family()),
+                None => format!("{stem}-{}", command.family()),
+            }
+        }
+        (None, _) => command.family().to_string(),
     };
     if !taken(&made) {
         return made;
@@ -867,6 +1524,30 @@ fn widened_path() -> Option<std::ffi::OsString> {
     (dirs.len() != before)
         .then(|| std::env::join_paths(dirs).ok())
         .flatten()
+}
+
+/// Where the program `configured` names is: a path as it is, or a name
+/// looked for along the `PATH` a run is given and then where packages put
+/// a program that a session started from the desktop does not have on it.
+pub fn locate(configured: &str) -> Option<PathBuf> {
+    let path = widened_path().unwrap_or_else(|| std::env::var_os("PATH").unwrap_or_default());
+    let mut dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    for dir in crate::exiftool::EXTRA_DIRS {
+        let dir = PathBuf::from(dir);
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    let configured = expand_tilde(configured);
+    crate::exiftool::locate_in(&configured, &dirs)
+}
+
+/// `path` with a leading `~/` read as the home directory.
+fn expand_tilde(path: &str) -> String {
+    match (path.strip_prefix("~/"), xdg::home()) {
+        (Some(rest), Some(home)) => home.join(rest).display().to_string(),
+        _ => path.to_string(),
+    }
 }
 
 /// The status a run's shell ended with, as [`Status`] says it.
@@ -1019,10 +1700,10 @@ pub fn parsed(text: &str) -> (Vec<Command>, Vec<Problem>) {
     let Some(Value::Table(table)) = root.get_ref().get("command").map(|v| v.get_ref()) else {
         return (Vec::new(), problems);
     };
-    let (commands, said) = parse(table, &lines);
-    problems.extend(said);
+    let parsed = parse(table, &lines);
+    problems.extend(parsed.problems);
     problems.sort_by_key(|(line, _)| *line);
-    (commands, problems)
+    (parsed.commands, problems)
 }
 
 #[cfg(test)]
@@ -1338,8 +2019,9 @@ mod tests {
             .collect();
         let (commands, problems) = parsed(&example);
         assert_eq!(problems, Vec::new());
-        assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].inputs.len(), 5);
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0].inputs.len(), 6);
+        assert_eq!(commands[1].base.as_deref(), Some("redact"));
     }
 
     /// The result file is lines of `name = value`; a line it cannot
@@ -1353,7 +2035,10 @@ mod tests {
              error = \"Quoted\"\n\
              text = nope\n\
              open =\n\
-             just words\n",
+             just words\n\
+             step = next\n\
+             step = previous\n\
+             step = sideways\n",
         );
         assert_eq!(
             asked,
@@ -1361,10 +2046,395 @@ mod tests {
                 Directive::Open("/tmp/a b.png".into()),
                 Directive::Message("Redacted 3 faces".into()),
                 Directive::Error("Quoted".into()),
+                Directive::Step(true),
+                Directive::Step(false),
             ]
         );
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
-        assert_eq!(lines, [5, 6, 7]);
+        assert_eq!(lines, [5, 6, 7, 10]);
+    }
+
+    /// A variant is its command under a name and label of its own, after
+    /// it in the set: its run, needs and inputs the command's, the inputs
+    /// it sets held, its output and confirmation its own where it says, and
+    /// in the menus whether or not its command is. Either of TOML's ways
+    /// of writing an array of tables will do.
+    #[test]
+    fn a_variant_is_its_command_with_some_inputs_set() {
+        let (commands, problems) = parsed(
+            "[command.rate]\n\
+             label = \"Rate\"\n\
+             run = \"rate.sh\"\n\
+             menu = false\n\
+             output = \"choose\"\n\
+             name = \"{stem}-rated.jpg\"\n\
+             input = [\n\
+               { name = \"stars\", kind = \"number\", min = 0, max = 5 },\n\
+               { name = \"then\", kind = \"radio\", choices = [\"stay\", \"next\"], hidden = true },\n\
+               { name = \"loud\", kind = \"checkbox\" },\n\
+             ]\n\
+             [[command.rate.variant]]\n\
+             name = \"rate-1\"\n\
+             label = \"1 star\"\n\
+             output = \"replace\"\n\
+             set = { stars = 1, then = \"next\", loud = true }\n\
+             [[command.rate.variant]]\n\
+             name = \"rate-ask\"\n\
+             confirm = true\n\
+             menu = false\n",
+        );
+        assert_eq!(problems, Vec::new());
+        let read: Vec<(&str, &str, Option<&str>, bool, Output)> = commands
+            .iter()
+            .map(|c| {
+                (
+                    c.name.as_str(),
+                    c.label.as_str(),
+                    c.base.as_deref(),
+                    c.menu,
+                    c.output,
+                )
+            })
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("rate", "Rate", None, false, Output::Choose),
+                ("rate-1", "1 star", Some("rate"), true, Output::Replace),
+                ("rate-ask", "rate-ask", Some("rate"), false, Output::Choose),
+            ]
+        );
+        let [rate, one, ask] = &commands[..] else {
+            unreachable!()
+        };
+        assert_eq!((one.run.as_str(), one.family()), ("rate.sh", "rate"));
+        assert_eq!(one.new_name.as_deref(), Some("{stem}-rated.jpg"));
+        let set: Vec<Option<Held>> = one.inputs.iter().map(|i| i.set.clone()).collect();
+        assert_eq!(
+            set,
+            [
+                Some(Held::Number("1".into())),
+                Some(Held::Radio(1)),
+                Some(Held::Checkbox(true)),
+            ]
+        );
+        assert!(!one.asks(), "everything set, and it replaces");
+        let asked = |c: &Command| c.asked().map(|(at, _)| at).collect::<Vec<_>>();
+        assert_eq!(asked(rate), [0, 2], "the hidden input is never asked");
+        assert!(ask.confirm && ask.asks());
+        assert_eq!(asked(ask), [0, 2]);
+    }
+
+    /// What is wrong with a variant is said where it is written, and the
+    /// rest of it taken: an input it sets that is not one, or to what it
+    /// cannot hold; a field it has not; an output its command cannot have;
+    /// and a name that is taken, which leaves it out.
+    #[test]
+    fn what_is_wrong_with_a_variant_is_said_and_the_rest_taken() {
+        let (commands, problems) = parsed(
+            "[command.taken]\n\
+             run = \"true\"\n\
+             [command.mark]\n\
+             run = \"mark.sh\"\n\
+             needs = \"none\"\n\
+             input = [\n\
+               { name = \"size\", kind = \"slider\", min = 1, max = 10 },\n\
+               { name = \"mode\", kind = \"radio\", choices = [\"a\", \"b\"] },\n\
+               { name = \"note\", kind = \"string\" },\n\
+             ]\n\
+             variant = [\n\
+               { name = \"mark-a\", set = { sise = 2, size = 11, mode = \"c\", note = 4 } },\n\
+               { name = \"mark-b\", output = \"replace\", colour = \"red\" },\n\
+               { name = \"taken\" },\n\
+               { name = \"Bad Name\" },\n\
+               { label = \"Nameless\" },\n\
+               { name = \"mark-c\", set = 3 },\n\
+             ]\n\
+             [command.mark-a]\n\
+             run = \"true\"\n\
+             variant = [{ name = \"orphan\" }]\n",
+        );
+        let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["taken", "mark", "mark-a", "mark-b", "mark-c"]);
+        assert_eq!(commands[2].base.as_deref(), Some("mark"));
+        assert!(commands[2].inputs.iter().all(|input| input.set.is_none()));
+        assert_eq!(commands[3].output, Output::Own);
+        let said: Vec<(usize, &str)> = problems
+            .iter()
+            .map(|(line, problem)| (*line, problem.as_str()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                (
+                    12,
+                    "command.mark variant `mark-a` sets `sise`, which is not one of the command's inputs"
+                ),
+                (
+                    12,
+                    "command.mark variant `mark-a` sets `size`: it is between 1 and 10"
+                ),
+                (
+                    12,
+                    "command.mark variant `mark-a` sets `mode`: `c` is not a choice: a, b"
+                ),
+                (
+                    12,
+                    "command.mark variant `mark-a` sets `note`: it is a string, not 4"
+                ),
+                (
+                    13,
+                    "command.mark variant `mark-b` replaces the file it runs on, so it cannot need none; it runs without replacing"
+                ),
+                (
+                    13,
+                    "command.mark variant `mark-b` has no field `colour`: name, label, set, output, confirm or menu"
+                ),
+                (14, "command.mark: `taken` is already a command's name"),
+                (
+                    15,
+                    "\"Bad Name\" is not a variant's name: a-z, 0-9, _ and - only"
+                ),
+                (16, "a variant of command.mark has no name"),
+                (
+                    17,
+                    "command.mark variant `mark-c`: set is a table of inputs by name, { size = 10 }, not 3"
+                ),
+                (19, "command.mark-a: `mark-a` is already a command's name"),
+            ]
+        );
+    }
+
+    /// The commands and programs a whole file defines, the built-ins
+    /// left out unless `builtins` says, and what is wrong with it.
+    fn configured(text: &str, builtins: &Builtins) -> (Vec<Command>, Vec<Program>, Vec<Problem>) {
+        let (clean, mut problems) = document::readable(text);
+        let root = document::table(&clean);
+        let lines = Lines::new(text);
+        let table = |name: &str| match root.get_ref().get(name).map(|value| value.get_ref()) {
+            Some(Value::Table(table)) => Some(table.clone()),
+            _ => None,
+        };
+        let parsed = table("command")
+            .map(|table| parse(&table, &lines))
+            .unwrap_or_default();
+        let programs = match table("program") {
+            Some(table) => {
+                let (programs, said) = parse_programs(&table, &lines);
+                problems.extend(said);
+                programs
+            }
+            None => Vec::new(),
+        };
+        let (commands, programs, said) = with_builtins(parsed, programs, builtins);
+        problems.extend(said);
+        problems.sort_by_key(|(line, _)| *line);
+        (commands, programs, problems)
+    }
+
+    /// The built-ins read without a problem, and each one's line of the
+    /// shell is one `sh` reads.
+    #[test]
+    fn the_builtins_read_and_their_scripts_parse() {
+        let lines = Lines::new(BUILTINS);
+        let root = document::table(BUILTINS);
+        let table = |name: &str| match root.get_ref().get(name).map(|value| value.get_ref()) {
+            Some(Value::Table(table)) => table.clone(),
+            _ => panic!("no {name} table"),
+        };
+        let parsed = parse(&table("command"), &lines);
+        assert_eq!(parsed.problems, Vec::new());
+        let (programs, said) = parse_programs(&table("program"), &lines);
+        assert_eq!(said, Vec::new());
+        let names: Vec<&str> = programs.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["magick", "exiftool"]);
+        let builtins = builtins();
+        let names: Vec<&str> = builtins.commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "redact",
+                "redact-copy",
+                "redact-in-place",
+                "watermark",
+                "strip"
+            ]
+        );
+        assert_eq!(builtins.commands[0].writes, programs[0].writes);
+        for command in &builtins.commands {
+            let checked = Process::new("sh")
+                .args(["-n", "-c", &command.run])
+                .status()
+                .expect("sh runs");
+            assert!(checked.success(), "{}", command.name);
+        }
+    }
+
+    /// A program's table: what it is called, where it is and what it
+    /// writes, the extensions as written but in lower case and without a
+    /// dot; what is wrong with one is said.
+    #[test]
+    fn a_programs_table_is_read() {
+        let (_, programs, problems) = configured(
+            "[program.magick]\n\
+             label = \"ImageMagick\"\n\
+             path = \"~/bin/magick\"\n\
+             writes = [\"JPG\", \".png\"]\n\
+             [program.bad]\n\
+             writes = \"jpg\"\n\
+             colour = 1\n\
+             [program.Bad]\n\
+             path = \"x\"\n",
+            &Builtins::default(),
+        );
+        assert_eq!(
+            programs[0],
+            Program {
+                name: "magick".into(),
+                label: "ImageMagick".into(),
+                path: Some("~/bin/magick".into()),
+                writes: Some(vec!["jpg".into(), "png".into()]),
+            }
+        );
+        let said: Vec<(usize, &str)> = problems.iter().map(|(l, p)| (*l, p.as_str())).collect();
+        assert_eq!(
+            said,
+            [
+                (
+                    6,
+                    "program.bad.writes is a list of extensions, [\"jpg\", \"png\"], not \"jpg\""
+                ),
+                (
+                    7,
+                    "unknown field `colour` of program.bad: label, path or writes"
+                ),
+                (8, "`Bad` is not a program's name: a-z, 0-9, _ and - only"),
+            ]
+        );
+    }
+
+    /// What a command writes is what every one of its programs that says
+    /// writes, in the first's order, an extension's alias counting as it;
+    /// a program that does not say, or has no table, limits nothing.
+    #[test]
+    fn a_command_writes_what_all_its_programs_write() {
+        let (commands, _, problems) = configured(
+            "[program.a]\n\
+             writes = [\"jpeg\", \"png\", \"tif\", \"gif\"]\n\
+             [program.b]\n\
+             writes = [\"tiff\", \"jpg\", \"webp\"]\n\
+             [program.c]\n\
+             label = \"C\"\n\
+             [command.both]\n\
+             run = \"true\"\n\
+             programs = [\"a\", \"c\", \"b\", \"nowhere\"]\n\
+             [command.free]\n\
+             run = \"true\"\n\
+             programs = [\"c\"]\n\
+             [command.bad]\n\
+             run = \"true\"\n\
+             programs = \"a\"\n",
+            &Builtins::default(),
+        );
+        assert_eq!(
+            commands[0].writes,
+            Some(vec!["jpeg".to_string(), "tif".to_string()])
+        );
+        assert_eq!(commands[1].writes, None);
+        assert_eq!(commands[2].programs, Vec::<String>::new());
+        assert_eq!(
+            problems,
+            [(
+                15,
+                "command.bad.programs is a list of programs' names, [\"magick\"], not \"a\""
+                    .to_string()
+            )]
+        );
+        assert!(same_extension("JPG", "jpeg") && same_extension("tiff", "TIF"));
+        assert!(!same_extension("jpg", "png"));
+    }
+
+    /// A configuration's own commands come first, then the built-ins: one
+    /// of its own replaces the built-in of that name with its variants, and
+    /// a built-in variant named as one of its own is left out; `false`
+    /// turns a built-in off, and one there is none of is said; and a
+    /// program of its own replaces the built-in.
+    #[test]
+    fn a_configurations_own_commands_come_before_the_builtins_they_leave() {
+        let (builtins, _) = parsed(
+            "[command.mark]\n\
+             run = \"mark\"\n\
+             variant = [{ name = \"mark-a\" }, { name = \"mark-b\" }]\n\
+             [command.blur]\n\
+             run = \"blur\"\n\
+             [command.gone]\n\
+             run = \"gone\"\n",
+        );
+        let builtins = Builtins {
+            commands: builtins,
+            programs: vec![Program {
+                name: "magick".into(),
+                label: "ImageMagick".into(),
+                path: None,
+                writes: Some(vec!["jpg".into()]),
+            }],
+        };
+        let (commands, programs, problems) = configured(
+            "command.gone = false\n\
+             command.never = false\n\
+             [command.mine]\n\
+             run = \"mine\"\n\
+             [command.mark-b]\n\
+             run = \"own b\"\n\
+             [program.magick]\n\
+             label = \"Mine\"\n",
+            &builtins,
+        );
+        let names: Vec<(&str, &str)> = commands
+            .iter()
+            .map(|c| (c.name.as_str(), c.run.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("mine", "mine"),
+                ("mark-b", "own b"),
+                ("mark", "mark"),
+                ("mark-a", "mark"),
+                ("blur", "blur"),
+            ]
+        );
+        assert_eq!(
+            problems,
+            [(
+                2,
+                "command.never = false turns off a built-in command, and there is none called never"
+                    .to_string()
+            )]
+        );
+        assert_eq!((programs.len(), programs[0].label.as_str()), (1, "Mine"));
+        let (commands, _, _) = configured("[command.mark]\nrun = \"replaced\"\n", &builtins);
+        let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["mark", "blur", "gone"], "its variants go with it");
+    }
+
+    /// Where a command's programs do not write the file's extension, the
+    /// name it offers has the first they do write.
+    #[test]
+    fn a_new_files_name_has_an_extension_its_programs_write() {
+        let (commands, _, _) = configured(
+            "[program.m]\n\
+             writes = [\"png\", \"jpg\"]\n\
+             [command.copy]\n\
+             run = \"true\"\n\
+             output = \"new\"\n\
+             programs = [\"m\"]\n",
+            &Builtins::default(),
+        );
+        let offered = |file: &str| offered_name(&commands[0], Some(Path::new(file)), |_| false);
+        assert_eq!(offered("/p/IMG_1.JPEG"), "IMG_1-copy.JPEG");
+        assert_eq!(offered("/p/IMG_1.CR3"), "IMG_1-copy.png");
+        assert_eq!(offered("/p/IMG_1"), "IMG_1-copy.png");
     }
 
     fn launch(line: &str, cwd: &Path) -> Launch {

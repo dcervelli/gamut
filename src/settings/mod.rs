@@ -40,7 +40,7 @@ use anyhow::{Context, Result};
 
 use crate::app::input::Action;
 use crate::app::keymap::{Chord, Keymap};
-use crate::commands::{self, Command};
+use crate::commands::{self, Command, Program};
 use crate::gestures::{Behavior, Gestures, Slot};
 use crate::image::geo::Corners;
 use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
@@ -79,13 +79,30 @@ pub struct Config {
     pub keys: Keymap,
     pub gestures: Gestures,
     /// The commands its `command.` lines define, in the order each is first
-    /// named; each also a name of `keys`, `command.<name>`.
+    /// named, and then the built-in ones it leaves in; each also a name of
+    /// `keys`, `command.<name>`.
     pub commands: Vec<Command>,
+    /// The programs its `program.` tables describe, and then the built-in
+    /// ones none of them replaces.
+    pub programs: Vec<Program>,
+}
+
+impl Config {
+    /// Makes `commands` the configuration's, each a name of `keys`.
+    fn adopt_commands(&mut self, commands: Vec<Command>, programs: Vec<Program>) {
+        self.keys.clear_extras();
+        for (index, command) in commands.iter().enumerate() {
+            self.keys
+                .add_extra(&command.key_name(), &command.label, Action::Command(index));
+        }
+        self.commands = commands;
+        self.programs = programs;
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
+        let mut config = Self {
             show_ui: true,
             show_minimap: true,
             show_filmstrip: true,
@@ -99,7 +116,11 @@ impl Default for Config {
             keys: Keymap::default(),
             gestures: Gestures::default(),
             commands: Vec::new(),
-        }
+            programs: Vec::new(),
+        };
+        let builtins = commands::builtins();
+        config.adopt_commands(builtins.commands.clone(), builtins.programs.clone());
+        config
     }
 }
 
@@ -337,6 +358,7 @@ impl Config {
         text.push_str(&config.keys.template());
         text.push_str(&config.gestures.template());
         text.push_str(commands::TEMPLATE);
+        text.push_str(&commands::builtins_template());
         text
     }
 
@@ -425,34 +447,43 @@ impl Config {
     /// `text` as a configuration, and each thing in it that could not be
     /// used, by line, with what was wrong with it. A chord two lines give two
     /// names in one context goes to the later, which is said.
-    fn parse(text: &str) -> (Self, Vec<(usize, String)>) {
+    pub(crate) fn parse(text: &str) -> (Self, Vec<(usize, String)>) {
         let mut config = Self::default();
         let lines = Lines::new(text);
         let (clean, mut problems) = document::readable(text);
         let root = document::table(&clean);
         let root = root.get_ref();
         // The commands first, wherever their tables are, so that a `keys.`
-        // or a gesture's line can name one the file defines further down.
+        // or a gesture's line can name one the file defines further down;
+        // and the programs with them, which say what each can write.
+        let mut parsed = commands::Parsed::default();
         if let Some((key, value)) = root.get_key_value("command") {
             match value.get_ref() {
-                Value::Table(table) => {
-                    let (commands, said) = commands::parse(table, &lines);
-                    problems.extend(said);
-                    for (index, command) in commands.iter().enumerate() {
-                        config.keys.add_extra(
-                            &command.key_name(),
-                            &command.label,
-                            Action::Command(index),
-                        );
-                    }
-                    config.commands = commands;
-                }
+                Value::Table(table) => parsed = commands::parse(table, &lines),
                 other => problems.push((
                     lines.of(key.span()),
                     format!("command is a table of commands, not {}", shown(other)),
                 )),
             }
         }
+        let mut programs = Vec::new();
+        if let Some((key, value)) = root.get_key_value("program") {
+            match value.get_ref() {
+                Value::Table(table) => {
+                    let (read, said) = commands::parse_programs(table, &lines);
+                    programs = read;
+                    problems.extend(said);
+                }
+                other => problems.push((
+                    lines.of(key.span()),
+                    format!("program is a table of programs, not {}", shown(other)),
+                )),
+            }
+        }
+        let (commands, programs, said) =
+            commands::with_builtins(parsed, programs, commands::builtins());
+        problems.extend(said);
+        config.adopt_commands(commands, programs);
         // Which line set each key's name, for saying which a later line
         // took a chord from.
         let mut set_on: Vec<(String, usize)> = Vec::new();
@@ -460,7 +491,7 @@ impl Config {
             let name: &str = key.get_ref();
             let line = lines.of(key.span());
             match (name, value.get_ref()) {
-                ("command", _) => {}
+                ("command" | "program", _) => {}
                 ("keys", Value::Table(table)) => {
                     for (name, value) in document::leaves(table) {
                         let line = lines.of(value.span());
@@ -636,7 +667,7 @@ pub enum Rewrite {
 /// retired one, or one of the tables of keys, gestures and commands. What
 /// lets a command's table say that a line written below it belongs above.
 pub(crate) fn top_level(name: &str) -> bool {
-    matches!(name, "keys" | "gesture" | "command")
+    matches!(name, "keys" | "gesture" | "command" | "program")
         || RETIRED.contains(&name)
         || SETTINGS.iter().any(|setting| setting.name == name)
 }
@@ -1236,7 +1267,10 @@ mod tests {
         );
         let lines: Vec<usize> = problems.iter().map(|(line, _)| *line).collect();
         assert_eq!(lines, [3], "{problems:?}");
-        assert_eq!(config.commands.len(), 1);
+        // Its own, which replaces the built-in of that name, and then the
+        // other built-ins.
+        assert_eq!(config.commands[0].run, "~/bin/redact.sh");
+        assert!(config.commands[1..].iter().all(|c| c.family() != "redact"));
         assert_eq!(
             config.keys.action_named("command.redact"),
             Some(Action::Command(0))
@@ -1303,7 +1337,8 @@ mod tests {
             exiftool: "/opt/exiftool/exiftool".to_string(),
             keys: defaults.keys.clone(),
             gestures: defaults.gestures.clone(),
-            commands: Vec::new(),
+            commands: defaults.commands.clone(),
+            programs: defaults.programs.clone(),
         };
         let text: String = SETTINGS
             .iter()
@@ -1385,7 +1420,13 @@ mod tests {
         for block in blocks {
             let (config, problems) = Config::parse(block);
             assert_eq!(problems, Vec::new(), "{block}");
-            assert_eq!(config.commands.len(), 1, "{block}");
+            let builtins = &commands::builtins().commands;
+            let own = config
+                .commands
+                .iter()
+                .take_while(|c| !builtins.contains(c))
+                .filter(|c| c.base.is_none());
+            assert_eq!(own.count(), 1, "{block}");
         }
     }
 

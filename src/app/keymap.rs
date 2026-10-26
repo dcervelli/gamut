@@ -480,6 +480,12 @@ impl Keymap {
         }
     }
 
+    /// Takes every extra away, to make them again from another set of
+    /// commands.
+    pub fn clear_extras(&mut self) {
+        self.extras.clear();
+    }
+
     /// The words of the extra that runs `action`, where one does.
     pub fn extra_help_for(&self, action: Action) -> Option<&str> {
         self.extras

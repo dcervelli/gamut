@@ -935,6 +935,21 @@ pub fn extension_for(path: &Path, asked: Option<&str>) -> Option<String> {
     Some(known.first().copied().unwrap_or(format).to_string())
 }
 
+/// What `written` is where it is not the same kind of file as `original`,
+/// by what the leading bytes of each say: the format `written` turned out
+/// to be. A camera's raws are one kind, since which camera made one is
+/// read off its maker and is not the format; `None` where either cannot
+/// be opened, which reading it says better.
+pub fn other_kind(original: &Path, written: &Path) -> Option<&'static str> {
+    let (original, written) = (Opened::new(original).ok()?, Opened::new(written).ok()?);
+    let decoder = |opened: &Opened| opened.decoder.name();
+    if decoder(&original) != decoder(&written) {
+        return Some(written.format());
+    }
+    (decoder(&written) != "camera raw" && original.format() != written.format())
+        .then(|| written.format())
+}
+
 /// What one pixel of `path`'s picture comes to decoded, from its header —
 /// see [`Decoder::pixel_bytes`].
 pub fn pixel_bytes(path: &Path) -> Result<Option<u64>> {

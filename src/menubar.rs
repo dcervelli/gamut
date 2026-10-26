@@ -158,11 +158,15 @@ pub struct Snapshot {
     pub lists: Vec<Vec<Listed>>,
 }
 
-/// An item of a [`Node::List`]: what it says, and whether it can be chosen.
+/// An item of a [`Node::List`]: what it says, whether it can be chosen, and
+/// where it goes.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Listed {
     pub title: String,
     pub enabled: bool,
+    /// The submenu of the list it goes in, by title: the items of one
+    /// follow each other, and `None` is the list's own.
+    pub submenu: Option<String>,
 }
 
 /// What was chosen with the pointer.
@@ -323,10 +327,26 @@ define_class!(
             let Some(listed) = snapshot.lists.get(list) else {
                 return;
             };
+            // A run of items under one submenu's title hangs from one
+            // holder, each still tagged by its place in the list.
+            let mut inner: Option<(&str, Retained<NSMenu>)> = None;
             for (index, each) in listed.iter().enumerate() {
                 let item = item(mtm, &each.title, None, sel!(pick:), self);
                 item.setTag((list * LIST_STRIDE + index) as isize);
-                menu.addItem(&item);
+                let Some(title) = each.submenu.as_deref() else {
+                    inner = None;
+                    menu.addItem(&item);
+                    continue;
+                };
+                if inner.as_ref().is_none_or(|(held, _)| *held != title) {
+                    let built =
+                        NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(title));
+                    menu.addItem(&holder(mtm, title, None, &built, self));
+                    inner = Some((title, built));
+                }
+                if let Some((_, built)) = &inner {
+                    built.addItem(&item);
+                }
             }
         }
     }

@@ -50,6 +50,29 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   the format the command wrote; never goes over another file; and goes to
   the trash on undo. `output = "choose"` has the dialog ask whether to make
   a new file or replace the original.
+- Variants of a command: the same command under other names, each with
+  some of its inputs set, and its own output, label and key, so that one
+  press runs what would otherwise be a dialog. A variant asks only what it
+  leaves open, and with nothing left runs at once, a new file named as
+  the command offers. A command with variants is a submenu of the file
+  menu. An input can be hidden from the dialog, and a command or a variant
+  left out of the menus, `menu = false`, its key still running it.
+- A command can step to the next file or the previous once it is done, with
+  `step = next` or `step = previous` in its result file.
+- Built-in commands: Redact, with variants that redact to a copy and in
+  place; Watermark; and Strip metadata. They need ImageMagick or ExifTool,
+  are dead with a tooltip saying which until it is installed, have no key
+  until given one, and are replaced by a command of the same name or
+  turned off with `command.<name> = false`. `--print-config` writes them
+  out to copy from.
+- A command can name the programs it runs, `programs = ["magick"]`: it is
+  dead while one cannot be found, and is told where each is in
+  `GAMUT_PROGRAM_<NAME>`. A `[program.<name>]` table gives one a label, a
+  path and the extensions it writes, and a command then writes only those:
+  one that replaces is dead on any other kind of file, and its new file is
+  offered under an extension it writes.
+- A command's replacement of a file is refused when it is a different
+  kind of file from the original, which keeps its name.
 - A TIFF holding several bands of gray, as a GIS writes a stack of a
   satellite's bands or a classifier's probabilities, opens with each band
   as a page, named in the bar where the file describes it. It was refused.

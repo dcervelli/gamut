@@ -198,6 +198,7 @@ fn options() -> Options {
             keys: keymap::Keymap::table(),
             gestures: Gestures::table(),
             commands: Vec::new(),
+            programs: Vec::new(),
         },
         upscale: Upscale::default(),
         size: None,
@@ -5435,7 +5436,10 @@ fn with_commands(
 ) -> std::sync::mpsc::Receiver<crate::commands::Finished> {
     let (sent, received) = std::sync::mpsc::channel();
     let sent = std::sync::Mutex::new(sent);
-    app.commands.replace(commands_of(text));
+    let (config, problems) = Config::parse(text);
+    assert_eq!(problems, Vec::new());
+    app.commands
+        .replace(config.commands, config.programs, config.exiftool);
     app.commands.deliver_to(Arc::new(move |finished| {
         let _ = sent.lock().unwrap().send(finished);
     }));
@@ -5734,6 +5738,268 @@ command.ask.input = [
     };
     let _ = app.reconfigure(config, None);
     assert!(app.command_input().is_none(), "the file changed under it");
+}
+
+/// A variant asks only for the inputs it leaves open, its own settings and
+/// a hidden input's default reaching the script; what its dialog is let
+/// go with is remembered for its base and its other variants, but not what
+/// it sets; and one that leaves nothing open runs at once.
+#[test]
+fn a_variant_asks_only_what_it_leaves_open() {
+    use ui::commands::Value;
+    let (mut app, _dir) = app_over("command-variant", &[("a.png", 4, 3)]);
+    let received = with_commands(
+        &mut app,
+        r#"[command.mark]
+run = 'echo "$GAMUT_INPUT_TEXT $GAMUT_INPUT_SIZE $GAMUT_INPUT_THEN"'
+input = [
+  { name = "text", kind = "string", default = "hi" },
+  { name = "size", kind = "number", default = 3 },
+  { name = "then", kind = "radio", choices = ["stay", "next"], hidden = true },
+]
+variant = [
+  { name = "mark-big", label = "Big", set = { size = 9, then = "next" } },
+  { name = "mark-fixed", label = "Fixed", set = { text = "(c)", size = 1 } },
+]
+"#,
+    );
+    let last_line = |app: &App| {
+        let run = app.commands.run_on(app.shown_path().as_deref()).unwrap();
+        run.lines[0].text.clone()
+    };
+    let rows = |app: &mut App| -> Vec<(usize, String, Value)> {
+        app.command_input()
+            .expect("the dialog is up")
+            .rows
+            .into_iter()
+            .map(|row| (row.input, row.label, row.value))
+            .collect()
+    };
+
+    let _ = app.perform(input::Action::Command(1));
+    assert_eq!(
+        rows(&mut app),
+        [(0, "text".to_string(), Value::Text("hi".into()))]
+    );
+    // An input it does not ask for takes nothing from the dialog.
+    let _ = app.act(ui::Command::DialogInput(1, Value::Number("5".into())));
+    let _ = app.act(ui::Command::DialogInput(0, Value::Text("yo".into())));
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    finish(&mut app, &received);
+    assert_eq!(last_line(&app), "yo 9 next");
+
+    let _ = app.perform(input::Action::Command(0));
+    assert_eq!(
+        rows(&mut app),
+        [
+            (0, "text".to_string(), Value::Text("yo".into())),
+            (1, "size".to_string(), Value::Number("3".into())),
+        ],
+        "the text typed for the variant, and not the size it sets"
+    );
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    finish(&mut app, &received);
+    assert_eq!(last_line(&app), "yo 3 stay");
+
+    let _ = app.perform(input::Action::Command(2));
+    assert!(app.command_input().is_none(), "nothing to ask");
+    assert!(app.commands.running());
+    finish(&mut app, &received);
+    assert_eq!(last_line(&app), "(c) 1 stay");
+}
+
+/// A variant that makes a new file and has nothing else to ask runs at
+/// once, under the name its command offers.
+#[test]
+fn a_variant_that_makes_a_file_with_nothing_to_ask_names_it_itself() {
+    let (mut app, dir) = app_over("command-variant-new", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let received = with_commands(
+        &mut app,
+        r#"[command.small]
+run = 'cp "$GAMUT_FILE" "$GAMUT_OUTPUT"'
+needs = "file"
+output = "choose"
+name = "{stem}-small.png"
+variant = [{ name = "small-copy", label = "Small copy", output = "new" }]
+"#,
+    );
+    let _ = app.perform(input::Action::Command(0));
+    assert!(app.command_input().is_some(), "the base asks which");
+    let _ = app.act(ui::Command::Press(ui::Control::CommandCancel));
+    let _ = app.perform(input::Action::Command(1));
+    assert!(app.command_input().is_none());
+    finish(&mut app, &received);
+    let made = dir.join("a-small.png");
+    assert!(made.is_file());
+    assert_eq!(
+        said(&app),
+        spelled_here("Small copy made a-small.png. Ctrl+Z to undo.")
+    );
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// A result file's `step = next` steps on from the file the command ran
+/// on, and `step = previous` back; not once another file has been asked
+/// for meanwhile.
+#[test]
+fn a_command_steps_on_where_its_result_file_asks() {
+    let (mut app, _dir) = app_over(
+        "command-step",
+        &[("a.png", 4, 3), ("b.png", 4, 3), ("c.png", 4, 3)],
+    );
+    let received = with_commands(
+        &mut app,
+        r#"command.on.run = 'echo "step = next" >> "$GAMUT_RESULT"'
+command.back.run = 'echo "step = previous" >> "$GAMUT_RESULT"'
+"#,
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    assert_eq!(app.files.target(), 1);
+    answer(&mut app, Reload::Fresh);
+    let _ = app.perform(input::Action::Command(1));
+    finish(&mut app, &received);
+    assert_eq!(app.files.target(), 0);
+    answer(&mut app, Reload::Fresh);
+    let _ = app.perform(input::Action::Command(0));
+    let _ = app.step(false);
+    finish(&mut app, &received);
+    assert_eq!(app.files.target(), 2, "the step taken meanwhile stands");
+}
+
+/// A command whose program is nowhere to be found is dead, the tooltip
+/// and a key's press saying which; one whose programs are found is handed
+/// each where it was found, a path as it is and a bare name off `PATH`.
+#[test]
+fn a_command_is_dead_without_its_programs_and_handed_them_with() {
+    use crate::ui::Naming;
+    let (mut app, _dir) = app_over("command-programs", &[("a.png", 4, 3)]);
+    let received = with_commands(
+        &mut app,
+        r#"[program.ghost]
+label = "Ghost"
+path = "/nonexistent/ghost"
+[program.shell]
+path = "/bin/sh"
+[command.haunt]
+run = "true"
+programs = ["ghost"]
+[command.tell]
+run = 'echo "$GAMUT_PROGRAM_SHELL $GAMUT_PROGRAM_TRUE"'
+programs = ["shell", "true"]
+"#,
+    );
+    let slot = ui::commands::Slot {
+        index: 0,
+        needs: ui::commands::Needs::File,
+    };
+    assert_eq!(
+        app.command_blocked(0).as_deref(),
+        Some("Ghost isn't installed.")
+    );
+    assert!(app.refuses(ui::Control::RunCommand(slot)));
+    let tip = app
+        .namer()
+        .tooltip(ui::Tip::Control(ui::Control::RunCommand(slot)))
+        .expect("a tooltip");
+    assert_eq!(tip.title, ["Ghost isn't installed."]);
+    assert!(!app.command_items(&app.conditions())[0].enabled);
+    let _ = app.perform(input::Action::Command(0));
+    assert!(!app.commands.running());
+    assert_eq!(said(&app), "Ghost isn't installed.");
+
+    assert_eq!(app.command_blocked(1), None);
+    let _ = app.perform(input::Action::Command(1));
+    finish(&mut app, &received);
+    let run = app.commands.run_on(app.shown_path().as_deref()).unwrap();
+    let line = &run.lines[0].text;
+    assert!(
+        line.starts_with("/bin/sh /") && line.ends_with("/true"),
+        "{line}"
+    );
+}
+
+/// A command that replaces its file is dead on a file its programs do not
+/// write, and so is the box that would have one that may choose replace
+/// it; the new file it makes instead is offered under an extension they
+/// do write, and a name typed with one they do not is refused.
+#[test]
+fn a_command_cannot_write_what_its_programs_do_not() {
+    let (mut app, dir) = app_over("command-writes", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    let _ = with_commands(
+        &mut app,
+        r#"[program.m]
+label = "M"
+path = "/bin/sh"
+writes = ["jpg", "webp"]
+[command.over]
+run = "true"
+output = "replace"
+programs = ["m"]
+[command.either]
+run = "true"
+output = "choose"
+programs = ["m"]
+"#,
+    );
+    assert_eq!(
+        app.command_blocked(0).as_deref(),
+        Some("M can't write .png files.")
+    );
+    assert_eq!(app.command_blocked(1), None);
+    let _ = app.perform(input::Action::Command(1));
+    let naming = naming_of(&mut app);
+    assert_eq!(naming.name, "a-either.jpg");
+    assert_eq!(
+        naming.replace,
+        Some((false, Some("M can't write .png files.".to_string())))
+    );
+    assert!(!naming.refused);
+    let _ = app.act(ui::Command::DialogName("b.tif".into()));
+    let naming = naming_of(&mut app);
+    assert!(naming.refused);
+    assert_eq!(
+        naming.line,
+        Some((
+            "M writes .jpg or .webp files.".to_string(),
+            ui::rename::Tone::Refusal
+        ))
+    );
+    let _ = app.act(ui::Command::Press(ui::Control::CommandOk));
+    assert!(app.command_input().is_some(), "OK does nothing");
+    let _ = app.act(ui::Command::DialogName("b.JPEG".into()));
+    assert!(!naming_of(&mut app).refused);
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// What takes a file's place has to be the kind of file it was: a JPEG
+/// written for a PNG leaves the PNG alone.
+#[test]
+fn a_replacement_of_another_kind_is_refused() {
+    let (mut app, dir) = app_over("command-replace-kind", &[("a.png", 4, 3)]);
+    app.trash = Some(Trash::under(dir.join("Trash")));
+    std::fs::create_dir_all(dir.join("made")).unwrap();
+    ::image::RgbImage::new(3, 3)
+        .save(dir.join("made/j.jpg"))
+        .unwrap();
+    let received = with_commands(
+        &mut app,
+        r#"[command.swap]
+run = 'cp made/j.jpg "$GAMUT_OUTPUT"'
+output = "replace"
+"#,
+    );
+    let _ = app.perform(input::Action::Command(0));
+    finish(&mut app, &received);
+    assert_eq!(
+        said(&app),
+        "swap wrote a JPEG file, so a.png was left alone."
+    );
+    assert_eq!(decode::probe(&dir.join("a.png")).unwrap(), Some((4, 3)));
+    assert_eq!(output_dirs(&dir), Vec::<PathBuf>::new());
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
 /// A command that only asks to be sure opens a dialog with nothing in it

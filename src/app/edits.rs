@@ -283,6 +283,17 @@ impl App {
             crate::image::decode::probe(output).is_err().then(|| {
                 format!("{label} wrote a file that can't be read, so {name} was left alone.")
             })
+        })
+        // The name stays the file's, so what is put under it has to be the
+        // kind of file it was: a PNG under a raw's name would read, and
+        // would be wrong for everything else that opens it.
+        .or_else(|| {
+            crate::image::decode::other_kind(file, output).map(|format| {
+                format!(
+                    "{label} wrote a {} file, so {name} was left alone.",
+                    format.to_ascii_uppercase()
+                )
+            })
         });
         if let Some(refused) = refused {
             self.toast(refused, Level::Error);

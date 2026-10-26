@@ -8,6 +8,7 @@
 //! message that says it is running carries the cross that stops it, so a
 //! script that hangs costs a press rather than the session.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,7 +18,9 @@ use super::App;
 use super::edits::{Made, Making, Replacing};
 use super::files::SLOW_READ;
 use super::input::Effect;
-use crate::commands::{self, Command, Directive, Finished, Launch, Output, Status, Stopper};
+use crate::commands::{
+    self, Command, Directive, Finished, Launch, Output, Program, Status, Stopper,
+};
 use crate::image::auxiliary::Showing;
 use crate::image::exif;
 use crate::image::orient::{self, Orientation};
@@ -37,6 +40,14 @@ const OUTPUTS_KEPT: usize = commands::RUNS_KEPT;
 pub(super) struct Commands {
     /// The set in force: the configuration file's, as last read.
     pub(super) set: Vec<Command>,
+    /// The programs they run that the configuration describes.
+    programs: Vec<Program>,
+    /// What the configuration names exiftool by, for the Tags tab: where
+    /// a command's `exiftool` is looked for too, unless its table says.
+    exiftool: String,
+    /// Where each program was found, by name, and when that was looked
+    /// for: read each frame, for whether a command is dead.
+    located: RefCell<Located>,
     running: Option<Running>,
     /// The dialog, while it is up.
     pub(super) asking: Option<Asking>,
@@ -58,6 +69,17 @@ pub(super) struct Commands {
     /// How a run's answer reaches the loop.
     delivered: commands::Deliver,
 }
+
+/// Where the programs were last found.
+#[derive(Default)]
+struct Located {
+    at: Option<Instant>,
+    found: HashMap<String, Option<PathBuf>>,
+}
+
+/// How long where a program was found is taken as still so: a program
+/// installed while the window is open is noticed within this.
+const LOOK_AGAIN: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// The run in flight.
 struct Running {
@@ -140,6 +162,9 @@ struct Naming {
     replace: Option<(bool, Option<String>)>,
     /// The file's own name, shown in the field while it is to be replaced.
     own: String,
+    /// What is wrong with the name's extension, where the command's
+    /// programs do not write it.
+    unwritten: Option<String>,
 }
 
 /// The dialog while it is up: which command it is for, and what each
@@ -155,9 +180,17 @@ pub(super) struct Asking {
 }
 
 impl Commands {
-    pub(super) fn new(set: Vec<Command>, delivered: commands::Deliver) -> Self {
+    pub(super) fn new(
+        set: Vec<Command>,
+        programs: Vec<Program>,
+        exiftool: String,
+        delivered: commands::Deliver,
+    ) -> Self {
         Self {
             set,
+            programs,
+            exiftool,
+            located: RefCell::default(),
             running: None,
             asking: None,
             remembered: HashMap::new(),
@@ -237,12 +270,143 @@ impl Commands {
         }
     }
 
+    /// The values `command`'s dialog opens with, one for each of its
+    /// inputs: those its family's was last let go with, where they still
+    /// fit its inputs.
+    fn remembered_for(&self, command: &Command) -> Option<Vec<Value>> {
+        let values = self.remembered.get(command.family())?;
+        (values.len() == command.inputs.len()
+            && command
+                .inputs
+                .iter()
+                .zip(values)
+                .all(|(input, value)| input.kind.holds(value)))
+        .then(|| values.clone())
+    }
+
+    /// Keeps what `command`'s dialog was let go with, for its family's
+    /// next: what it asked for, and whatever was remembered of the rest,
+    /// which a variant's settings do not overwrite.
+    fn remember(&mut self, command: &Command, values: Vec<Value>) {
+        let mut kept = self.remembered_for(command).unwrap_or_else(|| {
+            command
+                .inputs
+                .iter()
+                .map(|input| input.kind.default_value())
+                .collect()
+        });
+        for (at, _) in command.asked() {
+            if let (Some(slot), Some(value)) = (kept.get_mut(at), values.get(at)) {
+                *slot = value.clone();
+            }
+        }
+        self.remembered.insert(command.family().to_string(), kept);
+    }
+
     /// The set read again: the dialog comes down, since the command it was
     /// asking for may have changed under it; the run in flight, the output
     /// kept and the values remembered stay.
-    pub(super) fn replace(&mut self, set: Vec<Command>) {
+    pub(super) fn replace(&mut self, set: Vec<Command>, programs: Vec<Program>, exiftool: String) {
         self.set = set;
+        self.programs = programs;
+        self.exiftool = exiftool;
+        self.located = RefCell::default();
         self.asking = None;
+    }
+
+    /// The program called `name`, as the configuration describes it, or
+    /// as a bare name where it does not.
+    fn program(&self, name: &str) -> Program {
+        self.programs
+            .iter()
+            .find(|program| program.name == name)
+            .cloned()
+            .unwrap_or_else(|| Program {
+                name: name.to_string(),
+                label: name.to_string(),
+                path: None,
+                writes: None,
+            })
+    }
+
+    /// Where the program called `name` is, looked for again where the last
+    /// look is older than [`LOOK_AGAIN`].
+    fn locate(&self, name: &str) -> Option<PathBuf> {
+        let mut located = self.located.borrow_mut();
+        let now = Instant::now();
+        if located
+            .at
+            .is_none_or(|at| now.duration_since(at) > LOOK_AGAIN)
+        {
+            located.found.clear();
+            located.at = Some(now);
+        }
+        if let Some(found) = located.found.get(name) {
+            return found.clone();
+        }
+        let program = self.program(name);
+        let configured = match &program.path {
+            Some(path) => path.clone(),
+            None if name == "exiftool" => self.exiftool.clone(),
+            None => name.to_string(),
+        };
+        let found = commands::locate(&configured);
+        located.found.insert(name.to_string(), found.clone());
+        found
+    }
+
+    /// The first of `command`'s programs that is nowhere to be found.
+    fn missing(&self, command: &Command) -> Option<Program> {
+        command
+            .programs
+            .iter()
+            .find(|name| self.locate(name).is_none())
+            .map(|name| self.program(name))
+    }
+
+    /// Why `command` cannot write a file whose extension is `extension`,
+    /// where it cannot: the program that does not write it says so.
+    fn unwritable(&self, command: &Command, extension: Option<&str>) -> Option<String> {
+        let writes = command.writes.as_ref()?;
+        if extension.is_some_and(|extension| commands::writes_extension(writes, extension)) {
+            return None;
+        }
+        let who = command
+            .programs
+            .iter()
+            .map(|name| self.program(name))
+            .find(|program| {
+                program.writes.as_ref().is_some_and(|writes| {
+                    !extension
+                        .is_some_and(|extension| commands::writes_extension(writes, extension))
+                })
+            })
+            .map_or_else(|| command.label.clone(), |program| program.label);
+        Some(match extension {
+            Some(extension) => format!("{who} can't write .{extension} files."),
+            None => format!("{who} can't write a file with no extension."),
+        })
+    }
+
+    /// What `command` can be told to write a new file as, said where a name
+    /// typed is not one of them.
+    fn writes_said(&self, command: &Command) -> Option<String> {
+        let writes = command.writes.as_ref()?;
+        let who: Vec<String> = command
+            .programs
+            .iter()
+            .map(|name| self.program(name))
+            .filter(|program| program.writes.is_some())
+            .map(|program| program.label)
+            .collect();
+        let extensions: Vec<String> = writes.iter().map(|each| format!(".{each}")).collect();
+        let listed = match extensions.as_slice() {
+            [] => return Some(format!("{} write no format in common.", who.join(" and "))),
+            [one] => one.clone(),
+            [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+        };
+        let verb = if who.len() == 1 { "writes" } else { "write" };
+        Some(format!("{} {verb} {listed} files.", who.join(" and ")))
     }
 
     /// The window closing. A run whose output the window was to put in
@@ -303,6 +467,27 @@ fn clean(value: &str) -> String {
     crate::escape_controls(value)
 }
 
+/// What `command`'s inputs reach it as, `GAMUT_INPUT_<NAME>`: what the
+/// dialog let go with for each it asks for, from `values` by place, and
+/// for the rest what a variant sets or the default.
+fn input_environment(command: &Command, values: &[Value]) -> Vec<(String, String)> {
+    command
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(at, input)| {
+            let value = match values.get(at) {
+                Some(value) if input.asked() => value.clone(),
+                _ => input.given(),
+            };
+            (
+                format!("GAMUT_INPUT_{}", input.name.to_ascii_uppercase()),
+                input.kind.environment(&value),
+            )
+        })
+        .collect()
+}
+
 /// A number for the environment: as few places as say it.
 fn number(value: f64) -> String {
     ui::commands::decimal(value)
@@ -342,14 +527,48 @@ pub(super) fn fields_of_view(focal: f64, width: f64, height: f64) -> [f64; 3] {
     [across, down, diagonal].map(|side| (2.0 * (side / (2.0 * focal)).atan()).to_degrees())
 }
 
+/// The extension of `name`, a file's, where it has one.
+fn extension_of(name: &Path) -> Option<String> {
+    name.extension()
+        .map(|extension| extension.to_string_lossy().into_owned())
+}
+
 impl App {
+    /// Why the command at `index` cannot be run now, where something of its
+    /// own stands in the way: a program it runs is not installed, or it
+    /// replaces its file, which is of a kind its programs do not write.
+    /// What every command needs — a file, a region — is
+    /// `ui::tooltip::disabled`'s.
+    pub(super) fn command_blocked(&self, index: usize) -> Option<String> {
+        let command = self.commands.set.get(index)?;
+        if let Some(program) = self.commands.missing(command) {
+            return Some(format!("{} isn't installed.", program.label));
+        }
+        if command.output != Output::Replace || self.current.is_none() {
+            return None;
+        }
+        let file = self.shown_path()?;
+        self.commands
+            .unwritable(command, extension_of(&file).as_deref())
+    }
+
     /// The menu's items: each command's label, whether it asks first, the
     /// control a press on it is, and whether that press would be taken.
     pub(super) fn command_items(&self, conditions: &super::input::Conditions) -> Vec<Item> {
-        self.commands
-            .set
-            .iter()
+        let set = &self.commands.set;
+        // A command with variants is a submenu of them, under its label,
+        // itself first where the menus offer it.
+        let submenu = |command: &Command| {
+            let family = command.family();
+            set.iter()
+                .any(|each| each.base.as_deref() == Some(family))
+                .then(|| set.iter().find(|each| each.name == family))
+                .flatten()
+                .map(|base| base.label.clone())
+        };
+        set.iter()
             .enumerate()
+            .filter(|(_, command)| command.menu)
             .map(|(index, command)| {
                 let slot = Slot {
                     index,
@@ -357,13 +576,15 @@ impl App {
                 };
                 Item {
                     label: command.label.clone(),
+                    submenu: submenu(command),
                     asks: command.asks(),
                     slot,
                     enabled: ui::tooltip::disabled(
                         ui::Tip::Control(Control::RunCommand(slot)),
                         *conditions,
                     )
-                    .is_none(),
+                    .is_none()
+                        && self.command_blocked(index).is_none(),
                 }
             })
             .collect()
@@ -385,16 +606,33 @@ impl App {
             return Effect::Nothing;
         }
         let asks = command.asks();
-        let target = match command.output {
-            Output::Replace => Target::Replace,
-            _ => Target::Own,
-        };
+        let output = command.output;
+        let inputs = input_environment(command, &[]);
         self.close_menus();
         if asks {
             self.open_command_dialog(slot.index);
             return Effect::Redraw;
         }
-        self.start_command(slot.index, &[], target)
+        let target = match output {
+            Output::Replace => Target::Replace,
+            // Nothing to ask, so the name it offers is the name it gets.
+            Output::New => {
+                let naming = self.naming(slot.index);
+                match naming.folder {
+                    Some(folder) => Target::New {
+                        folder,
+                        name: naming.name,
+                    },
+                    None => {
+                        let label = &self.commands.set[slot.index].label;
+                        self.toast(format!("{label}: {NOWHERE}"), Level::Error);
+                        return Effect::Redraw;
+                    }
+                }
+            }
+            _ => Target::Own,
+        };
+        self.start_command(slot.index, &inputs, target)
     }
 
     /// Puts up the dialog of the command at `index`, with the values it
@@ -409,19 +647,7 @@ impl App {
             .iter()
             .map(|input| input.kind.default_value())
             .collect();
-        let values = match self.commands.remembered.get(&command.name) {
-            Some(values)
-                if values.len() == command.inputs.len()
-                    && command
-                        .inputs
-                        .iter()
-                        .zip(values)
-                        .all(|(input, value)| input.kind.holds(value)) =>
-            {
-                values.clone()
-            }
-            _ => defaults,
-        };
+        let values = self.commands.remembered_for(command).unwrap_or(defaults);
         let naming = command.output.makes().then(|| self.naming(index));
         self.commands.asking = Some(Asking {
             index,
@@ -460,20 +686,23 @@ impl App {
                         super::edits::name_of(file)
                     ))
                 }
-                Some(_) => None,
+                Some(file) => self
+                    .commands
+                    .unwritable(command, extension_of(file).as_deref()),
                 None => Some(ui::tooltip::NOTHING_OPEN.to_string()),
             };
             let on = why.is_none()
                 && self
                     .commands
                     .replace_remembered
-                    .get(&command.name)
+                    .get(command.family())
                     .copied()
                     .unwrap_or(false);
             (on, why)
         });
         Naming {
             verdict: ui::export::judge(&offered, taken),
+            unwritten: self.unwritten(command, &offered),
             folder,
             name: offered,
             replace,
@@ -481,9 +710,23 @@ impl App {
         }
     }
 
+    /// What is wrong with `name` as the name of the new file `command`
+    /// makes, where its programs do not write its extension.
+    fn unwritten(&self, command: &Command, name: &str) -> Option<String> {
+        let extension = extension_of(Path::new(name));
+        self.commands.unwritable(command, extension.as_deref())?;
+        self.commands.writes_said(command)
+    }
+
     /// The dialog's name for the new file was typed in: what is wrong with
     /// it now, if anything, the folder asked whether it is taken.
     pub(super) fn set_command_name(&mut self, name: String) -> Effect {
+        let unwritten = self
+            .commands
+            .asking
+            .as_ref()
+            .and_then(|asking| self.commands.set.get(asking.index))
+            .and_then(|command| self.unwritten(command, &name));
         let Some(naming) = self
             .commands
             .asking
@@ -492,6 +735,7 @@ impl App {
         else {
             return Effect::Nothing;
         };
+        naming.unwritten = unwritten;
         let folder = naming.folder.clone();
         naming.verdict = ui::export::judge(&name, |typed| {
             folder
@@ -529,14 +773,16 @@ impl App {
             return Effect::Nothing;
         };
         let fits = command.inputs.get(input).is_some_and(|each| {
-            matches!(
-                (&each.kind, &value),
-                (Kind::Text { .. }, Value::Text(_))
-                    | (Kind::Number { .. }, Value::Number(_))
-                    | (Kind::Checkbox { .. }, Value::Checkbox(_))
-                    | (Kind::Radio { .. }, Value::Radio(_))
-                    | (Kind::Slider { .. }, Value::Slider(_))
-            ) && (matches!(value, Value::Text(_) | Value::Number(_)) || each.kind.holds(&value))
+            each.asked()
+                && matches!(
+                    (&each.kind, &value),
+                    (Kind::Text { .. }, Value::Text(_))
+                        | (Kind::Number { .. }, Value::Number(_))
+                        | (Kind::Checkbox { .. }, Value::Checkbox(_))
+                        | (Kind::Radio { .. }, Value::Radio(_))
+                        | (Kind::Slider { .. }, Value::Slider(_))
+                )
+                && (matches!(value, Value::Text(_) | Value::Number(_)) || each.kind.holds(&value))
         });
         if !fits {
             return Effect::Nothing;
@@ -560,14 +806,14 @@ impl App {
                 replace: Some((true, None)),
                 ..
             }) => true,
-            Some(naming) => naming.folder.is_some() && naming.verdict.allows(),
+            Some(naming) => {
+                naming.folder.is_some() && naming.verdict.allows() && naming.unwritten.is_none()
+            }
         };
         named
             && command
-                .inputs
-                .iter()
-                .zip(&asking.values)
-                .all(|(input, value)| input.kind.judge(value).is_none())
+                .asked()
+                .all(|(at, input)| input.kind.judge(&asking.values[at]).is_none())
     }
 
     /// The dialog's OK: the values remembered for next time, the dialog
@@ -595,17 +841,7 @@ impl App {
         let Some(command) = self.commands.set.get(asking.index) else {
             return Effect::Redraw;
         };
-        let inputs: Vec<(String, String)> = command
-            .inputs
-            .iter()
-            .zip(&asking.values)
-            .map(|(input, value)| {
-                (
-                    format!("GAMUT_INPUT_{}", input.name.to_ascii_uppercase()),
-                    input.kind.environment(value),
-                )
-            })
-            .collect();
+        let inputs = input_environment(command, &asking.values);
         let target = match (command.output, asking.naming) {
             (Output::Replace, _) => Target::Replace,
             (
@@ -627,11 +863,10 @@ impl App {
         if command.output == Output::Choose {
             self.commands
                 .replace_remembered
-                .insert(command.name.clone(), target == Target::Replace);
+                .insert(command.family().to_string(), target == Target::Replace);
         }
-        self.commands
-            .remembered
-            .insert(command.name.clone(), asking.values);
+        let command = command.clone();
+        self.commands.remember(&command, asking.values);
         self.start_command(asking.index, &inputs, target)
             .also(Effect::Redraw)
     }
@@ -648,14 +883,13 @@ impl App {
         let asking = self.commands.asking.as_mut()?;
         let command = self.commands.set.get(asking.index)?;
         let rows = command
-            .inputs
-            .iter()
-            .zip(&asking.values)
-            .map(|(input, value)| ui::commands::Row {
+            .asked()
+            .map(|(at, input)| ui::commands::Row {
+                input: at,
                 label: input.label.clone(),
                 kind: input.kind.clone(),
-                value: value.clone(),
-                refused: input.kind.judge(value),
+                value: asking.values[at].clone(),
+                refused: input.kind.judge(&asking.values[at]),
             })
             .collect();
         let naming = asking.naming.as_ref().map(|naming| {
@@ -664,6 +898,10 @@ impl App {
                 _ if replacing => Some((REPLACED.to_string(), ui::rename::Tone::Note)),
                 (None, _) => Some((NOWHERE.to_string(), ui::rename::Tone::Refusal)),
                 (Some(_), Some(refused)) => Some(refused),
+                (Some(_), None) if naming.unwritten.is_some() => naming
+                    .unwritten
+                    .clone()
+                    .map(|said| (said, ui::rename::Tone::Refusal)),
                 (Some(folder), None) => Some((
                     format!("In {}", crate::shown_path(folder)),
                     ui::rename::Tone::Note,
@@ -675,7 +913,7 @@ impl App {
                     false => naming.name.clone(),
                 },
                 line,
-                refused: !replacing && !naming.verdict.allows(),
+                refused: !replacing && (!naming.verdict.allows() || naming.unwritten.is_some()),
                 replace: naming.replace.clone(),
             }
         });
@@ -718,6 +956,14 @@ impl App {
                 .iter()
                 .map(|(name, value)| (name.clone(), value.replace('\0', ""))),
         );
+        for name in &command.programs {
+            let Some(found) = self.commands.locate(name) else {
+                let label = self.commands.program(name).label;
+                self.toast(format!("{label} isn't installed."), Level::Error);
+                return Effect::Redraw;
+            };
+            env.push((commands::variable_of(name), found.display().to_string()));
+        }
         let shown = match (&self.current, command.shown) {
             (Some(current), true) => {
                 let seen = current.seen();
@@ -1177,9 +1423,11 @@ impl App {
             Status::Exited(0) if unplaced => {}
             Status::Exited(0) => {
                 let mut said = false;
+                let mut step = None;
                 for directive in asked {
                     said = true;
                     match directive {
+                        Directive::Step(forward) => step = Some(forward),
                         Directive::Message(words) => {
                             self.toast(crate::escape_controls(&words), Level::Message);
                         }
@@ -1213,6 +1461,19 @@ impl App {
                     Some(Landed::Replaced(file)) => self.said_replaced(&label, file),
                     Some(Landed::Made(made)) => self.toast(made.said.clone(), Level::Message),
                     None => {}
+                }
+                // Only from the file it ran on, as it is asked for now — read
+                // again, where it was replaced: a step taken meanwhile, or a
+                // file the run opened or made, is left on screen.
+                let asked_for = self
+                    .files
+                    .target_path()
+                    .map(|path| std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
+                if let Some(forward) = step
+                    && finished.about.is_some()
+                    && asked_for == finished.about
+                {
+                    effect = effect.also(self.step(forward));
                 }
             }
             Status::Exited(code) => {

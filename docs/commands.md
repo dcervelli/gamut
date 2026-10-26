@@ -37,6 +37,99 @@ held it, and the other way round, as between any two names. `help_of`
 answers with a `Cow`, and the help popup's `Row::does` is one, since an
 extra's words are the file's.
 
+## Variants
+
+A variant is read into the set as a `Command` of its own, after its base:
+`read_variant` clones the base, gives it the variant's name and label, its
+`output` and `confirm` where it says, and holds each input it sets in
+`Input::set`, checked by `Kind::value_of` against the input's kind. Making
+it a whole command rather than a reference to one is what keeps everything
+downstream unchanged: `Action::Command` and `Control::RunCommand` carry its
+index, `Keymap::add_extra` gives it a name to bind, the help lists it, and
+`App::press_command` runs it, none of them knowing variants exist. Only
+`run`, `needs`, `shown`, `name` and the inputs are not a variant's to
+change: what it needs is what makes it dead, and a variant that needed
+something its base did not would be a second command written in the
+first's table.
+
+`Command::base` is what remains of the family, read in three places.
+`Command::family` keys what a dialog is remembered by, so a variant's
+dialog opens with what its base's was left with; `Commands::remember`
+writes back only the inputs that dialog asked for, so that a variant's
+settings never become the base's defaults. `App::command_items` gives every
+member of a family the base's label as its `Item::submenu`, and the file
+menu and the Mac's list hang each run of items under one title from one
+submenu. `commands::offered_name` names a variant's new file by its family,
+since the variant's name is a key's rather than a word for the file.
+
+A value the dialog never asks for — a `hidden` input, or one a variant
+sets — is still in the environment: `input_environment` takes the dialog's
+value for each input it asked and `Input::given` for the rest. So a script
+reads every input the same way however it was run, and what a variant
+means is in the values it sets rather than in its name, which a script
+never sees.
+
+`Command::asks` is what decides whether a press opens the dialog: an input
+left to ask, `output = "choose"`, `confirm`, or a plain command's
+`output = "new"`, whose name is asked. A variant that makes a file and has
+nothing else to ask runs at once under the name `offered_name` gives,
+which `prepare_making` counts up past a name taken meanwhile as it does
+for any other: a variant is there to be one key, and a name the user would
+only ever accept is not a question.
+
+## Programs
+
+A command's `programs` are looked for by `commands::locate` — the run's own
+`PATH`, widened on a Mac as the run's is, then `exiftool::EXTRA_DIRS` — and
+handed to it as `GAMUT_PROGRAM_<NAME>`. So a script never looks for one,
+nor knows where a Mac's packages put it, and a script that runs
+`"$GAMUT_PROGRAM_MAGICK"` runs exactly what the menu was judged by. `Commands::locate` keeps what it found for
+`LOOK_AGAIN`, since it is asked on every frame, for every command, by
+`App::command_blocked`; a program installed while the window is open is
+noticed within it. `exiftool`, with no `path` of its own, is looked for by
+the Tags tab's setting, so that one setting places it for both.
+
+A missing program, and a replacement of a kind of file the command cannot
+write, are reasons of the command's own rather than conditions every
+command shares, and they carry the program's label, which
+`ui::tooltip::disabled`'s `&'static str` cannot. So `App::command_blocked`
+says them: `App::refuses` asks it beside `disabled`, `App::command_items`
+draws the item dead by it, the `Namer` carries each command's reason for
+the tooltip, and a key that runs a blocked command says the reason as a
+message, since a key has no item to wear it.
+
+`writes` is a program's, not a command's, since what ImageMagick writes is
+the same for every command that runs it. A command writes the intersection
+of its programs' lists (`commands::resolve`), worked out once the
+configuration's programs and the built-ins' are both known. It is enforced
+before the run rather than by the script: `command_blocked` for a command
+that replaces, `Naming::replace`'s reason for the box that chooses to,
+`App::unwritten` for a name typed, and `commands::offered_name`, which
+offers the first extension the programs write where they do not write the
+file's own — so that `redact-copy` on a raw runs at once as a PNG rather
+than failing. `decode::other_kind` stays behind all of it for a script that
+writes something else anyway.
+
+## Built-in commands
+
+`src/builtins.toml` is written as a configuration file is, and read by the
+same `commands::parse` and `parse_programs`, so a built-in is nothing a
+user's command could not be, and `--print-config` can print the file for
+copying (`commands::builtins_template`). Its scripts are POSIX `sh`, one for
+both platforms, asking `uname` where they differ, and held in the TOML
+rather than as files beside the binary, since a script that has to be found
+on disk is one more thing to install in the right place on every platform;
+`sh -c` runs a script of many lines as it runs one.
+
+`Config::default` holds the built-ins, so a configuration file that says
+nothing has them, and `commands::with_builtins` lays a file's own over them:
+its commands first, in its order, then each built-in family none of its own
+replaces by name or turns off with `command.<name> = false`. A built-in
+variant whose name one of its own already holds is left out alone, so that
+a key bound to that name runs the user's. Keys are made after the merge,
+`Config::adopt_commands` clearing the keymap's extras first, since the
+indices the extras carry are the merged set's.
+
 ## The environment, and why not the command line
 
 Everything the window knows is handed over as `GAMUT_*` variables, never
@@ -93,7 +186,7 @@ a 36 mm width, so a 4:3 phone picture's horizontal angle comes out right.
 
 What a command asks of the window comes back in a file the window names,
 `GAMUT_RESULT`, read with the configuration's own lexer after the run:
-`open`, `message` and `error` lines. The output is never read for them. A
+`open`, `message`, `error` and `step` lines. The output is never read for them. A
 script very often prints what it read from a file — exiftool's tags, the
 text in a picture, a caption — and if a line of output could be a
 directive, the file's author could make the window open what they liked.
@@ -117,6 +210,13 @@ hold it relative; any other joins it beside the file on screen with
 `Files::adopt`, as an export does. A script that writes beside the picture
 or over it needs no `open` at all: the file on screen and its folder are
 watched (see [live reload](live-reload.md)).
+
+`step` goes through `App::step`, as `]` and `[` do, and only while the
+file last asked for is still the one the run was given: a step taken while
+the run went on, or a file the run opened or made, is what the user is
+looking at now, and a run that ended later is not to move them off it. A
+replacement leaves the same file asked for, read again, so a command that
+replaces and steps on does both.
 
 ## One run at a time, delivered and stopped
 
@@ -176,7 +276,12 @@ and only where the output is a regular file that is not empty, the file's
 signature is the one recorded at launch — a file changed under the run
 would have its change lost — and `decode::probe` reads the output's header,
 since a file nothing can show would leave the window with a file it could
-not show. The output takes the original's permissions, then
+not show. `decode::other_kind` then holds the output to the original's
+kind, by what the leading bytes of each say: the name does not change, so
+a PNG written for a raw would read in the window and be wrong to every
+other program that trusted its extension. A camera's raws count as one
+kind, since `raw_format` tells them apart by the maker in the header,
+which would refuse an NRW put back where it was read from. The output takes the original's permissions, then
 `Trash::replace` makes the swap; see
 [editing](editing.md#a-replacement-keeps-the-original-without-moving-it).
 The file replaced is the one the run was launched on, held in
@@ -221,18 +326,20 @@ generation over a suffix would be worse than correcting it and saying so.
 `output = "choose"` is either, as the dialog's box says. The box is dead
 where `prepare_replacing` would refuse — no trash, or a link — so that the
 refusal is seen before the run rather than after it, and is remembered for
-the session by the command's name, as the inputs are. The name typed is
+the session by the command's family, as the inputs are. The name typed is
 not remembered: it names one file.
 
 ## The dialog
 
-A command with inputs, or with `confirm`, opens a modal first, drawn with
+A command with an input to ask, or with `confirm`, opens a modal first, drawn with
 the rename dialog's pieces: `rename::modal`, `rename::boxed_field`,
 `rename::line` and `rename::ok_cancel`, so it reads as one of the window's
 dialogs. Each input's value comes back as `Command::DialogInput` and is held
-by the application, which judges a number as it is typed. The values a
-dialog was let go with are remembered for the session by the command's name,
-and used again only where each still fits its input — the file may have
+by the application, which judges a number as it is typed; each row carries
+its input's place among the command's, since the rows leave out what is not
+asked. The values a dialog was let go with are remembered for the session
+by the command's family, and used again only where each still fits its
+input — the file may have
 been edited since — and never written to the state file, since what is
 typed into a dialog may be a secret. Reading the configuration again takes
 the dialog down, since the command it asked for may have changed under it.

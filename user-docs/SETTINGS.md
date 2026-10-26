@@ -196,14 +196,14 @@ one is a table of the file, under a `[command.<name>]` heading, after every
 setting, key and gesture:
 
 ```
-keys.command.redact = "ctrl+shift+r"
+keys.command.cover = "ctrl+shift+c"
 
-[command.redact]
-label = "Redact region"
-run = "~/bin/redact.sh"
+[command.cover]
+label = "Cover region"
+run = "~/bin/cover.sh"
 needs = "region"
 
-[[command.redact.input]]
+[[command.cover.input]]
 name = "style"
 label = "Style"
 kind = "radio"
@@ -227,8 +227,11 @@ digits, `_` and `-`.
 | `confirm` | `true` asks before running, even with nothing to ask |
 | `shown` | `true` writes the picture as you see it, turned, exposed and toned, to a PNG for the command to read, in `GAMUT_SHOWN` |
 | `output` | What becomes of what the command writes to `GAMUT_OUTPUT`. `"replace"` has it take the file's place, the original going to the trash: see [Changing the file itself](#changing-the-file-itself). `"new"` makes it a new file, under a name the dialog asks for, and `"choose"` has the dialog ask which of the two: see [Making a new file](#making-a-new-file). Left out, the command writes wherever it likes |
-| `name` | For `"new"` and `"choose"`, the name the dialog offers the new file under, `{stem}` standing for the file's own name without its extension: `"{stem}-small.jpg"`. Left out, it is the file's name with the command's after it, `IMG_1234-watermark.jpg`, or the command's name alone for one that needs nothing |
+| `name` | For `"new"` and `"choose"`, the name the dialog offers the new file under, `{stem}` standing for the file's own name without its extension: `"{stem}-small.jpg"`. Left out, it is the file's name with the command's after it, `IMG_1234-watermark.jpg`, or the command's name alone for one that needs nothing. A variant's file is named for its command |
 | `input` | What to ask before it runs: one `[[command.<name>.input]]` table for each, below. The window puts up a dialog with every input in the order the file has them |
+| `variant` | The same command under other names, each with some of its inputs already set: one `[[command.<name>.variant]]` table for each. See [Variants](#variants) |
+| `menu` | `false` leaves it out of the menus; its key still runs it |
+| `programs` | The programs it runs, by name: `["magick"]`. It is dead while one cannot be found, and is told where each is. See [Programs](#programs) |
 
 A `run` line in single quotes is read exactly as written, which suits a
 line of the shell with double quotes in it:
@@ -241,8 +244,9 @@ Three single quotes on each side hold a script of several lines.
 
 Each input has a `name`, which reaches the command as `GAMUT_INPUT_<NAME>`
 in capitals and is lower-case letters, digits and `_`; a `label`, what the
-dialog calls it, which is its name if left out; and a `kind`, with what
-that kind takes:
+dialog calls it, which is its name if left out; `hidden = true` where the
+dialog is never to ask for it, the command being given its default or what
+a variant sets; and a `kind`, with what that kind takes:
 
 | `kind` | Also takes | Reaches the command as |
 | --- | --- | --- |
@@ -265,6 +269,107 @@ The dialog opens with what you last chose for that command in this
 session. `Enter` runs it, `Esc` closes it. In a box of several lines,
 `Enter` starts a new line and `Ctrl+Enter` (`⌘Enter` on a Mac) runs it,
 as it does anywhere in the dialog.
+
+#### Variants
+
+A variant is the command with some of its answers given ahead of time,
+under a name of its own, so that a key can run it with no dialog, or with
+a shorter one. Rating a photo from one to five stars is one command and
+five variants, each on a key of its own:
+
+```
+keys.command.rate-1 = "alt+1"
+keys.command.rate-5 = "alt+5"
+
+[command.rate]
+label = "Rate"
+run = '"$GAMUT_PROGRAM_EXIFTOOL" -overwrite_original -Rating="$GAMUT_INPUT_STARS" "$GAMUT_FILE" && echo "step = next" >> "$GAMUT_RESULT"'
+programs = ["exiftool"]
+menu = false
+input = [
+  { name = "stars", kind = "number", min = 0, max = 5 },
+]
+variant = [
+  { name = "rate-1", label = "1 star", set = { stars = 1 } },
+  { name = "rate-5", label = "5 stars", set = { stars = 5 } },
+]
+```
+
+| Field | What it does |
+| --- | --- |
+| `name` | What its key is bound by, `keys.command.<name>`, as a command's name is. No two commands or variants may share one. Required |
+| `label` | What the menu and the help popup call it. The name, if left out |
+| `set` | A table of the command's inputs by name, each with the value it is to have: `{ stars = 1 }`. The dialog does not ask for those |
+| `output` | Its own `output`, in place of the command's |
+| `confirm` | Its own `confirm`, in place of the command's |
+| `menu` | `false` leaves it out of the menus. A variant is in them even when its command is not |
+
+Everything else — `run`, `needs`, `shown`, `name` and the inputs — is the
+command's. The dialog asks only what a variant leaves open, and a variant
+with nothing left to ask runs at once: one with `output = "new"` names its
+file as the command's `name` offers, counting up past a name that is
+taken. What you type into a variant's dialog is remembered for the command
+and every variant of it, but what a variant sets is not.
+
+A command with variants is a submenu of the file menu, under its label,
+holding the command and then each variant.
+
+#### Built-in commands
+
+Three commands come with `gamut`, at the foot of the file menu after your
+own. None has a key until you give it one.
+
+| Name | What it does | Needs |
+| --- | --- | --- |
+| `redact`, with `redact-copy` and `redact-in-place` | Blacks out the region, in a new file or in the photo itself. **Redact…** asks which; each variant does one without asking | ImageMagick |
+| `watermark` | Lays a line of text over a corner or the middle of the picture as you see it, blended into it rather than painted over it, in a new file or in the photo itself | ImageMagick |
+| `strip` | Takes every tag out, the location included, keeping the orientation and the color profile, in a new file or in the photo itself | ExifTool |
+
+Install what they need with your package manager: `pacman -S imagemagick
+perl-image-exiftool`, `apt install imagemagick libimage-exiftool-perl`,
+`dnf install ImageMagick perl-Image-ExifTool`, or on a Mac `brew install
+imagemagick exiftool`. Until it is installed, a command is dead, and its
+tooltip says what it is waiting for.
+
+A `[command.<name>]` table of your own with a built-in's name replaces it,
+its variants with it. To take one out of the menus and the help, turn it
+off above the first table:
+
+```
+command.watermark = false
+```
+
+`gamut --print-config` ends with every built-in command written out,
+commented, to copy from.
+
+#### Programs
+
+A command that runs other programs can name them in its `programs`, so
+that `gamut` finds them before it runs. While one cannot be found, the
+command is dead, its tooltip names what is missing, and its key says so.
+Each is looked for on the `PATH` a command runs with, and on Linux in
+`/usr/bin/vendor_perl` too, and reaches the command as
+`GAMUT_PROGRAM_<NAME>`, its full path: run it by that rather than by name.
+A `-` in the name is a `_` there.
+
+A program needs no table of its own to be named. Give it one to say more:
+
+```
+[program.magick]
+label = "ImageMagick"
+path = "~/opt/imagemagick/bin/magick"
+writes = ["jpg", "png", "tif", "webp", "bmp", "gif"]
+```
+
+| Field | What it does |
+| --- | --- |
+| `label` | What the window calls it. The name, if left out |
+| `path` | Where it is, when it is not on the `PATH`. `exiftool`, left without one, is looked for where the `exiftool` setting says |
+| `writes` | The extensions of the files it can write. A command that runs it then writes only those: one with `output = "replace"` is dead on any other kind of file, the **Replace the original** box likewise, and a new file is offered with an extension it writes and refused one it does not. `jpg` and `jpeg` are one, and so are `tif` and `tiff`, and `heic` and `heif`. Left out, nothing is refused |
+
+Where a command names several programs that say what they write, it
+writes only what all of them do. `magick` and `exiftool` have tables
+already, which a table of your own with the same name replaces.
 
 #### What a command is told
 
@@ -299,6 +404,7 @@ whose EXIF orientation turns it, and a picture you have turned with `[` or
 | `GAMUT_SHOWN_REGION_X`, `_Y`, `_WIDTH`, `_HEIGHT` | The region in it, as you see it |
 | `GAMUT_RESULT` | The file to write what the window should do afterward, below |
 | `GAMUT_OUTPUT` | With `output = "replace"`: where to write the new version of the file, below |
+| `GAMUT_PROGRAM_<NAME>` | Where each of its `programs` was found |
 | `GAMUT_VERSION` | Which version of `gamut` ran it |
 | `GAMUT_INPUT_<NAME>` | What each input was given |
 
@@ -327,6 +433,7 @@ without quotes:
 | `open = <path>` | Shows that image, joining it to the list beside the file on screen. A relative path is read from the command's folder. With several, the last. One `gamut` cannot read is not shown, and the window says so |
 | `message = <words>` | Says the words at the foot of the window |
 | `error = <words>` | Says them as something that went wrong |
+| `step = next` | Steps on to the next file, as `]` does, or with `step = previous` back to the one before. Only while the file it ran on is still the one on screen: not when you have stepped elsewhere meanwhile, or the command opened or made another file |
 
 What a command prints is never read for these: a script printing what it
 found in a file, such as its tags or the text in it, cannot make the window
@@ -388,7 +495,8 @@ The new version keeps the original's permissions and nothing else of the
 file is carried across for you: if your command drops metadata, the file
 loses it, the EXIF orientation included, and a photo held on its side then
 shows on its side. Write the format the file is already in, since the name
-does not change. A command that replaces needs a file, so it cannot have
+does not change: a file of another kind is refused, and the original left
+alone. A command that replaces needs a file, so it cannot have
 `needs = "none"`, and it cannot run on a link.
 
 #### Making a new file
@@ -427,51 +535,12 @@ new file, and the window's message about it is what it says afterward.
 #### Examples
 
 These use programs you install yourself: ImageMagick's `magick`,
-`tesseract`, `exiftool`, `curl` and `jq`.
+`tesseract`, `exiftool`, `curl` and `jq`. The built-in commands, which
+`gamut --print-config` writes out, are examples too.
 
-Black out the region, in a new file beside the photo, and show it:
-
-```
-[command.redact]
-label = "Redact region"
-needs = "region"
-run = '''
-out="$GAMUT_DIR/$GAMUT_STEM-redacted.$GAMUT_EXT"
-magick "$GAMUT_FILE" -fill black \
-  -draw "rectangle $GAMUT_REGION_X,$GAMUT_REGION_Y $((GAMUT_REGION_X + GAMUT_REGION_WIDTH - 1)),$((GAMUT_REGION_Y + GAMUT_REGION_HEIGHT - 1))" \
-  "$out" && echo "open = $out" >> "$GAMUT_RESULT"
-'''
-```
-
-The coordinates are the file's own, so this blacks out the right place
-whichever way the photo was held, and the new file keeps its orientation.
-
-Black out the region in the photo itself, the original kept in the trash
-for undo:
-
-```
-[command.redact-in-place]
-label = "Redact in place"
-needs = "region"
-output = "replace"
-run = '''
-magick "$GAMUT_FILE" -fill black \
-  -draw "rectangle $GAMUT_REGION_X,$GAMUT_REGION_Y $((GAMUT_REGION_X + GAMUT_REGION_WIDTH - 1)),$((GAMUT_REGION_Y + GAMUT_REGION_HEIGHT - 1))" \
-  "$GAMUT_OUTPUT"
-'''
-```
-
-Take every tag out of the photo, its location included, keeping the
-orientation and the color profile it needs to look right:
-
-```
-[command.strip]
-label = "Strip metadata"
-output = "replace"
-run = 'exiftool -q -all= -tagsfromfile @ -Orientation -ColorSpaceTags -o "$GAMUT_OUTPUT" "$GAMUT_FILE"'
-```
-
-Blur it instead, as hard as the slider says:
+Blur the region in a new file beside the photo, as hard as the slider
+says. The coordinates are the file's own, so this blurs the right place
+whichever way the photo was held, and the new file keeps its orientation:
 
 ```
 [command.blur]

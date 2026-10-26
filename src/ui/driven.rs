@@ -3613,6 +3613,7 @@ fn the_file_menu_lists_the_commands_after_a_rule() {
     let mut harness = open(WINDOW, 1, panels());
     let item = |label: &str, index, asks, enabled| Item {
         label: label.to_string(),
+        submenu: None,
         asks,
         slot: Slot {
             index,
@@ -3647,6 +3648,53 @@ fn the_file_menu_lists_the_commands_after_a_rule() {
     );
 }
 
+/// A command with variants is a submenu of the file menu under its label,
+/// holding it and each variant, and a press on one asks for that one.
+#[test]
+fn a_commands_variants_are_a_submenu_of_the_file_menu() {
+    use super::commands::{Item, Needs, Slot};
+    let mut harness = open(WINDOW, 1, panels());
+    let item = |label: &str, index, submenu: Option<&str>| Item {
+        label: label.to_string(),
+        submenu: submenu.map(str::to_string),
+        asks: false,
+        slot: Slot {
+            index,
+            needs: Needs::Region,
+        },
+        enabled: true,
+    };
+    harness.state_mut().input.commands = vec![
+        item("Redact to a copy", 0, Some("Redact")),
+        item("Redact in place", 1, Some("Redact")),
+        item("Wallpaper", 2, None),
+    ];
+    harness.run();
+    assert_eq!(click(&mut harness, "File"), []);
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::Button, "Redact in place")
+            .is_none()
+    );
+    assert!(
+        harness
+            .query_by_role_and_label(egui::accesskit::Role::Button, "Wallpaper")
+            .is_some()
+    );
+    // egui's submenu button names itself with the arrow it draws.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Redact \u{23f5}")
+        .hover();
+    harness.run();
+    assert_eq!(
+        click(&mut harness, "Redact in place"),
+        [Command::Press(Control::RunCommand(Slot {
+            index: 1,
+            needs: Needs::Region
+        }))]
+    );
+}
+
 /// The command dialog takes the keyboard into its first box, hands back
 /// what each input is changed to, runs on `Enter` only while every input
 /// will do, and says what is wrong with a number.
@@ -3655,7 +3703,8 @@ fn the_command_dialog_hands_back_each_value() {
     use super::commands::{self, Kind, Refusal, Row, Value};
     let mut harness = open(WINDOW, 1, panels());
     let dialog = |size: &str, refused: Option<Refusal>, opened: bool| {
-        let row = |label: &str, kind: Kind, value: Value, refused| Row {
+        let row = |input, label: &str, kind: Kind, value: Value, refused| Row {
+            input,
             label: label.to_string(),
             kind,
             value,
@@ -3665,24 +3714,28 @@ fn the_command_dialog_hands_back_each_value() {
             title: "Redact region".to_string(),
             rows: vec![
                 row(
+                    0,
                     "Size",
                     Kind::number(Some((1.0, 10.0)), None).unwrap(),
                     Value::Number(size.to_string()),
                     refused,
                 ),
                 row(
+                    1,
                     "Mode",
                     Kind::radio(vec!["blur".into(), "black".into()], None).unwrap(),
                     Value::Radio(0),
                     None,
                 ),
                 row(
+                    2,
                     "Note",
                     Kind::Checkbox { default: false },
                     Value::Checkbox(false),
                     None,
                 ),
                 row(
+                    3,
                     "Strength",
                     Kind::slider(0.0, 100.0, Some(50.0), None).unwrap(),
                     Value::Slider(50.0),
@@ -3764,6 +3817,7 @@ fn a_box_of_several_lines_keeps_enter_for_itself() {
         Some(commands::Input {
             title: "Generate".to_string(),
             rows: vec![Row {
+                input: 0,
                 label: "Prompt".to_string(),
                 kind: Kind::text(None, Some(4.0)).unwrap(),
                 value: Value::Text(text.to_string()),

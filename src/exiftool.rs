@@ -58,9 +58,9 @@ const TOOLKIT: &str = "Image::ExifTool ";
 /// started from the desktop sees. A Mac app started from Finder or the Dock
 /// gets none of the shell's PATH at all.
 #[cfg(target_os = "linux")]
-const EXTRA_DIRS: &[&str] = &["/usr/bin/vendor_perl"];
+pub(crate) const EXTRA_DIRS: &[&str] = &["/usr/bin/vendor_perl"];
 #[cfg(target_os = "macos")]
-const EXTRA_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
+pub(crate) const EXTRA_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
 
 /// What exiftool read from one file.
 #[derive(Clone, Debug, PartialEq)]
@@ -368,7 +368,7 @@ impl Program {
 
 /// `configured` taken as a path where it has more than one component, and
 /// looked for in each of `dirs` in turn where it is a bare name.
-fn locate_in(configured: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
+pub(crate) fn locate_in(configured: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
     let named = Path::new(configured);
     if configured.is_empty() {
         return None;
