@@ -23,6 +23,42 @@ fn write_png(dir: &Path, name: &str, width: u32, height: u32) -> PathBuf {
     path
 }
 
+/// A gray GeoTIFF `width` by `height` in NZTM (EPSG:2193), its first
+/// corner at `corner` and a pixel `pixel` meters across.
+fn write_geotiff(
+    dir: &Path,
+    name: &str,
+    [width, height]: [u32; 2],
+    corner: [f64; 2],
+    pixel: f64,
+) -> PathBuf {
+    use tiff::tags::Tag;
+    let path = dir.join(name);
+    let file = std::fs::File::create(&path).expect("the temporary directory is writable");
+    let mut tiff = tiff::encoder::TiffEncoder::new(std::io::BufWriter::new(file)).unwrap();
+    let mut image = tiff
+        .new_image::<tiff::encoder::colortype::Gray8>(width, height)
+        .unwrap();
+    let tags = image.encoder();
+    tags.write_tag(Tag::Unknown(33550), &[pixel, pixel, 0.0][..])
+        .unwrap();
+    tags.write_tag(
+        Tag::Unknown(33922),
+        &[0.0, 0.0, 0.0, corner[0], corner[1], 0.0][..],
+    )
+    .unwrap();
+    // Projected, under EPSG:2193.
+    tags.write_tag(
+        Tag::Unknown(34735),
+        &[1u16, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 2193][..],
+    )
+    .unwrap();
+    image
+        .write_data(&vec![128u8; (width * height) as usize])
+        .unwrap();
+    path
+}
+
 /// The files are written under a directory of their own so that the tests,
 /// which run alongside each other, cannot tread on each other's files.
 fn opening(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
@@ -1846,6 +1882,42 @@ fn stepping_to_an_image_of_the_same_size_keeps_the_view() {
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
+/// A file of the same shape at another size is the same comparison made
+/// at another resolution — one map of the ground at twice the detail of
+/// another: the detail under the center of the window stays there, at the
+/// size it was on screen, and the display is the file's own.
+#[test]
+fn stepping_to_an_image_of_the_same_shape_rescales_the_view() {
+    let (mut app, dir) = app_over("shape", &[("a.png", 32, 24), ("b.png", 64, 48)]);
+    app.view
+        .set_zoom_at(4.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
+    app.view.pan_by(-40.0, 30.0, app.image_size(), VIEWPORT);
+    let before = app.view.placement(app.image_size(), VIEWPORT);
+    let centered = before.image_point(VIEWPORT.center());
+    if let Some(current) = app.current.as_mut() {
+        current.display.set_exposure(1.0);
+    }
+
+    let _ = app.step(true);
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.image_size(), [64.0, 48.0]);
+    let after = app.view.placement(app.image_size(), VIEWPORT);
+    let landed = after.image_point(VIEWPORT.center());
+    assert!(
+        (after.width - before.width).abs() < 1e-3,
+        "the same size on screen: {after:?} {before:?}"
+    );
+    assert!(
+        (landed[0] - centered[0] * 2.0).abs() < 1e-3
+            && (landed[1] - centered[1] * 2.0).abs() < 1e-3,
+        "the same detail at the center: {landed:?} {centered:?}"
+    );
+    let current = app.current.as_ref().unwrap();
+    assert_eq!(current.display.exposure_stops(), 0.0, "its own display");
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
 /// A file coming back at the size of the one it is arriving beside is a
 /// comparison, and it is made where the eye is: the pan and zoom carry
 /// over from the picture leaving the screen, whatever this file was left
@@ -2371,6 +2443,7 @@ fn thumbnailed(app: &mut App, path: &Path, size: (u32, u32)) {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     let ctx = egui::Context::default();
@@ -2467,6 +2540,63 @@ fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait(
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
+/// Stepping between georeferenced files of the same ground lines them up
+/// on it, and the stand-in for a slow read lands where the picture will,
+/// placed by what the header said of the file before its pixels are in.
+#[test]
+fn a_georeferenced_file_and_its_stand_in_land_on_the_same_ground() {
+    let dir = std::env::temp_dir().join(format!("gamut-ground-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the temporary directory is writable");
+    let a = write_geotiff(&dir, "a.tif", [400, 300], [1_000.0, 9_000.0], 7.0);
+    // Twice the detail, of ground starting fifty of a's pixels east.
+    let b = write_geotiff(&dir, "b.tif", [500, 700], [1_350.0, 9_000.0], 3.5);
+    let mut app = open(vec![a.clone(), b.clone()], vec![]);
+    app.headless = Some(WINDOW);
+    answer(&mut app, Reload::Fresh);
+    let ground = |app: &App| {
+        let placement = app.view.placement(app.image_size(), app.viewport());
+        let at = placement.image_point(app.viewport().center());
+        let geo = app.current.as_ref().unwrap().exif.georeference.clone();
+        geo.expect("placed").ground(at.map(f64::from))
+    };
+    let (image, viewport) = (app.image_size(), app.viewport());
+    app.view
+        .set_zoom_at(2.0, viewport.center(), image, viewport);
+    app.view.center_on([120.0, 150.0], image, viewport);
+    let before = ground(&app);
+
+    let _ = app.step(true);
+    let since = app.files.pending().expect("a read is in flight").since;
+    let _ = app.files.announce_slow_read(since + files::SLOW_READ);
+    thumbnailed(&mut app, &b, (500, 700));
+    let packet = crate::image::xmp::Xmp::read_from(&b, None);
+    let (_, georeference) = exif::taken_and_placed(&b, None, &packet);
+    assert!(georeference.is_some(), "the header places it");
+    let facts = app.chooser.facts_of(&b).unwrap().clone();
+    let _ = app.chooser.learn(
+        &b,
+        Facts {
+            georeference: georeference.map(Box::new),
+            ..facts
+        },
+    );
+    let stood = app
+        .standin(&app.sight())
+        .expect("the wait is said and the thumbnail held")
+        .placement;
+
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.view.zoom(app.image_size(), app.viewport()), 1.0);
+    let after = ground(&app);
+    assert!(
+        (after[0] - before[0]).abs() < 1e-3 && (after[1] - before[1]).abs() < 1e-3,
+        "{before:?} -> {after:?}"
+    );
+    assert_eq!(landed(&app), [stood.x, stood.y, stood.width, stood.height]);
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
 /// A step moves what says where in the list the key has gone — the
 /// count, the name in the bar and the title, the file list's highlight —
 /// at once, while the picture stays; what acts on the file waits, the
@@ -2554,6 +2684,7 @@ fn the_transport_bar_is_the_arriving_files_from_the_key() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     assert_eq!(
@@ -2606,6 +2737,7 @@ fn a_kind_that_was_slow_is_said_to_be_slow_at_once() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     let _ = app.step(true);
@@ -2625,6 +2757,7 @@ fn a_kind_that_was_slow_is_said_to_be_slow_at_once() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     assert!(said(&app).is_none());
@@ -3658,6 +3791,7 @@ fn the_list_is_put_in_order_between_reads_and_the_file_on_screen_stays() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         }),
     };
     app.take_thumbnail(learned("a.png", 4));
@@ -4765,6 +4899,14 @@ fn an_arrival_is_named_by_what_it_stands_to() {
             Reload::Fresh,
             b,
             large,
+            Some((a, small)),
+            Arrival::Matched,
+            true,
+        ),
+        (
+            Reload::Fresh,
+            b,
+            [6.0, 16.0],
             Some((a, small)),
             Arrival::Anew,
             true,

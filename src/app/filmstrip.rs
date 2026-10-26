@@ -298,6 +298,7 @@ mod tests {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         }
     }
 

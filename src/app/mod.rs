@@ -9,6 +9,7 @@ mod exporting;
 mod files;
 mod filmstrip;
 pub mod folder;
+mod ground;
 mod gui;
 pub mod input;
 mod kept;
@@ -42,6 +43,7 @@ use crate::image::DecodedImage;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{self, CameraJpeg, Reading, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
+use crate::image::geo::Georeference;
 use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Source};
@@ -1664,6 +1666,33 @@ impl App {
         Some((view, size))
     }
 
+    /// The view a file arriving placed by `geo`, `stored` pixels as stored
+    /// and shown under `turn`, lines up with the picture on screen by —
+    /// where both are georeferenced in one system and the ground on screen
+    /// overlaps it. Asked by the arrival itself, and by the stand-in from
+    /// what the header said, so that the two land in the same place.
+    fn on_the_same_ground(
+        &self,
+        geo: Option<&Georeference>,
+        stored: [u32; 2],
+        turn: Turn,
+    ) -> Option<View> {
+        let current = self.current.as_ref()?;
+        let (view, _) = self.picture_view()?;
+        let (picture, _) = current.picture();
+        let from = ground::Placed {
+            geo: current.exif.georeference.as_ref()?,
+            stored: [picture.width, picture.height],
+            turn: current.turn,
+        };
+        let to = ground::Placed {
+            geo: geo?,
+            stored,
+            turn,
+        };
+        ground::aligned(view, from, to, self.viewport())
+    }
+
     /// A read asked for `asked` has landed. Where the preference has moved
     /// since and the picture on screen has another rendering to move to, it
     /// is read again in the one asked for now.
@@ -1908,7 +1937,8 @@ impl App {
     /// is, being a better picture of itself than any thumbnail.
     fn standin(&self, sight: &Sight) -> Option<ui::Standin> {
         let path = self.replacing()?;
-        let (width, height) = self.chooser.facts_of(path)?.size?;
+        let facts = self.chooser.facts_of(path)?;
+        let (width, height) = facts.size?;
         let thumb = self.thumbs.get(path)?;
         // Where the picture will land, decided as its arrival will decide it.
         let kept = self.kept.left(path);
@@ -1924,7 +1954,9 @@ impl App {
             .zip(self.files.shown_path())
             .map(|(size, path)| (path, size));
         let (arrival, _) = arrival(Reload::Fresh, path, size, shown);
-        let view = arriving_view(arrival, kept, view, picture, size);
+        let view = self
+            .on_the_same_ground(facts.georeference.as_deref(), [width, height], turn)
+            .unwrap_or_else(|| arriving_view(arrival, kept, view, picture, size));
         Some(ui::Standin {
             thumb,
             placement: view.placement(size, sight.viewport),
@@ -2824,7 +2856,7 @@ impl App {
         // left in: an exposure set on the camera's JPEG means nothing to
         // linear sensor counts, and the other way about.
         let kept = match arrival {
-            Arrival::Beside | Arrival::Anew => self
+            Arrival::Beside | Arrival::Matched | Arrival::Anew => self
                 .kept
                 .left(&file.path)
                 .filter(|left| left.rendering == rendering)
@@ -2913,6 +2945,7 @@ impl App {
                 bytes: facts.bytes,
                 modified: facts.modified,
                 taken: exif.taken,
+                georeference: exif.georeference.clone().map(Box::new),
             },
         );
         // Made from the picture itself, decoded already, rather than read
@@ -2930,12 +2963,28 @@ impl App {
         if stepping
             || matches!(
                 arrival,
-                Arrival::Rescaled | Arrival::Reshaped | Arrival::Anew | Arrival::Rerendered
+                Arrival::Rescaled
+                    | Arrival::Reshaped
+                    | Arrival::Matched
+                    | Arrival::Anew
+                    | Arrival::Rerendered
             )
         {
             self.marking.clear();
         }
-        self.view = arriving_view(arrival, kept.as_ref(), self.view, shown_size, size);
+        // Another file of the ground on screen lines up with it, ahead of
+        // anything its arrival or what it was left in would make of the
+        // view: the comparison is of the place, wherever its pixels are.
+        let on_the_ground = match stepping {
+            true => self.on_the_same_ground(
+                exif.georeference.as_ref(),
+                [image.width, image.height],
+                turn,
+            ),
+            false => None,
+        };
+        self.view = on_the_ground
+            .unwrap_or_else(|| arriving_view(arrival, kept.as_ref(), self.view, shown_size, size));
         if arrival != Arrival::Reread {
             // A move under way was about the picture that has just left, and
             // there is nothing for it to carry the eye across any more.
@@ -2943,7 +2992,7 @@ impl App {
         }
         // And what else could open the file arriving, read here with the rest
         // of what the file itself says about it.
-        if matches!(arrival, Arrival::Beside | Arrival::Anew) {
+        if matches!(arrival, Arrival::Beside | Arrival::Matched | Arrival::Anew) {
             self.openers = openers::for_file(&file.path);
         }
         self.current = Some(Current {
@@ -3474,6 +3523,11 @@ enum Arrival {
     /// Another file, of the same size as the picture on screen: the view
     /// carries over, the display is its own.
     Beside,
+    /// Another file of the same shape as the picture on screen at another
+    /// size — the same ground mapped at two resolutions, say: the view is
+    /// rescaled so the same detail stays where it was, at the size it was
+    /// on screen, and the display is its own.
+    Matched,
     /// Another file of another size, or a file into an empty window: put
     /// back as it was left, or fitted afresh.
     Anew,
@@ -3504,6 +3558,7 @@ fn arrival(
         (true, false) if same_shape => Arrival::Rescaled,
         (true, false) => Arrival::Reshaped,
         (false, true) => Arrival::Beside,
+        (false, false) if same_shape => Arrival::Matched,
         (false, false) => Arrival::Anew,
     };
     (arrival, stepping)
@@ -3546,10 +3601,11 @@ fn arriving_view(
             fitted.reset();
             fitted
         }
-        // The same scene rendered again, or at another size: the detail
-        // under the center of the window stays there, at the size it was
-        // on screen.
-        (Arrival::Rerendered | Arrival::Rescaled, _) => {
+        // The same scene rendered again, or at another size, or another
+        // file of the same shape — which is the same case as one of the
+        // same size, made at another resolution: the detail under the
+        // center of the window stays there, at the size it was on screen.
+        (Arrival::Rerendered | Arrival::Rescaled | Arrival::Matched, _) => {
             let mut rescaled = view;
             if let Some(from) = shown_size {
                 rescaled.rescale(from, size);
