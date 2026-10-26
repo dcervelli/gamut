@@ -221,3 +221,14 @@ egui_kittest = { version = "0.36.2", features = ["wgpu"] }
 # feature of a dev-dependency reaches only the test builds, and `about.toml`
 # leaves those out, so the bundle's licenses are never shipped.
 egui = { version = "0.36.2", default-features = false, features = ["default_fonts"] }
+
+# `tiff` 0.11.3 as published, with weezl 0.2.1 for its LZW in place of 0.1:
+# the same one-line change upstream made in 0fdf1e0, not yet released.
+# weezl 0.1 can hand back the last bytes of a stream together with
+# `NoProgress`, which `tiff`'s reader takes for a stream with no end code,
+# so a tile padded past the picture's edge fails where its padding is
+# skipped (image-rs/image-tiff#395, image-rs/weezl#68). `tiff-lzw-padded.tif`
+# fails without it. Remove `vendor/tiff` and this once a `tiff` release
+# depends on weezl 0.2.
+[patch.crates-io]
+tiff = { path = "vendor/tiff" }
