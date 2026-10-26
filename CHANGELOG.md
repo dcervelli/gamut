@@ -62,6 +62,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
+- Some LZW-compressed TIFFs in tiles, as GDAL writes a map, no longer fail
+  to open with *no lzw end code found*. A tile at the picture's right edge
+  could fail, depending on what it held.
 - A large PNG is no longer refused a thumbnail in the background for what
   its pixels might come to rather than what they do: a picture of 8-bit
   color now gets one up to about 350 megapixels, where it stopped at 67.

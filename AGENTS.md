@@ -354,6 +354,10 @@ packaging/     what the packages are built from: the Arch PKGBUILD, the Homebrew
 bin/           release, pkgbuild-sha which points the PKGBUILD and the formula at a
                published tag, bundle which wraps a built binary in Gamut.app, and
                icon, which draws packaging/'s icon from a model of its scene's light
+vendor/        crates built from a copy here rather than from crates.io, each through
+               Cargo.toml's [patch.crates-io], which says why and until when, and
+               each with a VENDORED.md saying where it came from and what changed:
+               tiff, on weezl 0.2
 REUSE.toml     which file in the tree is under what license; LICENSES/ holds the
                texts it names, and `reuse lint` checks the two agree
 about.toml     which licenses a dependency may arrive under; packaging/about.hbs

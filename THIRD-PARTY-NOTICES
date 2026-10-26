@@ -1,4 +1,4 @@
-Cargo.lock sha256: 0f695b390e405e21834a3cd1f65f616ecfbaee41cade9873e2ca4b89cf6dc676
+Cargo.lock sha256: 8adfd1340eb9aa7ed8ba79bcf717978a8bd04d9843e2c44c91b9288381c7a0f3
 
                       gamut: third-party notices
 
@@ -17,7 +17,7 @@ or regenerating with
 
     cargo about generate --frozen packaging/about.hbs
 
-  MIT License — 243 crates
+  MIT License — 245 crates
   Apache License 2.0 — 15 crates
   BSD 2-Clause "Simplified" License — 6 crates
   BSD 3-Clause "New" or "Revised" License — 6 crates
@@ -3826,6 +3826,7 @@ MIT License
 --------------------------------------------------------------------------
 
 Used by:
+  gamut 0.12.2
   tiff 0.11.3
 
 MIT License
@@ -5267,6 +5268,7 @@ MIT License
 
 Used by:
   weezl 0.1.12
+  weezl 0.2.1
 
 The MIT License (MIT)
 
