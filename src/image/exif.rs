@@ -1472,6 +1472,24 @@ pub fn taken(path: &Path, mut opened: Option<&mut Opened>, xmp: &Xmp) -> Option<
     taken_of(block.as_ref(), xmp, || opened?.facts())
 }
 
+/// [`taken`], and where the file's pixels are on the ground, from the one
+/// parse of its EXIF block: what the thumbnailer's header pass reads, the
+/// georeference being what the stand-in for a slow read is placed by.
+pub fn taken_and_placed(
+    path: &Path,
+    mut opened: Option<&mut Opened>,
+    xmp: &Xmp,
+) -> (Option<Taken>, Option<geo::Georeference>) {
+    let block = Exif::parse(path, opened.as_deref_mut(), tiff::PREFIX);
+    let georeference = block
+        .as_ref()
+        .and_then(|block| geo::Georeference::read(&geo_tags(block)));
+    (
+        taken_of(block.as_ref(), xmp, || opened?.facts()),
+        georeference,
+    )
+}
+
 /// [`taken`], from the EXIF block already parsed, the packet, and the
 /// decoder's facts, asked for only where neither of the others says.
 fn taken_of(

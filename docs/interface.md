@@ -298,8 +298,10 @@ part on screen as the arriving raster's pixels see it, which is exact for two
 rasters whose rows run the same way and generous where one is rotated. The
 pan is held to its usual limit, so where the middle of the window is off the
 arriving raster the view stops at the limit, and the ground lines up only as
-far as that allows. The stand-in thumbnail shown during a slow read cannot
-know the georeference yet, so it lands where the rules above put it.
+far as that allows. The stand-in thumbnail shown during a slow read is placed
+the same way, from the georeference the thumbnailer's header pass read
+(`thumbnailer::Facts::georeference`, through `exif::taken_and_placed`), so it
+lands where the picture will rather than jumping when the pixels arrive.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window full`, `--exposure -1.5`, `--output hdr`,

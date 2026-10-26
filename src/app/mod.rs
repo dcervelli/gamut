@@ -43,7 +43,7 @@ use crate::image::DecodedImage;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{self, CameraJpeg, Reading, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
-use crate::image::exif::Exif;
+use crate::image::geo::Georeference;
 use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Source};
@@ -1666,11 +1666,17 @@ impl App {
         Some((view, size))
     }
 
-    /// The view a file arriving with `exif`, `stored` pixels as stored and
-    /// shown under `turn`, lines up with the picture on screen by — where
-    /// both are georeferenced in one system and the ground on screen
-    /// overlaps it.
-    fn on_the_same_ground(&self, exif: &Exif, stored: [u32; 2], turn: Turn) -> Option<View> {
+    /// The view a file arriving placed by `geo`, `stored` pixels as stored
+    /// and shown under `turn`, lines up with the picture on screen by —
+    /// where both are georeferenced in one system and the ground on screen
+    /// overlaps it. Asked by the arrival itself, and by the stand-in from
+    /// what the header said, so that the two land in the same place.
+    fn on_the_same_ground(
+        &self,
+        geo: Option<&Georeference>,
+        stored: [u32; 2],
+        turn: Turn,
+    ) -> Option<View> {
         let current = self.current.as_ref()?;
         let (view, _) = self.picture_view()?;
         let (picture, _) = current.picture();
@@ -1680,7 +1686,7 @@ impl App {
             turn: current.turn,
         };
         let to = ground::Placed {
-            geo: exif.georeference.as_ref()?,
+            geo: geo?,
             stored,
             turn,
         };
@@ -1931,7 +1937,8 @@ impl App {
     /// is, being a better picture of itself than any thumbnail.
     fn standin(&self, sight: &Sight) -> Option<ui::Standin> {
         let path = self.replacing()?;
-        let (width, height) = self.chooser.facts_of(path)?.size?;
+        let facts = self.chooser.facts_of(path)?;
+        let (width, height) = facts.size?;
         let thumb = self.thumbs.get(path)?;
         // Where the picture will land, decided as its arrival will decide it.
         let kept = self.kept.left(path);
@@ -1947,7 +1954,9 @@ impl App {
             .zip(self.files.shown_path())
             .map(|(size, path)| (path, size));
         let (arrival, _) = arrival(Reload::Fresh, path, size, shown);
-        let view = arriving_view(arrival, kept, view, picture, size);
+        let view = self
+            .on_the_same_ground(facts.georeference.as_deref(), [width, height], turn)
+            .unwrap_or_else(|| arriving_view(arrival, kept, view, picture, size));
         Some(ui::Standin {
             thumb,
             placement: view.placement(size, sight.viewport),
@@ -2936,6 +2945,7 @@ impl App {
                 bytes: facts.bytes,
                 modified: facts.modified,
                 taken: exif.taken,
+                georeference: exif.georeference.clone().map(Box::new),
             },
         );
         // Made from the picture itself, decoded already, rather than read
@@ -2966,7 +2976,11 @@ impl App {
         // anything its arrival or what it was left in would make of the
         // view: the comparison is of the place, wherever its pixels are.
         let on_the_ground = match stepping {
-            true => self.on_the_same_ground(&exif, [image.width, image.height], turn),
+            true => self.on_the_same_ground(
+                exif.georeference.as_ref(),
+                [image.width, image.height],
+                turn,
+            ),
             false => None,
         };
         self.view = on_the_ground
