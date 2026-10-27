@@ -8,6 +8,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The top bar gives the folder the file is in after its name, dimmed:
+  *photo.png · ~/Pictures/2026*. When the bar runs short of room the
+  folder is shortened in the middle, keeping the folder nearest the file,
+  and then left out. The size and color facts keep their place before it.
 - **Print Size** in the zoom menu shows the picture at the size the file
   says it prints, on the display the window is on, from the density the
   file gives and the physical size the display reports. Resting on it while

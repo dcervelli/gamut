@@ -11,7 +11,9 @@ use super::chrome::{BAR_PADDING, BUTTON_SIZE, Corners, Pass, STEP_SEAM, measure}
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{COUNTER_GAP, Current, TEXT_SIZE, capitalized, fonts, histogram, icon, menu};
+use super::{
+    COUNTER_GAP, Current, TEXT_SIZE, capitalized, filmstrip, fonts, histogram, icon, menu,
+};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
@@ -106,6 +108,38 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
         text.color(pass.theme.text_bright)
     };
     let response = ui.add(Label::new(text).truncate());
+    pass.tooltip(response, Tip::Name);
+    folder_words(pass, ui);
+}
+
+/// Less room than this and the folder is left out, rather than cut to a
+/// few characters either side of an ellipsis that say nothing of where.
+const FOLDER_MIN: f32 = 64.0;
+
+/// The directory the file sits in, after its name and in the bar's dim ink:
+/// whatever the name and the facts at the far end leave, cut in its middle
+/// so that its last directory, the one nearest the file, stays whole while
+/// there is room for it, and gone when there is too little for any of it.
+/// The facts are the picture's and go on being read across files, so the
+/// folder yields to them; the name's tooltip says the path in full, and is
+/// this one's too.
+fn folder_words(pass: &mut Pass, ui: &mut egui::Ui) {
+    let folder = &pass.input.directory;
+    let room = ui.available_width();
+    if folder.is_empty() || room < FOLDER_MIN {
+        return;
+    }
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let last = folder
+        .rsplit(std::path::MAIN_SEPARATOR)
+        .next()
+        .map_or(0, |last| last.chars().count() + 1);
+    let words = filmstrip::cut_middle(ui, SEPARATOR, folder, last, &body, room);
+    if measure(ui, &words) > room {
+        return;
+    }
+    let ink: egui::Color32 = pass.theme.text_dim.into();
+    let response = ui.add(Label::new(RichText::new(words).color(ink)));
     pass.tooltip(response, Tip::Name);
 }
 

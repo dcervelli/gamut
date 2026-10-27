@@ -136,6 +136,7 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         index: 0,
         count,
         arriving: None,
+        directory: String::new(),
         deleted: false,
         headroom: Headroom::None,
         hdr_available: false,
@@ -1523,6 +1524,45 @@ fn the_top_bar_drops_the_facts_before_the_name() {
     );
     assert!(harness.query_by_label("Zoom").is_some());
     assert!(harness.query_by_label("Maximize").is_some());
+}
+
+/// The folder follows the name in the top bar: whole where there is room,
+/// cut in its middle with its last directory kept where there is less, and
+/// gone before the facts are where there is too little for any of it.
+#[test]
+fn the_top_bar_writes_the_folder_after_the_name_while_there_is_room() {
+    let folder = |harness: &Harness<'static, State>| {
+        harness
+            .query_by_label_contains("\u{00b7} ~/")
+            .and_then(|node| node.accesskit_node().value())
+    };
+    let mut harness = build(WINDOW, 3, panels());
+    harness.state_mut().input.directory = "~/Pictures/2026".to_string();
+    harness.run();
+    assert_eq!(
+        folder(&harness).as_deref(),
+        Some(" \u{00b7} ~/Pictures/2026")
+    );
+    drop(harness);
+
+    let mut harness = build(WINDOW, 3, panels());
+    let long = format!("~/{}/Holiday", "a-long-directory-name/".repeat(8));
+    harness.state_mut().input.directory = long.replace("//", "/");
+    harness.run();
+    let cut = folder(&harness).expect("a cut folder");
+    assert!(cut.contains('\u{2026}'), "{cut}");
+    assert!(cut.ends_with("/Holiday"), "{cut}");
+    assert!(
+        harness.query_by_label_contains("\u{00d7}").is_some(),
+        "the facts stay beside it"
+    );
+    drop(harness);
+
+    let mut harness = build([300.0, 300.0], 3, panels());
+    harness.state_mut().input.directory = "~/Pictures/2026".to_string();
+    harness.run();
+    assert!(harness.query_by_label("photo.png").is_some());
+    assert_eq!(folder(&harness), None);
 }
 
 /// A window with nothing open offers the three ways of giving it

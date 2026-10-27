@@ -661,6 +661,9 @@ pub struct FrameInput {
     /// moment it is asked for, which the bar names in place of the file on
     /// screen: the name is where the key has gone, not what the pixels are.
     pub arriving: Option<String>,
+    /// The directory the file the bar names sits in, written for after the
+    /// name; empty with no file.
+    pub directory: String,
     /// Whether the file the picture came from is no longer there. The picture
     /// stays up — its pixels are as good as they ever were, and there is
     /// nothing to put in its place — so the bar is where this is said.
