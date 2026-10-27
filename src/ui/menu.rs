@@ -188,7 +188,7 @@ impl ZoomChoice {
     pub fn label(self) -> String {
         match self {
             ZoomChoice::Scale(scale) => percent(scale),
-            ZoomChoice::Print => "Print size".to_string(),
+            ZoomChoice::Print => "Print Size".to_string(),
             ZoomChoice::Fit(Fit::Whole) => "Fit whole".to_string(),
             ZoomChoice::Fit(Fit::Fill) => "Fill".to_string(),
             ZoomChoice::Filter(filter) => filter.label().to_string(),
@@ -205,7 +205,7 @@ impl ZoomChoice {
     pub fn describe(self) -> String {
         match self {
             ZoomChoice::Scale(scale) => format!("Zoom to {}", percent(scale)),
-            ZoomChoice::Print => "Show at the size the file says it prints".to_string(),
+            ZoomChoice::Print => "Zoom to actual print size based on DPI".to_string(),
             ZoomChoice::Fit(Fit::Whole) => "Fit the whole image".to_string(),
             ZoomChoice::Fit(Fit::Fill) => "Fill the window with the image".to_string(),
             ZoomChoice::Filter(Upscale::Nearest) => "Magnify to hard pixel edges".to_string(),

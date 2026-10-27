@@ -6,7 +6,10 @@
 //!
 //! The card is drawn at the size it should be on the glass, in the
 //! interface's points, so it does not follow the interface's scale: a card
-//! is the size it is. Its room is the size of the card at the slider's far
+//! is the size it is. Inside it, in two opposite corners, stand two rules
+//! square to the card's edges — two inches by one, and forty millimeters by
+//! twenty — for a ruler held to the glass where there is no card to hand,
+//! and to check that the two axes come out alike. Its room is the size of the card at the slider's far
 //! end, so that the dialog does not grow and shrink under the hand, and a
 //! card larger than the window allows is cut at the room's edge.
 
@@ -14,6 +17,7 @@ use egui::{Label, RichText, Sense, vec2};
 
 use super::chrome::Pass;
 use super::control::{Command, Control};
+use super::icon;
 use super::rename::{self, Dialog, GAP};
 use super::slider::{self, Line};
 use super::style::MENU_PADDING;
@@ -42,9 +46,59 @@ const REST: f32 = 190.0;
 /// How far the card's fill is faded toward the dialog's ground.
 const FILL_ALPHA: u8 = 60;
 
-/// What the dialog says above the card.
-const HOLD: &str = "Hold a credit card to the screen and move the slider until the outline \
-                    matches it. The arrow keys move it in fine steps.";
+/// What the dialog says above the card, and under that, either side of the
+/// two arrow keys drawn as marks: the interface's face has no arrows of its
+/// own.
+const HOLD: &str = "Hold a credit card or ruler to the screen and adjust the slider until \
+                    they match.";
+const USE: &str = "Use";
+const FINELY: &str = "to finely adjust.";
+/// How large the arrows' marks are drawn, beside words of [`TEXT_SIZE`].
+const ARROW: f32 = 14.0;
+
+/// One of the rules inside the card: where its corner is, in millimeters
+/// from the card's top left; how long its two legs are, signed the way each
+/// runs from the corner, across and down; what one of its divisions is, in
+/// millimeters, and how many make the middle mark and the long one; and
+/// what it is labeled.
+struct Rule {
+    corner: [f32; 2],
+    legs: [f32; 2],
+    division: f32,
+    middle: u32,
+    long: u32,
+    label: &'static str,
+}
+
+/// How far each rule's corner stands in from the card's edges.
+const INSET: f32 = 5.0;
+/// How long a rule's marks are, in millimeters: a division, the middle one
+/// and the long one.
+const MARKS: [f32; 3] = [1.4, 2.2, 3.0];
+/// How far the label stands from the rule's corner, in millimeters into
+/// its angle.
+const LABEL_OFFSET: f32 = 5.0;
+
+/// The two rules: two inches by one in eighths at the top left, and forty
+/// millimeters by twenty at the bottom right.
+const RULES: [Rule; 2] = [
+    Rule {
+        corner: [INSET, INSET],
+        legs: [2.0 * 25.4, 25.4],
+        division: 25.4 / 8.0,
+        middle: 4,
+        long: 8,
+        label: "2\" \u{00d7} 1\"",
+    },
+    Rule {
+        corner: [CARD[0] - INSET, CARD[1] - INSET],
+        legs: [-40.0, -20.0],
+        division: 1.0,
+        middle: 5,
+        long: 10,
+        label: "40 \u{00d7} 20 mm",
+    },
+];
 /// The slider's name.
 const SIZE: &str = "Card size";
 
@@ -87,6 +141,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
         |_, _| {},
         |pass, ui, inside| {
             ui.add(Label::new(RichText::new(HOLD).size(TEXT_SIZE)).wrap());
+            arrows(pass, ui);
             ui.add_space(GAP);
             card(pass, ui, input, [inside, room[1]]);
             ui.add_space(GAP);
@@ -136,8 +191,29 @@ pub fn diagonal(inches: f64) -> String {
     format!("{inches:.1} in diagonal")
 }
 
+/// The line under the words: "Use ← → to finely adjust.", the arrows drawn
+/// as the marks the buttons wear.
+fn arrows(pass: &Pass, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = vec2(4.0, 0.0);
+        ui.add(Label::new(RichText::new(USE).size(TEXT_SIZE)));
+        for marks in [icon::ARROW_LEFT, icon::ARROW_RIGHT] {
+            let (rect, _) = ui.allocate_exact_size(vec2(ARROW, ARROW), Sense::HOVER);
+            let ground = pass.theme.menu_background;
+            icon::paint(
+                ui.painter(),
+                marks,
+                icon::square(pass.grid, rect, ARROW),
+                pass.theme.text_primary.into(),
+                ground.into(),
+            );
+        }
+        ui.add(Label::new(RichText::new(FINELY).size(TEXT_SIZE)));
+    });
+}
+
 /// The card, filled and outlined, in the middle of `room`, and cut at its
-/// edge.
+/// edge, with its two rules.
 fn card(pass: &Pass, ui: &mut egui::Ui, input: &Input, room: [f32; 2]) {
     let theme = pass.theme;
     let (room, _) = ui.allocate_exact_size(room.into(), Sense::HOVER);
@@ -156,6 +232,68 @@ fn card(pass: &Pass, ui: &mut egui::Ui, input: &Input, room: [f32; 2]) {
         egui::Stroke::new(line, theme.text_primary),
         egui::StrokeKind::Inside,
     );
+
+    // Every line of a rule is put on the device's grid, as any rule is: a
+    // tick a pixel wide either side of a pixel is two gray pixels, and the
+    // half a device pixel it moves is under a tenth of a millimeter.
+    let grid = pass.grid;
+    let crisp = |at: f32| grid.stroke_center_in_device(at * grid.scale(), line);
+    let ppm = input.points_per_mm;
+    let at = |mm: [f32; 2]| [card.min.x + mm[0] * ppm[0], card.min.y + mm[1] * ppm[1]];
+    let stroke = egui::Stroke::new(line, theme.text_primary);
+    for rule in &RULES {
+        let sign = rule.legs.map(f32::signum);
+        let corner = at(rule.corner);
+        let ends = at([rule.corner[0] + rule.legs[0], rule.corner[1] + rule.legs[1]]);
+        let [x, y] = [crisp(corner[0]), crisp(corner[1])];
+        // The two legs, and their marks standing into the rule's angle.
+        painter.line_segment([egui::pos2(x, y), egui::pos2(ends[0], y)], stroke);
+        painter.line_segment([egui::pos2(x, y), egui::pos2(x, ends[1])], stroke);
+        for axis in 0..2 {
+            let count = (rule.legs[axis].abs() / rule.division).round() as u32;
+            for index in 0..=count {
+                let length = if index % rule.long == 0 {
+                    MARKS[2]
+                } else if index % rule.middle == 0 {
+                    MARKS[1]
+                } else {
+                    MARKS[0]
+                };
+                let along = rule.corner[axis] + sign[axis] * rule.division * index as f32;
+                let across = 1 - axis;
+                let mut from = rule.corner;
+                from[axis] = along;
+                let mut to = from;
+                to[across] += sign[across] * length;
+                let (from, to) = (at(from), at(to));
+                let (from, to) = if axis == 0 {
+                    let x = crisp(from[0]);
+                    ([x, y], [x, to[1]])
+                } else {
+                    let y = crisp(from[1]);
+                    ([x, y], [to[0], y])
+                };
+                painter.line_segment([from.into(), to.into()], stroke);
+            }
+        }
+        // The label in the angle, set from the corner as the legs run.
+        let anchor = at([
+            rule.corner[0] + sign[0] * LABEL_OFFSET,
+            rule.corner[1] + sign[1] * LABEL_OFFSET,
+        ]);
+        let align = if sign[0] > 0.0 {
+            egui::Align2::LEFT_TOP
+        } else {
+            egui::Align2::RIGHT_BOTTOM
+        };
+        painter.text(
+            anchor.into(),
+            align,
+            rule.label,
+            egui::FontId::proportional(TEXT_SIZE),
+            theme.text_primary.into(),
+        );
+    }
 }
 
 #[cfg(test)]

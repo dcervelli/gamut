@@ -5531,7 +5531,7 @@ fn the_print_size_needs_the_file_and_the_monitor_to_say_their_sizes() {
     assert_eq!(app.press(print), Effect::Nothing);
     assert_eq!(
         said(&app),
-        Some(vec!["This file doesn't say its print size.".to_string()])
+        Some(vec!["This file doesn't provide DPI".to_string()])
     );
 
     app.current
@@ -5544,7 +5544,7 @@ fn the_print_size_needs_the_file_and_the_monitor_to_say_their_sizes() {
     assert_eq!(
         said(&app),
         Some(vec![
-            "This display doesn't report its physical size.".to_string()
+            "This display didn't report its physical size".to_string()
         ])
     );
 

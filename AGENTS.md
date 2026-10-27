@@ -153,8 +153,9 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   slider.rs      the one slider the interface draws — the histogram's exposure, the export
                  dialog's quality — and handle(), the one handle every slider and the band draw
   calibrate.rs   the print size's calibration: a modal with a credit card's outline drawn at
-                 the size the monitor is taken to be, a slider that grows and shrinks it, the
-                 diagonal that makes, and OK and Cancel
+                 the size the monitor is taken to be, two rules square in opposite corners of
+                 it (RULES), a slider that grows and shrinks it, the diagonal that makes, and
+                 OK and Cancel
   export.rs      the export dialog: the name, JPG or PNG and JPG's quality, warnings() saying
                  what the new file loses from the Facts the application hands over, and
                  Export and Cancel

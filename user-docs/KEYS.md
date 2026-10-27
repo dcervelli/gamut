@@ -1178,31 +1178,36 @@ anywhere outside the menu, or `Esc`, closes it without copying anything.
 
 The percentage in the top bar, just inside the button that hides the
 interface, is itself a button. Pressing it opens a menu hanging under it, under four headings.
-**Zoom** is 10% through 1600%. **Physical** holds **Print size**, which shows
-the picture at the size the file says it prints, on the display the window is
-on: an inch of the print is an inch of the glass. It needs the file to say how
-many pixels go to an inch, as the info panel's *Density* row shows, and the
-display to report how large it is, which most do; resting on a dead **Print
-size** says which is missing. A display that misreports its size — some
-televisions and projectors do — shows the print at the wrong size. A window
-straddling two displays is sized for the one holding most of it.
+**Zoom** is 10% through 1600%. **Physical** is **Print Size**, and the ruler
+beside it that calibrates the display, both below. **Fit** is the two fits —
+the whole image, or the window filled by it. The chevrons on the second point
+the way it fills, across the window or down it, which follows the shape of
+the image. **Up-scaling** is the filter the image is magnified with,
+`Nearest` or `Bicubic`, the same choice `p` cycles. Whichever of each the
+view is in is lit, and choosing acts at once; pressing anywhere outside the
+menu, or `Esc`, closes it without changing anything. A window too small to
+hold the menu does not open one.
 
-The ruler beside **Print size**, or `Alt`+`0`, calibrates the display the window is on. It
-shows the outline of a credit card at the size the display is taken to be:
-hold a real card to the screen and move the slider until the outline covers
-it exactly, using the arrow keys for fine steps (`Shift` for larger ones), and
-press **OK** or `Enter`. The size is kept for that make and model of display
-whichever port it is plugged into, and overrides what the display reports. A
-display that reports no size at all can be calibrated too, after which
-**Print size** works on it. The mark on the slider is the size the display
-reports; move the slider back onto it and press **OK** to go back to that. **Fit** is the two fits — the whole image, or
-the window filled by it. The chevrons on the second point the way it fills,
-across the window or down it, which follows the shape of the image.
-**Up-scaling** is the filter the image is magnified with, `Nearest` or
-`Bicubic`, the same choice `p` cycles. Whichever of each the view is in is
-lit, and choosing acts at once; pressing anywhere outside the menu, or `Esc`,
-closes it without changing anything. A window too small to hold the menu does
-not open one.
+**Print Size**, or `Shift`+`0`, shows the picture at the size the file says
+it prints, on the display the window is on: an inch of the print is an inch
+of the glass. It needs the file to give its DPI, as the info panel's
+*Density* row shows, and the display to report how large it is, which most
+do; resting on a dead **Print Size** says which is missing. A display that
+misreports its size — some televisions and projectors do — shows the print
+at the wrong size until it is calibrated. A window straddling two displays
+is sized for the one holding most of it.
+
+The ruler beside **Print Size**, or `Alt`+`0`, calibrates the display the
+window is on. It shows the outline of a credit card at the size the display
+is taken to be, with a 2″ × 1″ rule in one corner and a 40 × 20 mm rule in
+the other for when a ruler is easier to hand. Hold the card or the ruler to
+the screen and move the slider until they match, using the arrow keys for
+fine steps (`Shift` for larger ones), and press **OK** or `Enter`. The size
+is kept for that make and model of display whichever port it is plugged
+into, and overrides what the display reports. A display that reports no size
+at all can be calibrated too, after which **Print Size** works on it. The
+mark on the slider is the size the display reports; move the slider back
+onto it and press **OK** to go back to that.
 
 Pointing at the image reads that pixel out in the bottom left corner: its
 coordinates, a swatch of the color it comes out on screen, and its value. The

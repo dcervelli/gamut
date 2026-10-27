@@ -1054,7 +1054,7 @@ impl Grid {
     /// be centered for both of its edges to land on device pixel boundaries:
     /// the middle of a pixel when it is an odd number of them across, and
     /// the seam between two when it is even. In logical pixels.
-    fn stroke_center_in_device(self, at: f32, thickness: f32) -> f32 {
+    pub(super) fn stroke_center_in_device(self, at: f32, thickness: f32) -> f32 {
         if !self.usable() {
             return at;
         }

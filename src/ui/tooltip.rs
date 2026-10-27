@@ -213,8 +213,8 @@ pub const NO_PROFILE: &str = "This file carries no camera profile.";
 
 /// What the zoom menu's print size says while it is dead: the file does not
 /// say how many of its pixels go to an inch, or the monitor how large it is.
-const NO_DENSITY: &str = "This file doesn't say its print size.";
-const NO_MONITOR_SIZE: &str = "This display doesn't report its physical size.";
+const NO_DENSITY: &str = "This file doesn't provide DPI";
+const NO_MONITOR_SIZE: &str = "This display didn't report its physical size";
 /// What the calibration's button says while it is dead: the window's
 /// monitor cannot be told apart from another, so nothing measured could be
 /// kept for it.

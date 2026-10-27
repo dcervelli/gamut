@@ -931,7 +931,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Zoom,
         when: None,
-        help: "Print size, the file's inch an inch on the screen",
+        help: "Print size, based on DPI",
         keys: one!("zoom.print", PrintSize, [digit(SHIFT, KeyCode::Digit0)]),
     },
     // And with Alt, the display measured. Option on a Mac as well: Command
@@ -939,7 +939,7 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Zoom,
         when: None,
-        help: "Calibrate the print size against a credit card",
+        help: "Calibrate display for print size",
         keys: one!(
             "zoom.print.calibrate",
             CalibratePrintSize,
