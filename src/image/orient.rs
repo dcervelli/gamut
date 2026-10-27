@@ -339,6 +339,29 @@ impl Turn {
         }
     }
 
+    /// Where the point `turned` of the turned picture is in the picture as
+    /// stored, `stored` across and down: any point, measured from the
+    /// corner, rather than a pixel. The other way round from
+    /// [`Turn::turned_point`].
+    pub fn stored_point(self, turned: [f64; 2], stored: [f64; 2]) -> [f64; 2] {
+        let across = self.size(stored);
+        let undone = Turn((4 - self.0) % 4).orientation();
+        let [s, t] = upright(undone, [turned[0] / across[0], turned[1] / across[1]]);
+        [s * stored[0], t * stored[1]]
+    }
+
+    /// Where the point `stored` of a picture `size` across and down as
+    /// stored lands in the turned picture, measured as
+    /// [`Turn::stored_point`] measures it.
+    pub fn turned_point(self, stored: [f64; 2], size: [f64; 2]) -> [f64; 2] {
+        let across = self.size(size);
+        let [s, t] = upright(
+            self.orientation(),
+            [stored[0] / size[0], stored[1] / size[1]],
+        );
+        [s * across[0], t * across[1]]
+    }
+
     /// The stored pixel shown at `turned`, for a picture `stored` pixels
     /// across and down as the file holds it. `turned` must be inside the
     /// turned picture.
@@ -579,5 +602,28 @@ mod tests {
             }
             turn = turn.clockwise();
         }
+    }
+
+    /// A point taken through each turn and back is where it started, and a
+    /// quarter clockwise puts the stored picture's first corner at the
+    /// turned one's top right.
+    #[test]
+    fn a_point_goes_through_a_turn_and_back() {
+        let size = [40.0, 30.0];
+        let mut turn = Turn::NONE;
+        for _ in 0..4 {
+            let point = [12.5, 3.25];
+            let turned = turn.turned_point(point, size);
+            let back = turn.stored_point(turned, size);
+            assert!(
+                (back[0] - point[0]).abs() < 1e-9 && (back[1] - point[1]).abs() < 1e-9,
+                "{turn:?}: {point:?} -> {turned:?} -> {back:?}"
+            );
+            turn = turn.clockwise();
+        }
+        assert_eq!(
+            Turn::NONE.clockwise().turned_point([0.0, 0.0], size),
+            [30.0, 0.0]
+        );
     }
 }

@@ -289,6 +289,14 @@ tag, and keeps a single-band raster single-band all the way to the GPU: a
 5500×4700 elevation model uploads as 103 MB of `R32Float` rather than 413 MB
 of `Rgba32Float`.
 
+The crate is built from `vendor/tiff`, its published 0.11.3 with its LZW on
+weezl 0.2 rather than 0.1. The crate reads a tile padded past the picture's
+edge a row at a time, skipping each row's padding, and a stream can run
+out just as the last row's padding is reached. weezl 0.1 hands the last
+bytes back then with `NoProgress`, which the crate's reader takes for a
+stream with no end code, and the tile fails. weezl 0.2 reports them as
+progress. `tiff-lzw-padded.tif` is a file that fails on 0.1.
+
 Signed and wide integer rasters are widened to float rather than rescaled —
 an elevation model holds meters, and −86 at the Dead Sea is a real value, not
 something to normalize away. A no-data sentinel is read from the file and kept

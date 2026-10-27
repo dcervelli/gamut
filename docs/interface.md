@@ -277,8 +277,31 @@ under a directory that is being written to.
 `]` and `[` keep the pan and zoom of the picture on screen when the file they
 land on is one they have not opened before and is the same size — a directory
 of frames or of exposures is a set to be compared, and the comparison only
-works if the same detail stays under the same pixels. A file of another size
-that has not been seen is a different picture, and is fitted.
+works if the same detail stays under the same pixels. A file of the same shape
+at another size — the same ground mapped at two resolutions, a picture beside
+its reduced copy — is the same comparison at another scale, so the view is
+rescaled to it (`Arrival::Matched`, through `View::rescale`): the detail at the
+center of the window stays there, at the size it was on screen. A file of
+another shape that has not been seen is a different picture, and is fitted.
+
+Two georeferenced files in the same coordinate system are compared by place
+rather than by pixel. Stepping from one to another whose raster lies under
+any of the part of the first on screen (`app/ground.rs::aligned`) keeps the
+ground at the middle of the window there, and as much ground to a screen
+pixel, whatever their sizes, resolutions and turns — ahead of the same-size
+and same-shape rules above and of the view the file was left in, since the
+pixels of two rasters say nothing about each other until the ground does.
+The two are one system only where both are filed under the same registered
+code (`Georeference::shares_system`): a system a file spells out for itself
+is never taken to be another's. The overlap is judged by the box around the
+part on screen as the arriving raster's pixels see it, which is exact for two
+rasters whose rows run the same way and generous where one is rotated. The
+pan is held to its usual limit, so where the middle of the window is off the
+arriving raster the view stops at the limit, and the ground lines up only as
+far as that allows. The stand-in thumbnail shown during a slow read is placed
+the same way, from the georeference the thumbnailer's header pass read
+(`thumbnailer::Facts::georeference`, through `exif::taken_and_placed`), so it
+lands where the picture will rather than jumping when the pixels arrive.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window full`, `--exposure -1.5`, `--output hdr`,

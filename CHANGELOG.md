@@ -12,6 +12,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   *photo.png · ~/Pictures/2026*. When the bar runs short of room the
   folder is shortened in the middle, keeping the folder nearest the file,
   and then left out. The size and color facts keep their place before it.
+- Stepping between two georeferenced files in the same coordinate system
+  lines them up on the ground: when the file arriving covers any of the
+  ground on screen, that ground stays in the middle of the window at the
+  same scale, whatever the two files' sizes and resolutions.
 - The info panel's Image section gives the density the file says it has —
   *600 dpi* — and the size the picture prints at at that density, naming
   the sheet where it is one: *420 × 297 mm · A3*. A size no sheet is is
@@ -39,6 +43,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- Stepping to a file of the same shape as the one on screen at another
+  size, such as a map of the same ground at twice the detail, keeps the
+  same spot in the middle of the window at the same size on screen, as a
+  file of the same size keeps the pan and zoom. It used to be fitted.
 - The picture can be dragged past its edge, until the edge reaches the
   middle of the window, so an edge can be pulled out from under whatever is
   covering it. A fitted or small picture can be dragged that far too. The
@@ -58,6 +66,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
+- Some LZW-compressed TIFFs in tiles, as GDAL writes a map, no longer fail
+  to open with *no lzw end code found*. A tile at the picture's right edge
+  could fail, depending on what it held.
 - A large PNG is no longer refused a thumbnail in the background for what
   its pixels might come to rather than what they do: a picture of 8-bit
   color now gets one up to about 350 megapixels, where it stopped at 67.

@@ -440,12 +440,49 @@ impl Georeference {
     /// and the raster's size the one across from it, rather than a pixel's
     /// middle.
     pub fn latitude_longitude_at(&self, at: [f64; 2]) -> Option<[f64; 2]> {
+        self.lifted(self.ground(at))
+    }
+
+    /// The point `at` of the stored raster in the file's own coordinates,
+    /// `at` measured from the raster's first corner in pixels as
+    /// [`Self::latitude_longitude_at`] measures it.
+    pub fn ground(&self, at: [f64; 2]) -> [f64; 2] {
         let [a, b, c, d, e, f] = self.affine;
         // The model is read at a pixel's middle, half a pixel in from its
         // corner, plus the inset; so a corner is half a pixel out from that.
         let shift = self.inset - 0.5;
         let (column, row) = (at[0] + shift, at[1] + shift);
-        self.lifted([a * column + b * row + c, d * column + e * row + f])
+        [a * column + b * row + c, d * column + e * row + f]
+    }
+
+    /// Where `ground`, in the file's own coordinates, falls on the stored
+    /// raster, measured as [`Self::ground`] measures it: the other way round
+    /// from that. `None` where the raster has no extent to fall on, its
+    /// matrix flattening it to a line.
+    pub fn raster(&self, ground: [f64; 2]) -> Option<[f64; 2]> {
+        let [a, b, c, d, e, f] = self.affine;
+        let determinant = a * e - b * d;
+        if !determinant.is_normal() {
+            return None;
+        }
+        let (x, y) = (ground[0] - c, ground[1] - f);
+        let shift = self.inset - 0.5;
+        Some([
+            (e * x - b * y) / determinant - shift,
+            (a * y - d * x) / determinant - shift,
+        ])
+    }
+
+    /// Whether a point in `other`'s coordinates is the same place on the
+    /// ground in these: both filed under the same registered system, read
+    /// as the same kind of model in the same unit. A system a file spells
+    /// out for itself, or leaves unnamed, is never taken to be another's,
+    /// there being no code to say the two are the same.
+    pub fn shares_system(&self, other: &Self) -> bool {
+        self.code.is_some()
+            && self.code == other.code
+            && self.geographic == other.geographic
+            && self.unit == other.unit
     }
 
     /// The middle of a stored raster `size` pixels across, as latitude and
@@ -985,5 +1022,35 @@ mod tests {
                 .any(|(name, value)| name == "Origin" && value == "5.9505, 47.8085"),
             "{rows:?}"
         );
+    }
+
+    /// A point on the ground goes back to where it came from on the raster,
+    /// through a sheared matrix as through a plain one; and two rasters are
+    /// in one system only where both name the same registered one.
+    #[test]
+    fn the_ground_goes_back_to_the_raster_it_was_read_from() {
+        let sheared = Tags {
+            directory: vec![1, 1, 0, 2, MODEL_TYPE, 0, 1, 1, PROJECTED_TYPE, 0, 1, 2193],
+            transform: vec![
+                2.0, 1.0, 0.0, 100.0, //
+                0.5, -2.0, 0.0, 500.0, //
+                0.0, 0.0, 0.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0,
+            ],
+            size: Some([100, 100]),
+            ..Tags::default()
+        };
+        let geo = Georeference::read(&sheared).expect("placed");
+        let at = [12.25, 40.5];
+        near(geo.raster(geo.ground(at)).expect("an extent"), at, 1e-9);
+
+        let nztm = Georeference::read(&placed(1, 2193, [1_275_668.5, 5_060_096.5], 7.0)).unwrap();
+        let finer = Georeference::read(&placed(1, 2193, [1_275_669.2, 5_060_095.8], 3.4)).unwrap();
+        let utm = Georeference::read(&placed(1, 32759, [1_275_668.5, 5_060_096.5], 7.0)).unwrap();
+        let unnamed = Georeference::read(&placed(1, USER_DEFINED, [0.0, 0.0], 7.0)).unwrap();
+        assert!(nztm.shares_system(&finer));
+        assert!(!nztm.shares_system(&utm));
+        assert!(!unnamed.shares_system(&unnamed), "no code to say so");
+        near(nztm.ground([0.0, 0.0]), [1_275_665.0, 5_060_100.0], 1e-9);
     }
 }

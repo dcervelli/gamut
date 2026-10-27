@@ -42,6 +42,7 @@ use anyhow::{Context, Result, anyhow};
 use crate::image::decode::{self, Overrides};
 use crate::image::display::{Display, Startup};
 use crate::image::exif::{self, Taken};
+use crate::image::geo::Georeference;
 use crate::image::sequence::Sequence;
 use crate::image::xmp::{self, Xmp};
 use crate::image::{Channels, DecodedImage, Region, Stats, encode, resample};
@@ -121,6 +122,10 @@ pub struct Facts {
     pub modified: Option<SystemTime>,
     /// When it was taken, or `None` where the file does not say.
     pub taken: Option<Taken>,
+    /// Where its pixels are on the ground, or `None` where it is not
+    /// georeferenced: what the stand-in for a slow read of it lines up by.
+    /// Boxed, being large beside the rest and absent from nearly every file.
+    pub georeference: Option<Box<Georeference>>,
 }
 
 /// The copies for the screen, each fitted from the same pixels to one of
@@ -457,6 +462,7 @@ fn header(path: &Path) -> Result<Facts> {
     guard("reading the header", || {
         let mut opened = decode::Opened::new(&absolute)?;
         let packet = Xmp::read_from(&absolute, Some(&mut opened));
+        let (taken, georeference) = exif::taken_and_placed(&absolute, Some(&mut opened), &packet);
         Ok(Facts {
             size: opened.dimensions()?,
             sequence: opened.sequence()?,
@@ -464,7 +470,8 @@ fn header(path: &Path) -> Result<Facts> {
             format: Some(opened.format()),
             bytes: metadata.as_ref().map(std::fs::Metadata::len),
             modified: metadata.and_then(|metadata| metadata.modified().ok()),
-            taken: exif::taken(&absolute, Some(&mut opened), &packet),
+            taken,
+            georeference: georeference.map(Box::new),
         })
     })
 }
@@ -829,6 +836,7 @@ mod tests {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         };
         let mut queue = Queue::default();
         queue.take(Ask::Enqueue(vec![
@@ -1024,6 +1032,7 @@ mod tests {
                 bytes: Some(std::fs::metadata(&picture).unwrap().len()),
                 modified: std::fs::metadata(&picture).unwrap().modified().ok(),
                 taken: None,
+                georeference: None,
             }
         );
         assert!(facts.format.is_some(), "a PNG has a decoder that claims it");
