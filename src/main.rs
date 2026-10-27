@@ -136,14 +136,13 @@ fn run() -> Result<ExitCode> {
 
     // In the order the list was last left in, before the first of them is
     // chosen, where that order needs only the names: the first file shown
-    // is the first in it. An order that needs more is read for once the
-    // window is open, and the first file chosen then — see `app::arranging`.
+    // is the first in it. An order that needs more knows nothing of any
+    // file yet, and leaves them by folder and name; it is read for once
+    // the window is open, and the first file chosen then — see
+    // `app::arranging`.
     let state = settings::StateFile::load();
     let order = state.state().order;
-    let mut files = match order.reads_facts() {
-        true => files,
-        false => app::arranged(files, order, &Default::default()),
-    };
+    let mut files = app::arranged(files, order, &Default::default());
 
     // Only the header, which is cheap for every format we read. A bad path or
     // an unsupported format is still a plain command-line error rather than a

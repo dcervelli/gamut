@@ -1187,6 +1187,11 @@ impl Pass<'_> {
         response
     }
 
+    /// The id the menu `control` opens is open under.
+    pub fn menu_id(control: Control) -> egui::Id {
+        egui::Id::new(("menu", control.label()))
+    }
+
     /// A button that opens a menu: [`Pass::icon_button`] lit while the menu
     /// is open, as a toggle is while it is on, with the menu hung `align`
     /// to it under an id of the control's own. The menu opens, closes and
@@ -1201,7 +1206,7 @@ impl Pass<'_> {
         enabled: bool,
         contents: impl FnOnce(&mut Pass, &mut Ui),
     ) {
-        let id = egui::Id::new(("menu", control.label()));
+        let id = Self::menu_id(control);
         let open = egui::Popup::is_id_open(ui.ctx(), id);
         let button = self.icon_button(ui, marks, control, open, enabled, Corners::All);
         egui::Popup::menu(&button)

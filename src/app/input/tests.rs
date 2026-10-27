@@ -12,12 +12,12 @@ fn hint(action: Action) -> Option<String> {
 
 /// What a key asks for with no region selected, at the default keys.
 fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
-    Keymap::table().action_for(key, position, mods, false)
+    Keymap::table().action_for(key, position, mods, &[])
 }
 
 /// The same with a region selected.
 fn with_region(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
-    Keymap::table().action_for(key, position, mods, true)
+    Keymap::table().action_for(key, position, mods, &[Context::Region])
 }
 
 /// The camera's switch says which picture is up, and under it the one a
@@ -34,6 +34,7 @@ fn the_camera_switch_says_what_a_press_brings_up() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera,
+        order: Default::default(),
         conditions,
     };
     let lines = |namer: Namer| {
@@ -78,6 +79,7 @@ fn the_gain_map_toggle_on_a_profile_says_where_the_map_comes_from() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        order: Default::default(),
         conditions,
     };
     let title = |conditions| {
@@ -187,13 +189,16 @@ fn a_button_is_named_by_the_key_that_does_the_same_job() {
         named(Control::Filmstrip).as_deref(),
         Some("Toggle the file list (Tab)")
     );
-    // The menu at its head names itself, no key opening it; a cell of
-    // it says what it puts the list in.
-    let sorting = named(Control::Sorting).expect("the button names itself");
-    assert!(!sorting.contains('('), "{sorting}");
+    // The menu at its head, by the key that opens it too; a cell of it
+    // says what it puts the list in, and the key that does it while the
+    // menu is open.
+    assert_eq!(
+        named(Control::Sorting),
+        Some(format!("Sort the list ({})", spelled_here("Shift+O")))
+    );
     assert_eq!(
         named(Control::SortBy(ui::filmstrip::Sort::Area)).as_deref(),
-        Some("Sort by total pixels")
+        Some("Sort by total pixels (a)")
     );
     let file = named(Control::FileMenu).expect("the button names itself");
     assert!(!file.contains('('), "{file}");
@@ -279,6 +284,7 @@ fn the_open_buttons_name_the_keys_that_open_the_dialog() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     assert_eq!(
@@ -323,6 +329,7 @@ fn the_open_buttons_name_the_keys_that_open_the_dialog() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        order: Default::default(),
         conditions: Conditions {
             picking: true,
             ..Conditions::ALIVE
@@ -717,6 +724,7 @@ fn the_handles_say_which_keys_step_them() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        order: Default::default(),
         conditions: Conditions {
             openable: false,
             data: false,
@@ -755,6 +763,7 @@ fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     let tooltip = namer
@@ -829,6 +838,7 @@ fn a_copy_cell_is_named_by_its_words_and_its_key() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     assert_eq!(
@@ -919,6 +929,7 @@ fn the_count_says_where_it_is_and_what_a_press_on_it_opens() {
         keys: Rc::new(Keymap::table()),
         gestures: Rc::new(Gestures::table()),
         camera: None,
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     let tooltip = namer
@@ -1134,6 +1145,61 @@ fn the_arrows_step_files_and_pan_by_what_is_held_with_them() {
     assert_eq!(
         action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, SHIFT),
         None
+    );
+}
+
+/// While the menu of sorts is open, a letter is one of its items, ahead of
+/// the plain names, and beside a region's, which take none of them; closed,
+/// the letters are their own, and the keys that open it and turn the order round are there
+/// either way.
+#[test]
+fn the_sort_menu_takes_its_letters_while_it_is_open() {
+    use ui::filmstrip::Sort;
+    use winit::keyboard::SmolStr;
+    let letter = |text: &str| Key::Character(SmolStr::new(text));
+    let open = |key: &Key, mods, holding: &[Context]| {
+        Keymap::table().action_for(key, ELSEWHERE, mods, holding)
+    };
+    let menu = [Context::SortMenu];
+    for (text, sort) in [
+        ("n", Sort::Name),
+        ("p", Sort::Path),
+        ("e", Sort::Type),
+        ("m", Sort::Modified),
+        ("t", Sort::Taken),
+        ("s", Sort::Size),
+        ("w", Sort::Width),
+        ("h", Sort::Height),
+        ("a", Sort::Area),
+    ] {
+        assert_eq!(
+            open(&letter(text), PLAIN, &menu),
+            Some(SortBy(sort)),
+            "{text}"
+        );
+        assert_ne!(
+            open(&letter(text), PLAIN, &[]),
+            Some(SortBy(sort)),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        open(&letter("a"), PLAIN, &[Context::SortMenu, Context::Region]),
+        Some(SortBy(Sort::Area))
+    );
+    // A region's arrows go on moving it under the menu, which has none.
+    let left = Key::Named(NamedKey::ArrowLeft);
+    assert_eq!(
+        open(&left, PLAIN, &[Context::SortMenu, Context::Region]),
+        Some(MoveRegion(Left))
+    );
+    for holding in [&menu[..], &[]] {
+        assert_eq!(open(&letter("O"), SHIFT, holding), Some(OpenSortMenu));
+        assert_eq!(open(&letter("R"), SHIFT, holding), Some(ReverseSort));
+    }
+    assert_eq!(
+        open(&Key::Named(NamedKey::Escape), PLAIN, &menu),
+        Some(Dismiss)
     );
 }
 

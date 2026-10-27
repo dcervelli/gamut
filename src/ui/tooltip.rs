@@ -292,6 +292,8 @@ pub const STILL_OPENING: &str = "Waiting for file.";
 /// cannot come to disagree.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Conditions {
+    /// Whether the menu of sorts is open, whose keys are tried first then.
+    pub sort_menu: bool,
     pub region_selected: bool,
     /// Whether regions are held to an aspect rather than free.
     pub region_held: bool,
@@ -375,6 +377,7 @@ impl Default for Conditions {
     /// Nothing holds: no room, no surface to switch to, nothing open.
     fn default() -> Self {
         Self {
+            sort_menu: false,
             region_selected: false,
             region_held: false,
             several_files: false,
@@ -427,6 +430,7 @@ impl Conditions {
     /// being alive only then.
     #[cfg(test)]
     pub const ALIVE: Conditions = Conditions {
+        sort_menu: false,
         region_selected: false,
         region_held: false,
         several_files: false,

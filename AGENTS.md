@@ -22,8 +22,9 @@ app/           the event loop's state and winit handlers
                  when egui wants painting again into the loop's deadline
   files.rs       Files: the file list, the read in flight, walks past broken files, the files taken
                  off it, and the order it is put in (pure, tested)
-  order.rs       the permutation an Order makes of the list — stable, the unknown last — and the
-                 sections it breaks it into (pure, tested)
+  order.rs       the permutation an Order makes of the list — the sort, the one before it, then
+                 folder and name, the unknown last — and the sections it breaks it into (pure,
+                 tested)
   arranging.rs   a list about to be opened — the command line's files under an order that needs
                  more than names, or the files the dialog chose — read for the order on a thread of
                  its own, and its first file in that order asked for once it is in

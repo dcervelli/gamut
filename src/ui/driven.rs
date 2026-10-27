@@ -155,6 +155,7 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         aspect: crate::image::aspect::Aspect::Free,
         transport: None,
         filmstrip: None,
+        order: filmstrip::Order::default(),
         side: None,
         chooser: None,
         tags: None,
@@ -1288,7 +1289,6 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
         slot: filmstrip::SLOT_MIN,
         listing: 0,
         current,
-        order: filmstrip::Order::default(),
         back: false,
         forward: true,
         reveal,
@@ -1344,6 +1344,32 @@ fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
             filmstrip::Direction::Descending
         ))]
     );
+}
+
+/// The menu of sorts a key opens with the list down hangs from the list's
+/// toggle in the top bar, and with the bars hidden too from the corner of
+/// the picture; either way its items press as the list's own menu's do.
+#[test]
+fn the_sort_menu_hangs_elsewhere_with_the_list_down() {
+    let mut bare = panels();
+    bare.show_ui = false;
+    for panels in [panels(), bare] {
+        let mut harness = open(WINDOW, 3, panels);
+        egui::Popup::open_id(&harness.ctx, filmstrip::sort_menu_id());
+        harness.run();
+        assert_eq!(
+            click(&mut harness, "Area"),
+            [Command::Press(Control::SortBy(filmstrip::Sort::Area))]
+        );
+        egui::Popup::open_id(&harness.ctx, filmstrip::sort_menu_id());
+        harness.run();
+        assert_eq!(
+            click(&mut harness, "Descending"),
+            [Command::Press(Control::SortDirection(
+                filmstrip::Direction::Descending
+            ))]
+        );
+    }
 }
 
 /// A dead control still names itself when the pointer rests on it — with

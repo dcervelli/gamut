@@ -16,7 +16,7 @@ use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use super::App;
 use super::copying::Done;
 use super::folder::Then;
-use super::keymap::{Bound, Chord, KeyName, Keymap, Keys, Row};
+use super::keymap::{Bound, Chord, Context, KeyName, Keymap, Keys, Row};
 use crate::clipboard;
 use crate::gestures::{self, Button, Gestures, Surface, WheelAction};
 use crate::image::auxiliary::{Auxiliary, Showing};
@@ -30,6 +30,7 @@ use crate::openers;
 use crate::pasted;
 use crate::portal::Pick;
 use crate::timing;
+use crate::ui::filmstrip::Sort;
 use crate::ui::histogram;
 use crate::ui::info::Copyable;
 use crate::ui::menu::{Copies, ZoomChoice};
@@ -112,6 +113,14 @@ pub enum Action {
     /// Put the file list up down the left of the picture, or take it down
     /// — see `ui::filmstrip`.
     ToggleFilmstrip,
+    /// Open the menu of sorts, hung from the file list's head where the
+    /// list is up and from its toggle where it is not, or close it; and,
+    /// while it is open, put the list in order of one thing, as the menu's
+    /// item does.
+    OpenSortMenu,
+    SortBy(Sort),
+    /// Turn the order the list is in round, whichever way it runs now.
+    ReverseSort,
     /// Back to the file that was on screen before this one, and forward
     /// again — see `app::visited`.
     Back,
@@ -395,6 +404,10 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         // The toggle before them, the pair at the head of the list it
         // puts up, and the key that takes a file off that list.
         Tip::Control(Control::Filmstrip) => ToggleFilmstrip,
+        // The menu of sorts at the list's head, and its items, which the
+        // keys read while it is open do exactly what they do.
+        Tip::Control(Control::Sorting) => OpenSortMenu,
+        Tip::Control(Control::SortBy(sort)) => SortBy(sort),
         Tip::Control(Control::Back) => Back,
         Tip::Control(Control::Forward) => Forward,
         Tip::Control(Control::Remove) => Remove,
@@ -498,8 +511,6 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::Chooser
             | Control::Choose(_)
             | Control::FileMenu
-            | Control::Sorting
-            | Control::SortBy(_)
             | Control::SortDirection(_)
             | Control::Thumb(_)
             | Control::RenameTo
@@ -634,10 +645,10 @@ impl Section {
 /// right now as well as what it is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum When {
-    /// The one condition that is also a context: a region's names are
-    /// tried before the plain ones while it holds — see
-    /// [`When::context`].
+    /// The two conditions that are also contexts: their names are tried
+    /// before the plain ones while they hold — see [`When::context`].
     RegionSelected,
+    SortMenuOpen,
     SeveralFiles,
     Animation,
     AnimationOrPages,
@@ -687,8 +698,9 @@ impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 23] = [
+    pub const ALL: [When; 24] = [
         When::RegionSelected,
+        When::SortMenuOpen,
         When::SeveralFiles,
         When::Animation,
         When::AnimationOrPages,
@@ -717,6 +729,7 @@ impl When {
     /// phrase, not a sentence.
     pub fn describe(self) -> &'static str {
         match self {
+            When::SortMenuOpen => "the sort menu open",
             When::RegionSelected => "a region selected",
             When::SeveralFiles => "more than one file",
             When::Animation => "an animation",
@@ -744,11 +757,13 @@ impl When {
     }
 
     /// The context a line under this condition binds its names in, where
-    /// it is one. Only the region's is: what the other conditions decide is
-    /// whether a key does anything, not which key it is.
-    pub fn context(self) -> Option<super::keymap::Context> {
+    /// it is one. Only the menu of sorts' and the region's are: what the
+    /// other conditions decide is whether a key does anything, not which key
+    /// it is.
+    pub fn context(self) -> Option<Context> {
         match self {
-            When::RegionSelected => Some(super::keymap::Context::Region),
+            When::SortMenuOpen => Some(Context::SortMenu),
+            When::RegionSelected => Some(Context::Region),
             _ => None,
         }
     }
@@ -758,6 +773,7 @@ impl Conditions {
     /// Whether `when` holds.
     pub fn met(&self, when: When) -> bool {
         match when {
+            When::SortMenuOpen => self.sort_menu,
             When::RegionSelected => self.region_selected,
             When::SeveralFiles => self.several_files,
             When::Animation => self.animation,
@@ -1215,6 +1231,72 @@ pub static ROWS: &[Row] = &[
         when: Some(When::SeveralFiles),
         help: "Show or hide the file list",
         keys: one!("files.list", ToggleFilmstrip, [named(PLAIN, NamedKey::Tab)]),
+    },
+    // The menu of sorts takes a letter for each of its items while it is
+    // open, which is the only time they are not other keys' letters.
+    Row {
+        section: Section::Files,
+        when: Some(When::SeveralFiles),
+        help: "Open the sort menu",
+        keys: one!("files.sort", OpenSortMenu, [key('O')]),
+    },
+    Row {
+        section: Section::Files,
+        when: Some(When::SortMenuOpen),
+        help: "Sort by name, path, type, modified, captured, size, width, height, area",
+        keys: Keys::Bound(&[
+            Bound {
+                name: "files.sort.name",
+                action: SortBy(Sort::Name),
+                defaults: &[key('n')],
+            },
+            Bound {
+                name: "files.sort.path",
+                action: SortBy(Sort::Path),
+                defaults: &[key('p')],
+            },
+            Bound {
+                name: "files.sort.type",
+                action: SortBy(Sort::Type),
+                defaults: &[key('e')],
+            },
+            Bound {
+                name: "files.sort.modified",
+                action: SortBy(Sort::Modified),
+                defaults: &[key('m')],
+            },
+            Bound {
+                name: "files.sort.taken",
+                action: SortBy(Sort::Taken),
+                defaults: &[key('t')],
+            },
+            Bound {
+                name: "files.sort.size",
+                action: SortBy(Sort::Size),
+                defaults: &[key('s')],
+            },
+            Bound {
+                name: "files.sort.width",
+                action: SortBy(Sort::Width),
+                defaults: &[key('w')],
+            },
+            Bound {
+                name: "files.sort.height",
+                action: SortBy(Sort::Height),
+                defaults: &[key('h')],
+            },
+            Bound {
+                name: "files.sort.area",
+                action: SortBy(Sort::Area),
+                defaults: &[key('a')],
+            },
+        ]),
+    },
+    Row {
+        section: Section::Files,
+        when: Some(When::SeveralFiles),
+        help: "Reverse file list sort order",
+        keys: one!("files.sort.reverse", ReverseSort, [key('R')]),
     },
     // The keys that step through the list, held with Alt, step through
     // the files that have been on screen instead: Alt with the arrows
@@ -1692,6 +1774,9 @@ pub(super) struct Namer {
     /// Which of a raw's pictures is on screen, where the file carries the
     /// camera's JPEG: what the camera's switch says.
     camera: Option<Rendering>,
+    /// How the file list stands, for what the sort button says under its
+    /// name.
+    order: ui::filmstrip::Order,
 }
 
 impl Naming for Namer {
@@ -1909,6 +1994,10 @@ impl Naming for Namer {
                     )],
                 )
             }
+            // The sort button: what the menu is, and under it how the list
+            // stands, the sort that breaks the ties being in nothing else on
+            // screen.
+            Tip::Control(Control::Sorting) => (vec![names(keys, at)?], vec![self.order.describe()]),
             _ => (vec![names(keys, at)?], Vec::new()),
         };
         Some(ui::Tooltip { title, hints })
@@ -2139,15 +2228,34 @@ impl App {
         if self.calibrating.is_some() {
             return self.calibration_key(key);
         }
-        let region_selected = matches!(self.marking.selection, Selection::Shown(_));
         match self
             .keys
-            .action_for(key, position, self.pointer.modifiers, region_selected)
+            .action_for(key, position, self.pointer.modifiers, &self.holding())
         {
             Some(CycleFit) => self.hold_fit_key(position),
             Some(action) => self.perform(action),
             None => Effect::Nothing,
         }
+    }
+
+    /// The contexts that hold now, whose names a key is looked for among
+    /// before the plain ones.
+    pub(super) fn holding(&self) -> Vec<Context> {
+        let mut holding = Vec::with_capacity(2);
+        if matches!(self.marking.selection, Selection::Shown(_)) {
+            holding.push(Context::Region);
+        }
+        if self.sort_menu_open() {
+            holding.push(Context::SortMenu);
+        }
+        holding
+    }
+
+    /// Whether the menu of sorts is up. Asked of egui, whose popup it is.
+    pub(super) fn sort_menu_open(&self) -> bool {
+        self.shown.as_ref().is_some_and(|shown| {
+            egui::Popup::is_id_open(&shown.gui.ctx, ui::filmstrip::sort_menu_id())
+        })
     }
 
     /// The fit key went down. Nothing moves, but the pointer over the
@@ -2303,6 +2411,17 @@ impl App {
             // the head of the bar or of the list cannot come to mean
             // different things.
             ToggleFilmstrip => return self.press(Control::Filmstrip),
+            // The menu's own button, and its items, which close it as a
+            // press on one does.
+            OpenSortMenu => return self.press(Control::Sorting),
+            SortBy(sort) => {
+                self.close_menus();
+                return self.press(Control::SortBy(sort)).also(Effect::Redraw);
+            }
+            ReverseSort => {
+                let direction = self.filmstrip.order().direction.reversed();
+                return self.press(Control::SortDirection(direction));
+            }
             Back => return self.press(Control::Back),
             Forward => return self.press(Control::Forward),
             Remove => return self.press(Control::Remove),
@@ -2710,6 +2829,7 @@ impl App {
                     CameraJpeg::Present(_) => Some(current.rendering),
                     CameraJpeg::Only(_) | CameraJpeg::Missing | CameraJpeg::Unavailable => None,
                 }),
+            order: self.filmstrip.order(),
         }
     }
 
@@ -2721,6 +2841,7 @@ impl App {
         let current = self.current.as_ref();
         let georeference = current.and_then(|current| current.exif.georeference.as_ref());
         Conditions {
+            sort_menu: self.sort_menu_open(),
             region_selected: matches!(self.marking.selection, Selection::Shown(_)),
             region_held: self.marking.aspect != crate::image::aspect::Aspect::Free,
             several_files: self.files.len() > 1 || self.beside.folder.unread(),
@@ -3462,14 +3583,32 @@ impl App {
                 };
                 self.perform(action)
             }
-            // The seven buttons that open a menu: the menu is egui's, and
-            // opens itself on the press, so there is nothing here to do.
+            // The buttons that open a menu: the menu is egui's, and opens
+            // itself on the press, so there is nothing here to do.
             Control::Zoom
             | Control::PixelFormat
             | Control::Copy
             | Control::OpenIn
-            | Control::FileMenu
-            | Control::Sorting => Effect::Nothing,
+            | Control::FileMenu => Effect::Nothing,
+            // And the menu of sorts, which a key opens too: toggled as the
+            // chooser is, and with one file, after the folder beside it is
+            // read. Hung from the list's head, or with the list down from
+            // elsewhere — see `ui::filmstrip::sort_menu_id`.
+            Control::Sorting => {
+                let open = self.sort_menu_open();
+                if !open && self.folder_first(Then::Sorting) {
+                    return Effect::Nothing;
+                }
+                let Some(shown) = &self.shown else {
+                    return Effect::Nothing;
+                };
+                let ctx = &shown.gui.ctx;
+                egui::Popup::close_all(ctx);
+                if !open && self.files.len() > 1 {
+                    egui::Popup::open_id(ctx, ui::filmstrip::sort_menu_id());
+                }
+                Effect::Redraw
+            }
             // The file list: up or down, and scrolled to the file on
             // screen as it comes up.
             // With one file, the folder beside it, where there is one to
@@ -3486,11 +3625,7 @@ impl App {
                 self.filmstrip.reveal();
                 Effect::Redraw
             }
-            Control::SortBy(sort) => {
-                let mut order = self.filmstrip.order();
-                order.sort = sort;
-                self.set_order(order)
-            }
+            Control::SortBy(sort) => self.set_order(self.filmstrip.order().sorted_by(sort)),
             Control::SortDirection(direction) => {
                 let mut order = self.filmstrip.order();
                 order.direction = direction;

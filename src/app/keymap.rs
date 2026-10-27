@@ -288,11 +288,13 @@ pub fn spell_all(chords: &[Chord]) -> String {
 pub enum Context {
     /// A region is selected on the picture.
     Region,
+    /// The menu of sorts is open.
+    SortMenu,
 }
 
 /// The contexts, in the order they are tried; the plain names come after
 /// all of them.
-pub const ORDER: &[Context] = &[Context::Region];
+pub const ORDER: &[Context] = &[Context::Region, Context::SortMenu];
 
 /// One line of `--help`, of the help popup and of the template.
 #[derive(PartialEq, Debug)]
@@ -498,7 +500,7 @@ impl Keymap {
     }
 
     /// What `key`, pressed at `position` and held with `mods`, asks for,
-    /// with a region selected on the picture or not.
+    /// with `holding` the contexts that hold now.
     ///
     /// The place on the keyboard is tried first, for the number row; then
     /// the named key or the character, Shift being part of a character and
@@ -511,7 +513,7 @@ impl Keymap {
         key: &Key,
         position: PhysicalKey,
         mods: Mods,
-        region_selected: bool,
+        holding: &[Context],
     ) -> Option<Action> {
         let mut candidates = Vec::with_capacity(2);
         if let PhysicalKey::Code(code) = position
@@ -541,9 +543,7 @@ impl Keymap {
         }
         let contexts = ORDER
             .iter()
-            .filter(|context| match context {
-                Context::Region => region_selected,
-            })
+            .filter(|context| holding.contains(context))
             .map(|context| Some(*context))
             .chain([None]);
         candidates.into_iter().find_map(|chord| {
@@ -614,7 +614,8 @@ impl Keymap {
              # home, end, pageup, pagedown, left, right, up, down, f1 to f12. # starts\n\
              # a comment, so the key that types it is written by its place: shift+3.\n\
              # A chord set here is taken from whichever other name held it. With a\n\
-             # region selected the region's names are tried first, then the rest.\n",
+             # region selected the region's names are tried first, and with the sort\n\
+             # menu open the menu's, then the rest.\n",
         );
         for section in Section::ALL {
             let _ = writeln!(text, "\n# {}", section.title());
@@ -623,8 +624,14 @@ impl Keymap {
                     continue;
                 };
                 let _ = writeln!(text, "\n# {}", row.help);
-                if row.context() == Some(Context::Region) {
-                    let _ = writeln!(text, "# Tried first while a region is selected.");
+                match row.context() {
+                    Some(Context::Region) => {
+                        let _ = writeln!(text, "# Tried first while a region is selected.");
+                    }
+                    Some(Context::SortMenu) => {
+                        let _ = writeln!(text, "# Tried first while the sort menu is open.");
+                    }
+                    None => {}
                 }
                 for bound in binds {
                     let tokens: Vec<String> = self
@@ -855,7 +862,8 @@ mod tests {
     ];
 
     fn press(keymap: &Keymap, key: Key, region: bool) -> Option<Action> {
-        keymap.action_for(&key, PhysicalKey::Code(KeyCode::F13), PLAIN, region)
+        let holding: &[Context] = if region { &[Context::Region] } else { &[] };
+        keymap.action_for(&key, PhysicalKey::Code(KeyCode::F13), PLAIN, holding)
     }
 
     fn typed(text: &str) -> Key {
@@ -1007,7 +1015,7 @@ mod tests {
                 &Key::Character(character.into()),
                 PhysicalKey::Code(KeyCode::KeyA),
                 mods,
-                false,
+                &[],
             )
         };
         assert_eq!(press(Mods::SUPER, "z"), Some(Action::Undo));
@@ -1022,7 +1030,7 @@ mod tests {
                 &Key::Named(NamedKey::Backspace),
                 PhysicalKey::Code(KeyCode::Backspace),
                 mods,
-                false,
+                &[],
             )
         };
         assert_eq!(backspace(Mods::SUPER), Some(Action::Delete));
@@ -1031,7 +1039,7 @@ mod tests {
             &Key::Character("0".into()),
             PhysicalKey::Code(KeyCode::Digit0),
             Mods::SUPER,
-            false,
+            &[],
         );
         assert_eq!(zero, Some(Action::ZoomTo(1.0)));
     }
@@ -1087,7 +1095,7 @@ mod tests {
             };
             assert!(words.contains(&first), "{name} under {:?}", row.section);
         }
-        assert_eq!(names.len(), 109);
+        assert_eq!(names.len(), 120);
         for row in keymap.rows() {
             if let Keys::Also(name) | Keys::Gesture(name) = row.keys {
                 assert!(names.contains(&name), "{name} is described but not bound");

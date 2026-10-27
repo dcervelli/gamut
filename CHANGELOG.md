@@ -8,6 +8,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- Keys for the file list's order: `O` opens the sort menu, even with the
+  list hidden, and while it is open a letter chooses each sort: `n` name,
+  `p` path, `e` type, `m` modified, `t` captured, `s` size, `w` width,
+  `h` height, `a` area. Each letter appears beside its sort in the menu.
+  `R` reverses the order, with or without the menu.
 - The top bar gives the folder the file is in after its name, dimmed:
   *photo.png · ~/Pictures/2026*. When the bar runs short of room the
   folder is shortened in the middle, keeping the folder nearest the file,
@@ -51,6 +56,16 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The file list remembers the sort chosen before the one in force and
+  breaks ties by it, so sorting by size and then by kind keeps each kind in
+  size order across restarts, and a file arriving lands among the files it
+  ties with rather than after them. Choosing the earlier sort again swaps
+  the two; the sort button's tooltip names both. Files neither tells apart
+  go by folder and then by name, rather than in the order they arrived.
+- Sorting the file list by path sorts by folder: a folder's own files come
+  before its subfolders', and within a folder the files go by the sort
+  before. It used to sort by the whole path as text, which mixed a folder's
+  files in among its subfolders by name.
 - Stepping to a file of the same shape as the one on screen at another
   size, such as a map of the same ground at twice the detail, keeps the
   same spot in the middle of the window at the same size on screen, as a

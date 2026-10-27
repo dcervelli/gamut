@@ -223,7 +223,6 @@ impl Filmstrip {
             slot: self.slot,
             listing: self.listing,
             current,
-            order: self.order,
             back,
             forward,
             reveal: std::mem::take(&mut self.reveal),
@@ -372,6 +371,7 @@ mod tests {
         assert!(strip.set_order(Order {
             sort: Sort::Type,
             direction: Direction::Ascending,
+            ..Order::default()
         }));
         assert!(strip.take_stale());
         strip.relist(&paths(&["a/2.jpg", "a/1.png", "b/3.png"]));
