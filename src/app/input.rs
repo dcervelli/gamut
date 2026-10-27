@@ -86,6 +86,8 @@ pub enum Action {
     /// Go to the zoom that shows the picture at the size it prints — see
     /// [`App::print_zoom`].
     PrintSize,
+    /// Put up the print size's calibration — see `app::calibration`.
+    CalibratePrintSize,
     Pan(Direction, PanStep),
     /// Move the region's current handle a pixel that way — the whole of it,
     /// while that is the middle. Nothing without a region, as for the two
@@ -448,6 +450,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::ZoomTo(ZoomChoice::Fit(_))) => CycleFit,
         Tip::Control(Control::ZoomTo(ZoomChoice::Filter(_))) => CycleUpscale,
         Tip::Control(Control::ZoomTo(ZoomChoice::Print)) => PrintSize,
+        Tip::Control(Control::Calibrate) => CalibratePrintSize,
         Tip::Control(Control::Format(_)) => CyclePixelFormat,
         Tip::Control(Control::Coordinates(_)) => CycleCoordinates,
         Tip::Control(Control::Geographic(_)) => CycleGeographicFormat,
@@ -501,7 +504,6 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::Thumb(_)
             | Control::RenameTo
             | Control::CancelRename
-            | Control::Calibrate
             | Control::CalibrateOk
             | Control::CancelCalibrate
             | Control::ExportAs(_)
@@ -931,6 +933,18 @@ pub static ROWS: &[Row] = &[
         when: None,
         help: "Print size, the file's inch an inch on the screen",
         keys: one!("zoom.print", PrintSize, [digit(SHIFT, KeyCode::Digit0)]),
+    },
+    // And with Alt, the display measured. Option on a Mac as well: Command
+    // with `0` is the Mac's own actual size.
+    Row {
+        section: Section::Zoom,
+        when: None,
+        help: "Calibrate the print size against a credit card",
+        keys: one!(
+            "zoom.print.calibrate",
+            CalibratePrintSize,
+            [digit(ALT, KeyCode::Digit0)]
+        ),
     },
     Row {
         section: Section::Zoom,
@@ -2245,6 +2259,8 @@ impl App {
             }
             // The menu's cell, so that the two are refused alike.
             PrintSize => return self.press(Control::ZoomTo(ZoomChoice::Print)),
+            // The ruler's press, so that the two are refused alike.
+            CalibratePrintSize => return self.press(Control::Calibrate),
             Pan(direction, step) => {
                 let sign = direction.sign();
                 match step.pixels() {

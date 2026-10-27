@@ -19,6 +19,7 @@ Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 | Key on a Mac | What it does | Name |
 | --- | --- | --- |
 | `1`, `0`, `⌘0` | Actual size | `zoom.100` |
+| `⌥0` | Calibrate the print size against a credit card, held with Option rather than `⌘`, which is actual size | `zoom.print.calibrate` |
 | `+`, `=`, `⌘+`, `⌘=` | Zoom in one step | `zoom.in` |
 | `-`, `_`, `⌘-` | Zoom out one step | `zoom.out` |
 | `⌘`-Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
@@ -77,6 +78,7 @@ configuration file in the application that opens plain text — see
 | `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% | `zoom.200`, `zoom.400`, `zoom.800`, `zoom.1600` |
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% | `zoom.50`, `zoom.25`, `zoom.10` |
 | `Shift`+`0` | Print size: the picture at the size the file says it prints, an inch of it an inch on the screen | `zoom.print` |
+| `Alt`+`0` | Calibrate the print size against a credit card | `zoom.print.calibrate` |
 | `+`, `=` | Zoom in one step, a factor of 1.25 | `zoom.in` |
 | `-`, `_` | Zoom out one step | `zoom.out` |
 | `Space` | Cycle through the whole image, the window filled, and actual size; a fit dragged past the picture's edge goes back to the whole image first. With a region selected, fit the region, fill the window with it, then the image's three, in turn | `zoom.fit` |
@@ -1185,7 +1187,7 @@ size** says which is missing. A display that misreports its size — some
 televisions and projectors do — shows the print at the wrong size. A window
 straddling two displays is sized for the one holding most of it.
 
-The ruler beside **Print size** calibrates the display the window is on. It
+The ruler beside **Print size**, or `Alt`+`0`, calibrates the display the window is on. It
 shows the outline of a credit card at the size the display is taken to be:
 hold a real card to the screen and move the slider until the outline covers
 it exactly, using the arrow keys for fine steps (`Shift` for larger ones), and

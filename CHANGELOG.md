@@ -15,6 +15,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - The ruler beside **Print size** calibrates the display against a credit
   card held to the screen, for a display that reports its size wrongly or
   not at all. The size is kept for that make and model of display.
+  `Alt+0` (`⌥0` on a Mac) does the same.
 - Stepping between two georeferenced files in the same coordinate system
   lines them up on the ground: when the file arriving covers any of the
   ground on screen, that ground stays in the middle of the window at the
