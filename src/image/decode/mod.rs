@@ -1045,8 +1045,9 @@ mod tests {
                 "bad" if name.ends_with(".dng") => "camera raw",
                 "bad" if name.ends_with(".tif") => "tiff",
                 // Not fixtures: the script, the notes, a profile, the raw
-                // samples' directory, and the one format nothing reads.
-                "generate" | "README" | "display" | "raw" | "unsupported" => continue,
+                // samples' directory, the print size's ruler, and the one
+                // format nothing reads.
+                "generate" | "README" | "display" | "raw" | "print" | "unsupported" => continue,
                 other => panic!("{name}: no decoder is expected of a fixture named `{other}-`"),
             };
             let opened = Opened::new(&path).unwrap_or_else(|error| panic!("{name}: {error:#}"));

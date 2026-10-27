@@ -19,6 +19,7 @@ Command, `⌥` Option, `⇧` Shift and `⌃` Control, run together onto the key.
 | Key on a Mac | What it does | Name |
 | --- | --- | --- |
 | `1`, `0`, `⌘0` | Actual size | `zoom.100` |
+| `⌥0` | Calibrate the print size against a credit card, held with Option rather than `⌘`, which is actual size | `zoom.print.calibrate` |
 | `+`, `=`, `⌘+`, `⌘=` | Zoom in one step | `zoom.in` |
 | `-`, `_`, `⌘-` | Zoom out one step | `zoom.out` |
 | `⌘`-Arrows | Pan to the far side of the image; with a region selected, grow it that way one pixel | `pan.edge.left` … `pan.edge.down`; `region.grow.left` … `region.grow.down` |
@@ -76,6 +77,8 @@ configuration file in the application that opens plain text — see
 | Double-click | Actual size, or back to the whole image from actual size | `zoom.100.toggle` |
 | `2`, `3`, `4`, `5` | 200%, 400%, 800%, 1600% | `zoom.200`, `zoom.400`, `zoom.800`, `zoom.1600` |
 | `Shift`+`2`, `3`, `4` | 50%, 25%, 10% | `zoom.50`, `zoom.25`, `zoom.10` |
+| `Shift`+`0` | Print size: the picture at the size the file says it prints, an inch of it an inch on the screen | `zoom.print` |
+| `Alt`+`0` | Calibrate the print size against a credit card | `zoom.print.calibrate` |
 | `+`, `=` | Zoom in one step, a factor of 1.25 | `zoom.in` |
 | `-`, `_` | Zoom out one step | `zoom.out` |
 | `Space` | Cycle through the whole image, the window filled, and actual size; a fit dragged past the picture's edge goes back to the whole image first. With a region selected, fit the region, fill the window with it, then the image's three, in turn | `zoom.fit` |
@@ -1171,7 +1174,7 @@ at that edge.
 | Click or drag the exposure's slider | Set the exposure to the quarter stop under the pointer | |
 | Wheel over the file information | Scroll it | |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle | |
-| Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter | |
+| Click the zoom percentage | Open the zoom menu: scale, print size, fit and the magnification filter | |
 | Click the dot beside the grid button | Choose how a pixel's value is read out | |
 | Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
 | Click the camera button reading **RAW** or **JPEG**, near the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
@@ -1189,15 +1192,38 @@ while the menu is open, so there would be no pixel under it to copy. Pressing
 anywhere outside the menu, or `Esc`, closes it without copying anything.
 
 The percentage in the top bar, just inside the button that hides the
-interface, is itself a button. Pressing it opens a menu hanging under it, under three headings.
-**Zoom** is 10% through 1600%. **Fit** is the two fits — the whole image, or
-the window filled by it. The chevrons on the second point the way it fills,
-across the window or down it, which follows the shape of the image.
-**Up-scaling** is the filter the image is magnified with, `Nearest` or
-`Bicubic`, the same choice `p` cycles. Whichever of each the view is in is
-lit, and choosing acts at once; pressing anywhere outside the menu, or `Esc`,
-closes it without changing anything. A window too small to hold the menu does
-not open one.
+interface, is itself a button. Pressing it opens a menu hanging under it, under four headings.
+**Zoom** is 10% through 1600%. **Physical** is **Print Size**, and the ruler
+beside it that calibrates the display, both below. **Fit** is the two fits —
+the whole image, or the window filled by it. The chevrons on the second point
+the way it fills, across the window or down it, which follows the shape of
+the image. **Up-scaling** is the filter the image is magnified with,
+`Nearest` or `Bicubic`, the same choice `p` cycles. Whichever of each the
+view is in is lit, and choosing acts at once; pressing anywhere outside the
+menu, or `Esc`, closes it without changing anything. A window too small to
+hold the menu does not open one.
+
+**Print Size**, or `Shift`+`0`, shows the picture at the size the file says
+it prints, on the display the window is on: an inch of the print is an inch
+of the glass. It needs the file to give its DPI, as the info panel's
+*Density* row shows, and the display to report how large it is, which most
+do; resting on a dead **Print Size** says which is missing. A display that
+misreports its size — some televisions and projectors do — shows the print
+at the wrong size until it is calibrated. A window straddling two displays
+is sized for the one holding most of it.
+
+The ruler beside **Print Size**, or `Alt`+`0`, calibrates the display the
+window is on. It shows the outline of a credit card at the size the display
+is taken to be, with a 2″ × 1″ rule in one corner and a 40 × 20 mm rule in
+the other for when a ruler is easier to hand. Hold the card or the ruler to
+the screen and move the slider until they match, using the arrow keys for
+fine steps (`Shift` for larger ones), and press **OK** or `Enter`. The size
+is kept for that make and model of display whichever port it is plugged
+into, and overrides what the display reports. A display that reports no size
+at all can be calibrated too, after which **Print Size** works on it. The
+mark on the slider is the size the display reports; the reset button after
+the diagonal puts the slider back on it, and **OK** then goes back to that
+size.
 
 Pointing at the image reads that pixel out in the bottom left corner: its
 coordinates, a swatch of the color it comes out on screen, and its value. The

@@ -229,6 +229,8 @@ fn every_chrome_button_has_something_to_say() {
                 | Control::TagRow(_)
                 | Control::RenameTo
                 | Control::CancelRename
+                | Control::CalibrateOk
+                | Control::CancelCalibrate
                 | Control::ExportAs(_)
                 | Control::ExportTo
                 | Control::CancelExport
@@ -1147,8 +1149,8 @@ fn the_arrows_step_files_and_pan_by_what_is_held_with_them() {
 }
 
 /// While the menu of sorts is open, a letter is one of its items, ahead of
-/// the region's names and the plain ones; closed, the letters are their
-/// own, and the keys that open it and turn the order round are there
+/// the plain names, and beside a region's, which take none of them; closed,
+/// the letters are their own, and the keys that open it and turn the order round are there
 /// either way.
 #[test]
 fn the_sort_menu_takes_its_letters_while_it_is_open() {

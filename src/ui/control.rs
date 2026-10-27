@@ -265,6 +265,16 @@ controls! {
     /// outside it also do.
     RenameTo,
     CancelRename,
+    /// The button beside the zoom menu's print size that puts up its
+    /// calibration — see [`calibrate`](super::calibrate) — and that
+    /// dialog's two buttons, as the rename dialog's are. Dead where the
+    /// window's monitor cannot be told apart from another. And the button
+    /// after the dialog's readout that puts the slider back on the size the
+    /// monitor says.
+    Calibrate,
+    CalibrateOk,
+    CancelCalibrate,
+    CalibrateReset,
     /// The buttons in the middle of an empty window that put up the
     /// desktop's file dialog, for image files and for a folder — see
     /// `ui::empty`. `Ctrl+O` and `Ctrl+Shift+O` come through here too,
@@ -388,6 +398,10 @@ impl Control {
             Control::CancelExport => "Cancel".to_string(),
             Control::RenameTo => "OK".to_string(),
             Control::CancelRename => "Cancel".to_string(),
+            Control::Calibrate => "Calibrate print size".to_string(),
+            Control::CalibrateOk => "OK".to_string(),
+            Control::CancelCalibrate => "Cancel".to_string(),
+            Control::CalibrateReset => "Reset".to_string(),
             Control::OpenFiles => "Open files".to_string(),
             Control::OpenFolder => "Open folder".to_string(),
             Control::OpenLastFolder => "Open last folder".to_string(),
@@ -517,6 +531,9 @@ pub enum Command {
     ExportName(String),
     /// The export dialog's quality slider moved: this is where it now stands.
     ExportQuality(u8),
+    /// The calibration's slider moved: this is where it now stands, in
+    /// stops of the card's size.
+    Calibration(f32),
     /// One of the export dialog's size boxes changed: which, and what it
     /// now says.
     ExportSize(Dimension, String),

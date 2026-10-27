@@ -35,6 +35,11 @@ impl Density {
             .then_some(Density { per_inch })
     }
 
+    /// Pixels to the millimeter, across and down.
+    pub fn per_mm(self) -> [f64; 2] {
+        self.per_inch.map(|value| value / MM_PER_INCH)
+    }
+
     /// The same density across the picture turned a quarter.
     pub fn swapped(self) -> Density {
         let [x, y] = self.per_inch;

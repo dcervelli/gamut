@@ -13,11 +13,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   `p` path, `e` type, `m` modified, `t` captured, `s` size, `w` width,
   `h` height, `a` area. Each letter appears beside its sort in the menu.
   `R` reverses the order, with or without the menu.
-
 - The top bar gives the folder the file is in after its name, dimmed:
   *photo.png · ~/Pictures/2026*. When the bar runs short of room the
   folder is shortened in the middle, keeping the folder nearest the file,
   and then left out. The size and color facts keep their place before it.
+- **Print Size** in the zoom menu shows the picture at the size the file
+  says it prints, on the display the window is on, from the density the
+  file gives and the physical size the display reports. Resting on it while
+  it is dead says which of the two is missing. `Shift+0` does the same.
+- The ruler beside **Print Size** calibrates the display against a credit
+  card or a ruler held to the screen, for a display that reports its size
+  wrongly or not at all. The size is kept for that make and model of display.
+  `Alt+0` (`⌥0` on a Mac) does the same.
 - Stepping between two georeferenced files in the same coordinate system
   lines them up on the ground: when the file arriving covers any of the
   ground on screen, that ground stays in the middle of the window at the

@@ -286,15 +286,15 @@ pub fn spell_all(chords: &[Chord]) -> String {
 /// holds, the name that holds a chord in it answers the chord.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Context {
-    /// The menu of sorts is open: what is up on top is tried first.
-    SortMenu,
     /// A region is selected on the picture.
     Region,
+    /// The menu of sorts is open.
+    SortMenu,
 }
 
 /// The contexts, in the order they are tried; the plain names come after
 /// all of them.
-pub const ORDER: &[Context] = &[Context::SortMenu, Context::Region];
+pub const ORDER: &[Context] = &[Context::Region, Context::SortMenu];
 
 /// One line of `--help`, of the help popup and of the template.
 #[derive(PartialEq, Debug)]
@@ -613,9 +613,9 @@ impl Keymap {
              # place (shift+2), or space, enter, esc, tab, backspace, delete, insert,\n\
              # home, end, pageup, pagedown, left, right, up, down, f1 to f12. # starts\n\
              # a comment, so the key that types it is written by its place: shift+3.\n\
-             # A chord set here is taken from whichever other name held it. With the\n\
-             # sort menu open its names are tried first, then with a region selected\n\
-             # the region's, then the rest.\n",
+             # A chord set here is taken from whichever other name held it. With a\n\
+             # region selected the region's names are tried first, and with the sort\n\
+             # menu open the menu's, then the rest.\n",
         );
         for section in Section::ALL {
             let _ = writeln!(text, "\n# {}", section.title());
@@ -1095,7 +1095,7 @@ mod tests {
             };
             assert!(words.contains(&first), "{name} under {:?}", row.section);
         }
-        assert_eq!(names.len(), 118);
+        assert_eq!(names.len(), 120);
         for row in keymap.rows() {
             if let Keys::Also(name) | Keys::Gesture(name) = row.keys {
                 assert!(names.contains(&name), "{name} is described but not bound");

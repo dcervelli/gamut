@@ -84,6 +84,11 @@ pub enum Action {
     /// Go to this zoom, or from it back to the whole image — see
     /// [`View::toggle_zoom`](crate::view::View::toggle_zoom).
     ToggleZoom(f32),
+    /// Go to the zoom that shows the picture at the size it prints — see
+    /// [`App::print_zoom`].
+    PrintSize,
+    /// Put up the print size's calibration — see `app::calibration`.
+    CalibratePrintSize,
     Pan(Direction, PanStep),
     /// Move the region's current handle a pixel that way — the whole of it,
     /// while that is the middle. Nothing without a region, as for the two
@@ -457,6 +462,8 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::ZoomTo(ZoomChoice::Scale(scale))) => ZoomTo(scale),
         Tip::Control(Control::ZoomTo(ZoomChoice::Fit(_))) => CycleFit,
         Tip::Control(Control::ZoomTo(ZoomChoice::Filter(_))) => CycleUpscale,
+        Tip::Control(Control::ZoomTo(ZoomChoice::Print)) => PrintSize,
+        Tip::Control(Control::Calibrate) => CalibratePrintSize,
         Tip::Control(Control::Format(_)) => CyclePixelFormat,
         Tip::Control(Control::Coordinates(_)) => CycleCoordinates,
         Tip::Control(Control::Geographic(_)) => CycleGeographicFormat,
@@ -508,6 +515,9 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::Thumb(_)
             | Control::RenameTo
             | Control::CancelRename
+            | Control::CalibrateOk
+            | Control::CancelCalibrate
+            | Control::CalibrateReset
             | Control::ExportAs(_)
             | Control::ExportTo
             | Control::CancelExport
@@ -637,8 +647,8 @@ impl Section {
 pub enum When {
     /// The two conditions that are also contexts: their names are tried
     /// before the plain ones while they hold — see [`When::context`].
-    SortMenuOpen,
     RegionSelected,
+    SortMenuOpen,
     SeveralFiles,
     Animation,
     AnimationOrPages,
@@ -689,8 +699,8 @@ impl When {
     /// application.
     #[cfg(test)]
     pub const ALL: [When; 24] = [
-        When::SortMenuOpen,
         When::RegionSelected,
+        When::SortMenuOpen,
         When::SeveralFiles,
         When::Animation,
         When::AnimationOrPages,
@@ -932,6 +942,26 @@ pub static ROWS: &[Row] = &[
                 defaults: &[digit(SHIFT, KeyCode::Digit4)],
             },
         ]),
+    },
+    // Beside `0`, which is a pixel to a pixel, Shift+`0` is an inch to an
+    // inch.
+    Row {
+        section: Section::Zoom,
+        when: None,
+        help: "Print size, based on DPI",
+        keys: one!("zoom.print", PrintSize, [digit(SHIFT, KeyCode::Digit0)]),
+    },
+    // And with Alt, the display measured. Option on a Mac as well: Command
+    // with `0` is the Mac's own actual size.
+    Row {
+        section: Section::Zoom,
+        when: None,
+        help: "Calibrate display for print size",
+        keys: one!(
+            "zoom.print.calibrate",
+            CalibratePrintSize,
+            [digit(ALT, KeyCode::Digit0)]
+        ),
     },
     Row {
         section: Section::Zoom,
@@ -2193,6 +2223,11 @@ impl App {
                 _ => Effect::Nothing,
             };
         }
+        // The calibration takes every key while it is up — see
+        // `app::calibration`.
+        if self.calibrating.is_some() {
+            return self.calibration_key(key);
+        }
         match self
             .keys
             .action_for(key, position, self.pointer.modifiers, &self.holding())
@@ -2207,11 +2242,11 @@ impl App {
     /// before the plain ones.
     pub(super) fn holding(&self) -> Vec<Context> {
         let mut holding = Vec::with_capacity(2);
-        if self.sort_menu_open() {
-            holding.push(Context::SortMenu);
-        }
         if matches!(self.marking.selection, Selection::Shown(_)) {
             holding.push(Context::Region);
+        }
+        if self.sort_menu_open() {
+            holding.push(Context::SortMenu);
         }
         holding
     }
@@ -2331,6 +2366,10 @@ impl App {
                     view.toggle_zoom(scale, anchor, image, viewport);
                 });
             }
+            // The menu's cell, so that the two are refused alike.
+            PrintSize => return self.press(Control::ZoomTo(ZoomChoice::Print)),
+            // The ruler's press, so that the two are refused alike.
+            CalibratePrintSize => return self.press(Control::Calibrate),
             Pan(direction, step) => {
                 let sign = direction.sign();
                 match step.pixels() {
@@ -2856,6 +2895,9 @@ impl App {
             nothing_open: current.is_none(),
             arriving: self.arriving().is_some(),
             tags_in: self.tags.tags_in(),
+            density: current.is_some_and(|current| current.exif.density.is_some()),
+            monitor_size: self.surface_density().is_some(),
+            screen: self.screen().is_some(),
         }
     }
 
@@ -2974,6 +3016,9 @@ impl App {
             ui::Command::Name(name) => self.set_rename_name(name),
             ui::Command::ExportName(name) => self.set_export_name(name),
             ui::Command::ExportQuality(quality) => self.set_export_quality(quality),
+            ui::Command::Calibration(stops) => {
+                let _ = self.set_calibration(stops);
+            }
             ui::Command::ExportSize(dimension, text) => self.set_export_size(dimension, text),
             ui::Command::Cursor(step) => self.chooser.step(step),
             ui::Command::Visible(rows) => {
@@ -3636,6 +3681,13 @@ impl App {
                 self.cancel_export();
                 Effect::Redraw
             }
+            Control::Calibrate => {
+                self.open_calibration();
+                Effect::Redraw
+            }
+            Control::CalibrateOk => self.calibrated(),
+            Control::CancelCalibrate => self.cancel_calibration(),
+            Control::CalibrateReset => self.reset_calibration(),
             Control::RenameTo => {
                 self.rename_shown();
                 Effect::Redraw
@@ -3747,7 +3799,10 @@ impl App {
             // A cell of the zoom menu: a zoom chosen here is a move.
             Control::ZoomTo(choice) => {
                 let anchor = self.zoom_anchor();
-                self.animate(|view, image, viewport| choice.apply(view, anchor, image, viewport));
+                let print = self.print_zoom();
+                self.animate(|view, image, viewport| {
+                    choice.apply(view, anchor, image, viewport, print);
+                });
                 Effect::Redraw
             }
             Control::Format(format) => {
