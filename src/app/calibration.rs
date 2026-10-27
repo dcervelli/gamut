@@ -134,6 +134,20 @@ impl App {
         Effect::Redraw
     }
 
+    /// The dialog's reset: the slider back on the size the monitor says,
+    /// and its run centered there, however far from it the dialog opened.
+    pub(super) fn reset_calibration(&mut self) -> Effect {
+        let Some(calibrating) = &mut self.calibrating else {
+            return Effect::Nothing;
+        };
+        if calibrating.stops == 0.0 && calibrating.center == 0.0 {
+            return Effect::Nothing;
+        }
+        calibrating.stops = 0.0;
+        calibrating.center = 0.0;
+        Effect::Redraw
+    }
+
     /// OK: the size the slider says is kept for the monitor's model. Left
     /// where the monitor says it is, nothing is kept, and a size measured
     /// before is let go — the monitor was right.

@@ -5664,3 +5664,27 @@ fn a_monitor_that_says_no_size_is_measured() {
     let zoom = app.print_zoom().expect("measured at the guess");
     assert!((zoom - 96.0 / 100.0).abs() < 1e-4, "{zoom}");
 }
+
+/// The dialog's reset puts the slider back on the size the monitor says,
+/// and centers its run there, however far off the size kept was.
+#[test]
+fn the_calibrations_reset_goes_back_to_what_the_monitor_says() {
+    let (mut app, _dir) = app_over("reset", &[("a.png", 300, 200)]);
+    let monitors = Monitors::stub(true);
+    monitors.set_screen("DP-1", [1600, 1000], Some([400.0, 250.0]));
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("DP-1".to_string());
+    app.displays
+        .insert("model-of-DP-1".to_string(), [250.0, 156.25]);
+
+    let _ = app.press(ui::Control::Calibrate);
+    let input = app.calibration_input().expect("up");
+    assert!(input.stops > 0.6, "{input:?}");
+    assert!(input.low > 0.0, "the size the monitor says is past the run");
+    assert_eq!(app.press(ui::Control::CalibrateReset), Effect::Redraw);
+    let input = app.calibration_input().expect("still up");
+    assert_eq!((input.stops, input.low, input.high), (0.0, -0.5, 0.5));
+    assert_eq!(app.press(ui::Control::CalibrateReset), Effect::Nothing);
+    let _ = app.press(ui::Control::CalibrateOk);
+    assert!(app.displays.is_empty(), "back to what the monitor says");
+}

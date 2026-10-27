@@ -1206,8 +1206,9 @@ fine steps (`Shift` for larger ones), and press **OK** or `Enter`. The size
 is kept for that make and model of display whichever port it is plugged
 into, and overrides what the display reports. A display that reports no size
 at all can be calibrated too, after which **Print Size** works on it. The
-mark on the slider is the size the display reports; move the slider back
-onto it and press **OK** to go back to that.
+mark on the slider is the size the display reports; the reset button after
+the diagonal puts the slider back on it, and **OK** then goes back to that
+size.
 
 Pointing at the image reads that pixel out in the bottom left corner: its
 coordinates, a swatch of the color it comes out on screen, and its value. The

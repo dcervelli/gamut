@@ -709,6 +709,7 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Coordinates(format)) => menu::describe_coordinates(format),
         Tip::Control(Control::Geographic(format)) => menu::describe_geographic(format),
         Tip::Control(Control::Zoom) => "Open zoom menu",
+        Tip::Control(Control::CalibrateReset) => "Reset to the display's reported size",
         // No one key opens it — every cell of it has a key of its own —
         // so the button says what the menu is of.
         Tip::Control(Control::Copy) => "Copy the file or image",

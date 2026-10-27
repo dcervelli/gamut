@@ -21,6 +21,8 @@ use super::icon;
 use super::rename::{self, Dialog, GAP};
 use super::slider::{self, Line};
 use super::style::MENU_PADDING;
+use super::style::TOGGLE_RADIUS;
+use super::tooltip::Tip;
 use super::{PADDING, Rect, TEXT_SIZE};
 
 /// The modal's id in egui's memory.
@@ -35,10 +37,12 @@ const CARD_RADIUS: f32 = 3.18;
 
 /// The dialog's least width, which the words above the card are set in.
 const WIDTH: f32 = 400.0;
-/// The slider's row: how tall, and how much of it the readout after the
-/// slider is given.
+/// The slider's row: how tall, and how much of it the readout and the
+/// reset after the slider are given — the reset a square the row's height,
+/// wearing the mark the histogram's reset wears.
 const ROW: f32 = 24.0;
-const READOUT: f32 = 110.0;
+const READOUT: f32 = 100.0;
+const RESET_ICON: f32 = 16.0;
 /// How much of the window's height the rest of the dialog takes — its
 /// title, the words, the slider, the buttons and the gaps between — which
 /// the card's room is cut to fit beside.
@@ -99,8 +103,9 @@ const RULES: [Rule; 2] = [
         label: "40 \u{00d7} 20 mm",
     },
 ];
-/// The slider's name.
+/// The slider's name, and what the card says in its middle.
 const SIZE: &str = "Card size";
+const CREDIT_CARD: &str = "Credit card";
 
 /// What the dialog is drawn from, on each frame it is up.
 #[derive(Clone, Debug, PartialEq)]
@@ -147,7 +152,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
             ui.add_space(GAP);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = vec2(GAP, 0.0);
-                let width = (inside - READOUT - GAP).max(0.0);
+                let width = (inside - READOUT - ROW - 2.0 * GAP).max(0.0);
                 let (row, _) = ui.allocate_exact_size(vec2(width, ROW), Sense::HOVER);
                 let asked = slider::show(
                     pass,
@@ -171,7 +176,8 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
                 if let Some(asked) = asked {
                     pass.commands.push(Command::Calibration(asked));
                 }
-                ui.add(Label::new(diagonal(input.diagonal)));
+                ui.add_sized([READOUT, ROW], Label::new(diagonal(input.diagonal)));
+                reset(pass, ui, input);
             });
             ui.add_space(GAP);
             rename::ok_cancel(
@@ -188,7 +194,31 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
 /// What the readout after the slider says: the monitor's diagonal, which is
 /// what a monitor is sold by and so a number the reader can check.
 pub fn diagonal(inches: f64) -> String {
-    format!("{inches:.1} in diagonal")
+    format!("{inches:.1}\" diagonal")
+}
+
+/// The button after the readout that puts the slider back on the size the
+/// monitor says: dead while it is there.
+fn reset(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
+    let control = Control::CalibrateReset;
+    let live = input.stops != 0.0;
+    let sense = if live { Sense::CLICK } else { Sense::HOVER };
+    let (rect, response) = ui.allocate_exact_size(vec2(ROW, ROW), sense);
+    let (background, ink) = pass.button_ink(false, &response, live);
+    ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+    icon::paint(
+        ui.painter(),
+        icon::ROTATE_CCW,
+        icon::square(pass.grid, rect, RESET_ICON),
+        ink,
+        background,
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, live, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control));
+    if response.clicked() {
+        pass.press(control);
+    }
 }
 
 /// The line under the words: "Use ← → to finely adjust.", the arrows drawn
@@ -231,6 +261,13 @@ fn card(pass: &Pass, ui: &mut egui::Ui, input: &Input, room: [f32; 2]) {
         radius,
         egui::Stroke::new(line, theme.text_primary),
         egui::StrokeKind::Inside,
+    );
+    painter.text(
+        card.center(),
+        egui::Align2::CENTER_CENTER,
+        CREDIT_CARD,
+        egui::FontId::proportional(TEXT_SIZE),
+        theme.text_dim.into(),
     );
 
     // Every line of a rule is put on the device's grid, as any rule is: a
@@ -302,7 +339,7 @@ mod tests {
 
     #[test]
     fn the_diagonal_is_written_to_a_tenth_of_an_inch() {
-        assert_eq!(diagonal(15.302), "15.3 in diagonal");
-        assert_eq!(diagonal(27.0), "27.0 in diagonal");
+        assert_eq!(diagonal(15.302), "15.3\" diagonal");
+        assert_eq!(diagonal(27.0), "27.0\" diagonal");
     }
 }

@@ -3638,4 +3638,15 @@ fn the_calibration_asks_for_its_buttons() {
         click(&mut harness, "Cancel"),
         [Command::Press(Control::CancelCalibrate)]
     );
+    // The reset, alive once the slider is off the size the monitor says —
+    // the card larger with it, as the application makes it.
+    if let Some(input) = harness.state_mut().input.calibrate.as_mut() {
+        input.stops = 0.1;
+        input.points_per_mm = [4.0 * 0.1_f32.exp2(); 2];
+    }
+    harness.run();
+    assert_eq!(
+        click(&mut harness, "Reset"),
+        [Command::Press(Control::CalibrateReset)]
+    );
 }

@@ -506,6 +506,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::CancelRename
             | Control::CalibrateOk
             | Control::CancelCalibrate
+            | Control::CalibrateReset
             | Control::ExportAs(_)
             | Control::ExportTo
             | Control::CancelExport
@@ -3551,6 +3552,7 @@ impl App {
             }
             Control::CalibrateOk => self.calibrated(),
             Control::CancelCalibrate => self.cancel_calibration(),
+            Control::CalibrateReset => self.reset_calibration(),
             Control::RenameTo => {
                 self.rename_shown();
                 Effect::Redraw

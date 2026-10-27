@@ -165,7 +165,9 @@ The dialog's slider is in stops of the card's size from the reported size (or,
 for a monitor that reports none, from 96 logical pixels to the inch), so its
 mark and the start of its fill stand at what the monitor says; OK with the
 slider on that mark lets the calibration go rather than keeping a copy of the
-reported size. It runs `calibration::RANGE` either side of where the dialog
+reported size. The reset (`App::reset_calibration`) puts it there and centers
+the run on it as well, since a calibration kept far from the reported size
+opens with the mark outside the run. It runs `calibration::RANGE` either side of where the dialog
 opened, which keeps the card's room — the card at the far end of the run, so
 that the dialog does not resize under the hand — small enough to fit a window.
 The dialog has no text field, so keys never reach egui while it is up:
