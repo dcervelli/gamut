@@ -1662,6 +1662,9 @@ pub(super) struct Namer {
     /// Which of a raw's pictures is on screen, where the file carries the
     /// camera's JPEG: what the camera's switch says.
     camera: Option<Rendering>,
+    /// How the file list stands, for what the sort button says under its
+    /// name.
+    order: ui::filmstrip::Order,
 }
 
 impl Naming for Namer {
@@ -1879,6 +1882,10 @@ impl Naming for Namer {
                     )],
                 )
             }
+            // The sort button: what the menu is, and under it how the list
+            // stands, the sort that breaks the ties being in nothing else on
+            // screen.
+            Tip::Control(Control::Sorting) => (vec![names(keys, at)?], vec![self.order.describe()]),
             _ => (vec![names(keys, at)?], Vec::new()),
         };
         Some(ui::Tooltip { title, hints })
@@ -2671,6 +2678,7 @@ impl App {
                     CameraJpeg::Present(_) => Some(current.rendering),
                     CameraJpeg::Only(_) | CameraJpeg::Missing | CameraJpeg::Unavailable => None,
                 }),
+            order: self.filmstrip.order(),
         }
     }
 
@@ -3441,11 +3449,7 @@ impl App {
                 self.filmstrip.reveal();
                 Effect::Redraw
             }
-            Control::SortBy(sort) => {
-                let mut order = self.filmstrip.order();
-                order.sort = sort;
-                self.set_order(order)
-            }
+            Control::SortBy(sort) => self.set_order(self.filmstrip.order().sorted_by(sort)),
             Control::SortDirection(direction) => {
                 let mut order = self.filmstrip.order();
                 order.direction = direction;

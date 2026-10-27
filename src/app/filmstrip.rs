@@ -372,6 +372,7 @@ mod tests {
         assert!(strip.set_order(Order {
             sort: Sort::Type,
             direction: Direction::Ascending,
+            ..Order::default()
         }));
         assert!(strip.take_stale());
         strip.relist(&paths(&["a/2.jpg", "a/1.png", "b/3.png"]));

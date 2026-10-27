@@ -282,10 +282,10 @@ pub struct Opening {
 }
 
 /// `files` in `order`, as far as what is known of each — `glimpsed` — can
-/// put them: files the order knows nothing of keep the order they stand in,
-/// after those it does. What `main` puts the command line's list in when
-/// the order needs only the names, and what files chosen in the window are
-/// put in once they have been read for it (see [`arranging`]).
+/// put them: files the order knows nothing of by folder and then by name,
+/// after those it does. What `main` puts the command line's list in, and
+/// what files chosen in the window are put in once they have been read
+/// for it (see [`arranging`]).
 pub fn arranged(
     files: Vec<PathBuf>,
     order: ui::filmstrip::Order,

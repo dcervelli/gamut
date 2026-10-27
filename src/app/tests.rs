@@ -414,6 +414,7 @@ fn a_folder_read_steps_in_the_order_in_force() {
     app.filmstrip.set_order(ui::filmstrip::Order {
         sort: ui::filmstrip::Sort::Size,
         direction: ui::filmstrip::Direction::Ascending,
+        ..Default::default()
     });
 
     let _ = app.step(true);
@@ -533,6 +534,7 @@ fn a_directory_opens_in_the_order_last_left() {
     let order = ui::filmstrip::Order {
         sort: ui::filmstrip::Sort::Size,
         direction: ui::filmstrip::Direction::Descending,
+        ..Default::default()
     };
     let size = decode::probe(&paths[0]).unwrap();
     let mut app = App::new(
@@ -594,6 +596,7 @@ fn files_chosen_open_on_the_first_in_the_order() {
     let order = ui::filmstrip::Order {
         sort: ui::filmstrip::Sort::Size,
         direction: ui::filmstrip::Direction::Descending,
+        ..Default::default()
     };
     app.filmstrip.set_order(order);
     let _ = app.apply_order();
@@ -3750,6 +3753,7 @@ fn a_removal_waits_and_a_file_on_its_way_out_is_refused_again() {
 #[test]
 fn the_list_is_put_in_order_between_reads_and_the_file_on_screen_stays() {
     use crate::thumbnailer::{Delivered, Facts, News};
+    use crate::ui::Naming;
     use crate::ui::filmstrip::Sort;
     let (mut app, dir) = opening(
         "order",
@@ -3773,9 +3777,18 @@ fn the_list_is_put_in_order_between_reads_and_the_file_on_screen_stays() {
     assert_eq!(app.files.index(), 1);
 
     // By area: only the file on screen has been read, and the rest
-    // wait at the end in the order they stood.
+    // wait at the end by name, the sort before.
     assert_eq!(app.press(ui::Control::SortBy(Sort::Area)), Effect::Redraw);
     assert_eq!(names(&app), ["b.png", "a.png", "c.png"]);
+    assert_eq!(
+        app.namer()
+            .tooltip(ui::Tip::Control(ui::Control::Sorting))
+            .map(|tooltip| tooltip.hints),
+        Some(vec![
+            "Sorted by Area, ascending, then by Name, ascending".to_string()
+        ]),
+        "the button says what breaks the ties"
+    );
     assert_eq!(app.files.index(), 0);
     assert!(
         app.filmstrip.reveals(),

@@ -258,17 +258,87 @@ impl Direction {
     }
 }
 
-/// How the list stands: what it is sorted by, and which way that sort runs.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// One key of an order: what is sorted by, and which way.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct By {
+    pub sort: Sort,
+    pub direction: Direction,
+}
+
+/// How the list stands: what it is sorted by and which way that sort runs,
+/// and `then`, what breaks its ties — the sort that was in force before
+/// this one, in the direction it ran. What neither tells apart goes by
+/// folder and then by name.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Order {
     pub sort: Sort,
     pub direction: Direction,
+    pub then: By,
+}
+
+impl Default for Order {
+    /// By name, and a name in two folders by folder.
+    fn default() -> Self {
+        Self {
+            sort: Sort::Name,
+            direction: Direction::Ascending,
+            then: By {
+                sort: Sort::Path,
+                direction: Direction::Ascending,
+            },
+        }
+    }
 }
 
 impl Order {
     /// Whether the order can change as headers are read.
     pub fn reads_facts(self) -> bool {
-        self.sort.reads_facts()
+        self.sort.reads_facts() || self.tie_break().is_some_and(|by| by.sort.reads_facts())
+    }
+
+    /// What breaks the sort's ties: `then`, unless it is the sort itself,
+    /// as a state file written by hand can make it.
+    pub fn tie_break(self) -> Option<By> {
+        (self.then.sort != self.sort).then_some(self.then)
+    }
+
+    /// What the sort button says under its name: what the list is sorted
+    /// by, and what breaks its ties, each with the way it runs.
+    pub fn describe(self) -> String {
+        let by = |sort: Sort, direction: Direction| {
+            format!("{}, {}", sort.label(), direction.label().to_lowercase())
+        };
+        let first = by(self.sort, self.direction);
+        match self.tie_break() {
+            Some(then) => format!(
+                "Sorted by {first}, then by {}",
+                by(then.sort, then.direction)
+            ),
+            None => format!("Sorted by {first}"),
+        }
+    }
+
+    /// The order a press of `sort` in the menu makes: the sort in force
+    /// becomes what breaks the ties, in the direction it ran. A sort
+    /// arriving keeps the direction in force, except the one that was
+    /// breaking the ties, which comes back in its own, the two trading
+    /// places; the sort in force pressed again changes nothing.
+    pub fn sorted_by(self, sort: Sort) -> Order {
+        if sort == self.sort {
+            return self;
+        }
+        let direction = match self.then.sort == sort {
+            true => self.then.direction,
+            false => self.direction,
+        };
+        Order {
+            sort,
+            direction,
+            then: By {
+                sort: self.sort,
+                direction: self.direction,
+            },
+        }
     }
 }
 

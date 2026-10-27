@@ -500,7 +500,7 @@ struct Kept {
 }
 
 /// Every line of the state file, in the order it is written.
-const KEPT: [Kept; 12] = [
+const KEPT: [Kept; 14] = [
     Kept {
         name: "filmstrip_width",
         get: |state| state.filmstrip_width.to_string(),
@@ -561,6 +561,24 @@ const KEPT: [Kept; 12] = [
         set: |state, value| {
             if let Some(direction) = filmstrip::Direction::read(value) {
                 state.order.direction = direction;
+            }
+        },
+    },
+    Kept {
+        name: "sort_then",
+        get: |state| state.order.then.sort.word().to_string(),
+        set: |state, value| {
+            if let Some(sort) = filmstrip::Sort::read(value) {
+                state.order.then.sort = sort;
+            }
+        },
+    },
+    Kept {
+        name: "sort_then_direction",
+        get: |state| state.order.then.direction.word().to_string(),
+        set: |state, value| {
+            if let Some(direction) = filmstrip::Direction::read(value) {
+                state.order.then.direction = direction;
             }
         },
     },
@@ -1095,6 +1113,10 @@ mod tests {
             order: filmstrip::Order {
                 sort: filmstrip::Sort::Modified,
                 direction: filmstrip::Direction::Descending,
+                then: filmstrip::By {
+                    sort: filmstrip::Sort::Type,
+                    direction: filmstrip::Direction::Descending,
+                },
             },
             camera_jpeg: true,
             profile: false,
@@ -1131,11 +1153,20 @@ mod tests {
     fn every_order_reads_back() {
         for sort in filmstrip::Sort::ALL {
             for direction in filmstrip::Direction::ALL {
-                let state = State {
-                    order: filmstrip::Order { sort, direction },
-                    ..State::default()
-                };
-                assert_eq!(State::parse(&state.render()), state);
+                for then in filmstrip::Sort::ALL {
+                    let state = State {
+                        order: filmstrip::Order {
+                            sort,
+                            direction,
+                            then: filmstrip::By {
+                                sort: then,
+                                direction,
+                            },
+                        },
+                        ..State::default()
+                    };
+                    assert_eq!(State::parse(&state.render()), state);
+                }
             }
         }
     }

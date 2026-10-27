@@ -221,9 +221,14 @@ wears which. Sorted by anything but the name, each thumbnail wears the
 value it is sorted by across its foot — for the path, the folder, cut in
 its middle where it is long. The list itself is put in
 that order: the keys, the count in the bar and the chooser all walk what
-the strip shows. A sort keeps the order of files it cannot tell apart, so
-sorting by size and then by kind leaves each kind in size order, the way
-sorting a spreadsheet twice does. The kind of a file, its size, its dates
+the strip shows. Files a sort cannot tell apart go by the sort chosen
+before it, so sorting by size and then by kind leaves each kind in size
+order, the way sorting a spreadsheet twice does, and the list stays that
+way across restarts and as files arrive. Choosing the earlier sort again
+swaps the two. Resting the pointer on the button says both. Whatever both
+leave tied goes by folder and then by name. Sorting by path sorts by
+folder alone, a folder's own files before its subfolders', so sorting by
+capture date and then by path leaves each folder in capture order. The kind of a file, its size, its dates
 and its dimensions are read from its header in the background, and a file whose
 header has not been read yet sorts after those that have, and moves
 into place once it is. A file that does not say when it was taken — a
