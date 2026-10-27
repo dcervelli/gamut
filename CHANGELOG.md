@@ -8,6 +8,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The top bar gives the folder the file is in after its name, dimmed:
+  *photo.png · ~/Pictures/2026*. When the bar runs short of room the
+  folder is shortened in the middle, keeping the folder nearest the file,
+  and then left out. The size and color facts keep their place before it.
 - Stepping between two georeferenced files in the same coordinate system
   lines them up on the ground: when the file arriving covers any of the
   ground on screen, that ground stays in the middle of the window at the
