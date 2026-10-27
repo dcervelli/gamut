@@ -93,13 +93,18 @@ impl Copies {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ZoomChoice {
     Scale(f32),
+    /// The zoom that shows the picture at the size the file says it prints,
+    /// on the monitor the window is on — which is not a number the menu
+    /// knows, and so is handed to [`ZoomChoice::apply`] and
+    /// [`ZoomChoice::active`] by the application that does.
+    Print,
     Fit(Fit),
     Filter(Upscale),
 }
 
 /// What the zoom menu offers. The order is the order the cells are laid out
 /// in, section by section and left to right within each.
-pub const ZOOM_CHOICES: [ZoomChoice; 12] = [
+pub const ZOOM_CHOICES: [ZoomChoice; 13] = [
     ZoomChoice::Scale(0.10),
     ZoomChoice::Scale(0.25),
     ZoomChoice::Scale(0.50),
@@ -108,6 +113,7 @@ pub const ZOOM_CHOICES: [ZoomChoice; 12] = [
     ZoomChoice::Scale(4.0),
     ZoomChoice::Scale(8.0),
     ZoomChoice::Scale(16.0),
+    ZoomChoice::Print,
     ZoomChoice::Fit(Fit::Whole),
     ZoomChoice::Fit(Fit::Fill),
     ZoomChoice::Filter(Upscale::Nearest),
@@ -117,35 +123,59 @@ pub const ZOOM_CHOICES: [ZoomChoice; 12] = [
 /// How the zoom menu is divided: a section's name, how many of
 /// [`ZOOM_CHOICES`] it takes, in that order, and how many to a row.
 ///
-/// Three things are chosen from it and they are not the same kind of thing:
-/// a zoom to go to, a rule for the view to keep, and how the magnified image
-/// is resampled. Undivided, the last of them read as a third fit. Eight
-/// numbers in fours, the two fits abreast, and two filters named in words
-/// rather than drawn as icons — the one pair of cells cut wider, and only
-/// because a word needs more room than a number.
-pub const ZOOM_SECTIONS: [(&str, usize, usize); 3] =
-    [("Zoom", 8, 4), ("Fit", 2, 2), ("Up-scaling", 2, 2)];
+/// Four things are chosen from it and they are not the same kind of thing:
+/// a zoom to go to, the zoom the picture is its own size at, a rule for the
+/// view to keep, and how the magnified image is resampled. Undivided, the
+/// last of them read as a third fit, and the print size as a ninth number
+/// that wears no number. Eight numbers in fours, the print size alone, the
+/// two fits abreast, and two filters named in words rather than drawn as
+/// icons — the print size and the filters cut wider, and only because a word
+/// needs more room than a number.
+pub const ZOOM_SECTIONS: [(&str, usize, usize); 4] = [
+    ("Zoom", 8, 4),
+    ("Physical", 1, 1),
+    ("Fit", 2, 2),
+    ("Up-scaling", 2, 2),
+];
 
 impl ZoomChoice {
     /// Whether this is what the view is already doing — `fit`, `zoom` and
     /// `upscale` being what it is doing — which is what lights the cell. A
     /// fit is only itself; a scale counts as matched when it is the zoom on
     /// screen and the view is not in a fit that happens to have landed there,
-    /// since pressing it would then mean something. A filter is always one of
-    /// the two, so one of that section's cells is always lit.
-    pub fn active(self, fit: Option<Fit>, zoom: f32, upscale: Upscale) -> bool {
+    /// since pressing it would then mean something. The print size is a
+    /// scale like the others, at `print`, the zoom it stands for where there
+    /// is one. A filter is always one of the two, so one of that section's
+    /// cells is always lit.
+    pub fn active(self, fit: Option<Fit>, zoom: f32, upscale: Upscale, print: Option<f32>) -> bool {
         match self {
             ZoomChoice::Scale(scale) => fit.is_none() && (zoom - scale).abs() < scale * 1e-3,
+            ZoomChoice::Print => {
+                print.is_some_and(|print| ZoomChoice::Scale(print).active(fit, zoom, upscale, None))
+            }
             ZoomChoice::Fit(fit_choice) => fit == Some(fit_choice),
             ZoomChoice::Filter(filter) => filter == upscale,
         }
     }
 
     /// Does what the cell says to `view`; a scale is zoomed to about
-    /// `anchor`, in window pixels, as [`View::set_zoom_at`] takes it.
-    pub fn apply(self, view: &mut View, anchor: [f32; 2], image: [f32; 2], viewport: Viewport) {
+    /// `anchor`, in window pixels, as [`View::set_zoom_at`] takes it, and the
+    /// print size is the scale `print`, where there is one.
+    pub fn apply(
+        self,
+        view: &mut View,
+        anchor: [f32; 2],
+        image: [f32; 2],
+        viewport: Viewport,
+        print: Option<f32>,
+    ) {
         match self {
             ZoomChoice::Scale(scale) => view.set_zoom_at(scale, anchor, image, viewport),
+            ZoomChoice::Print => {
+                if let Some(print) = print {
+                    view.set_zoom_at(print, anchor, image, viewport);
+                }
+            }
             ZoomChoice::Fit(fit) => view.set_fit(fit),
             ZoomChoice::Filter(filter) => view.set_upscale(filter),
         }
@@ -155,6 +185,7 @@ impl ZoomChoice {
     pub fn label(self) -> String {
         match self {
             ZoomChoice::Scale(scale) => percent(scale),
+            ZoomChoice::Print => "Print size".to_string(),
             ZoomChoice::Fit(Fit::Whole) => "Fit whole".to_string(),
             ZoomChoice::Fit(Fit::Fill) => "Fill".to_string(),
             ZoomChoice::Filter(filter) => filter.label().to_string(),
@@ -171,6 +202,7 @@ impl ZoomChoice {
     pub fn describe(self) -> String {
         match self {
             ZoomChoice::Scale(scale) => format!("Zoom to {}", percent(scale)),
+            ZoomChoice::Print => "Show at the size the file says it prints".to_string(),
             ZoomChoice::Fit(Fit::Whole) => "Fit the whole image".to_string(),
             ZoomChoice::Fit(Fit::Fill) => "Fill the window with the image".to_string(),
             ZoomChoice::Filter(Upscale::Nearest) => "Magnify to hard pixel edges".to_string(),
@@ -231,6 +263,7 @@ fn heading(pass: &Pass, ui: &mut Ui, title: &str, first: bool) {
 pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     let (fit, upscale) = (pass.view.fit(), pass.view.upscale());
+    let print = pass.input.print_zoom;
     let mut first = 0;
     for (index, (title, count, columns)) in ZOOM_SECTIONS.into_iter().enumerate() {
         heading(pass, ui, title, index == 0);
@@ -240,11 +273,19 @@ pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
             .spacing(vec2(MENU_GAP, MENU_GAP))
             .show(ui, |ui| {
                 for (place, choice) in choices.iter().enumerate() {
-                    let active = choice.active(fit, zoom, upscale);
+                    let active = choice.active(fit, zoom, upscale, print);
                     let response = match choice {
                         ZoomChoice::Scale(scale) => {
                             ui.add_sized(MENU_CELL, Button::new(percent(*scale)).selected(active))
                         }
+                        // Dead where the file or the monitor does not say
+                        // its size, and its tooltip says which.
+                        ZoomChoice::Print => ui.add_enabled(
+                            print.is_some(),
+                            egui::Button::new(choice.label())
+                                .selected(active)
+                                .min_size(vec2(MENU_WORD_CELL, MENU_CELL[1])),
+                        ),
                         // In marks, where the filters below are in words.
                         ZoomChoice::Fit(fit) => fit_cell(pass, ui, *fit, fills, active),
                         // The two filters are not a direction or a size, and
@@ -607,8 +648,9 @@ mod tests {
     fn section_of(choice: ZoomChoice) -> usize {
         match choice {
             ZoomChoice::Scale(_) => 0,
-            ZoomChoice::Fit(_) => 1,
-            ZoomChoice::Filter(_) => 2,
+            ZoomChoice::Print => 1,
+            ZoomChoice::Fit(_) => 2,
+            ZoomChoice::Filter(_) => 3,
         }
     }
 
@@ -619,19 +661,20 @@ mod tests {
     fn every_zoom_choice_lands_on_itself() {
         let image = [900.0, 600.0];
         let viewport = Viewport::whole(WINDOW);
+        let print = Some(1.37);
 
         for choice in ZOOM_CHOICES {
             let mut view = View::new();
-            choice.apply(&mut view, viewport.center(), image, viewport);
+            choice.apply(&mut view, viewport.center(), image, viewport, print);
             let (fit, zoom, upscale) = (view.fit(), view.zoom(image, viewport), view.upscale());
-            assert!(choice.active(fit, zoom, upscale), "{choice:?}");
+            assert!(choice.active(fit, zoom, upscale, print), "{choice:?}");
 
             for other in ZOOM_CHOICES {
                 if section_of(other) != section_of(choice) {
                     continue;
                 }
                 assert_eq!(
-                    other.active(fit, zoom, upscale),
+                    other.active(fit, zoom, upscale, print),
                     other == choice,
                     "{other:?} after {choice:?}"
                 );
@@ -640,6 +683,19 @@ mod tests {
                 assert!((view.zoom(image, viewport) - scale).abs() < 1e-4);
             }
         }
+    }
+
+    /// With no print size to go to, its cell leaves the view alone and is
+    /// never lit.
+    #[test]
+    fn no_print_size_is_no_zoom() {
+        let image = [900.0, 600.0];
+        let viewport = Viewport::whole(WINDOW);
+        let mut view = View::new();
+        ZoomChoice::Print.apply(&mut view, viewport.center(), image, viewport, None);
+        assert_eq!(view.fit(), View::new().fit());
+        let zoom = view.zoom(image, viewport);
+        assert!(!ZoomChoice::Print.active(view.fit(), zoom, view.upscale(), None));
     }
 
     /// The sections are [`ZOOM_CHOICES`] cut into three, and the cut has to
@@ -667,7 +723,7 @@ mod tests {
 
         // And the up-scaling section is exactly the filters on offer, in the
         // order the key cycles them.
-        let up_scaling = &ZOOM_CHOICES[ZOOM_CHOICES.len() - ZOOM_SECTIONS[2].1..];
+        let up_scaling = &ZOOM_CHOICES[ZOOM_CHOICES.len() - ZOOM_SECTIONS[3].1..];
         let filters: Vec<Upscale> = up_scaling
             .iter()
             .map(|choice| match choice {
@@ -689,7 +745,7 @@ mod tests {
             .iter()
             .filter_map(|choice| match choice {
                 ZoomChoice::Scale(scale) => Some(percent(*scale).len()),
-                ZoomChoice::Fit(_) | ZoomChoice::Filter(_) => None,
+                ZoomChoice::Print | ZoomChoice::Fit(_) | ZoomChoice::Filter(_) => None,
             })
             .max();
         assert_eq!(widest, Some("1600%".len()));

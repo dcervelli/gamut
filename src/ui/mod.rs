@@ -779,6 +779,10 @@ pub struct FrameInput {
     /// panels about the file on screen stop saying it, since it is on its
     /// way out, and wait for the file coming in.
     pub waiting: bool,
+    /// The zoom that shows the picture at the size the file says it prints
+    /// on the monitor the window is on, where the file says its density and
+    /// the monitor its size: what the zoom menu's print size goes to.
+    pub print_zoom: Option<f32>,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in

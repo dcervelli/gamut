@@ -25,6 +25,10 @@
 //! asked for. `xdg_output` says how large the output is in the logical pixels
 //! the compositor lays windows out in, and that with the mode is the scale it
 //! is really running.
+//!
+//! The `wl_output`'s geometry says how large the output is in millimeters,
+//! from the monitor's EDID, which over the same logical size is the density
+//! a picture is shown at the size it prints by.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -188,6 +192,9 @@ struct Output {
     scanned: Option<[u32; 2]>,
     transform: Transform,
     logical: Option<[u32; 2]>,
+    /// Its size in millimeters, as the panel is built: zero on a side the
+    /// monitor does not say.
+    physical: [i32; 2],
 }
 
 impl Output {
@@ -196,6 +203,12 @@ impl Output {
             device: device_size(self.scanned?, self.transform),
             logical: self.logical?,
         })
+    }
+
+    /// Its logical pixels to the millimeter — see [`super::density`].
+    fn density(&self) -> Option<[f64; 2]> {
+        let mm = device_size(self.physical.map(|side| side.max(0) as u32), self.transform);
+        super::density(self.logical?, mm.map(f64::from))
     }
 }
 
@@ -254,6 +267,11 @@ impl Listener {
                 })
                 .collect(),
             rooms: self.outputs.iter().filter_map(Output::room).collect(),
+            densities: self
+                .outputs
+                .iter()
+                .filter_map(|output| Some((output.name.clone()?, output.density()?)))
+                .collect(),
         };
         let Ok(mut shared) = self.table.lock() else {
             return;
@@ -295,6 +313,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Listener {
                         scanned: None,
                         transform: Transform::Normal,
                         logical: None,
+                        physical: [0, 0],
                     });
                     state.subscribe(handle);
                 }
@@ -353,9 +372,14 @@ impl Dispatch<wl_output::WlOutput, u32> for Listener {
                     .map(|(width, height)| [width, height]);
             }
             wl_output::Event::Geometry {
+                physical_width,
+                physical_height,
                 transform: WEnum::Value(transform),
                 ..
-            } => output.transform = transform,
+            } => {
+                output.transform = transform;
+                output.physical = [physical_width, physical_height];
+            }
             _ => return,
         }
         state.publish();

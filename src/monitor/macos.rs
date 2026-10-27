@@ -13,11 +13,22 @@ use std::sync::{Arc, Mutex};
 use objc2::MainThreadMarker;
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSScreen;
-use objc2_foundation::{NSNumber, NSRect, NSString};
+use objc2_foundation::{NSNumber, NSRect, NSSize, NSString};
 use winit::monitor::MonitorHandle;
 use winit::platform::macos::MonitorHandleExtMacOS as _;
 
 use super::{Mode, Monitors, Room, Table};
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    /// The display's size in millimeters; `NSSize` is `CGSize` by another
+    /// name.
+    fn CGDisplayScreenSize(display: u32) -> NSSize;
+}
+
+/// The pixels to the millimeter Core Graphics assumes — 72 to the inch — for
+/// a display whose EDID gives no size, which it then makes one up from.
+const GUESSED_PER_MM: f64 = 72.0 / 25.4;
 
 /// The key the table knows `monitor` by: the display's Core Graphics
 /// identifier, which winit and `NSScreen` both carry and which, unlike its
@@ -85,9 +96,10 @@ fn read() -> Option<Table> {
     autoreleasepool(|_| {
         let mut table = Table::default();
         for screen in NSScreen::screens(main).iter() {
-            let Some(key) = identifier(&screen) else {
+            let Some(display) = display_id(&screen) else {
                 continue;
             };
+            let key = display.to_string();
             let potential = screen.maximumPotentialExtendedDynamicRangeColorComponentValue();
             let now = screen.maximumExtendedDynamicRangeColorComponentValue();
             let mode = if potential > 1.0 {
@@ -96,14 +108,18 @@ fn read() -> Option<Table> {
                 Mode::Sdr
             };
             table.modes.insert(key.clone(), mode);
-            table.headrooms.insert(key, in_steps(now));
+            table.headrooms.insert(key.clone(), in_steps(now));
             let frame = screen.frame();
             let scale = screen.backingScaleFactor();
             let logical = [frame.size.width, frame.size.height];
-            table.rooms.push(Room {
+            let room = Room {
                 device: logical.map(|side| (side * scale).round() as u32),
                 logical: logical.map(|side| side.round() as u32),
-            });
+            };
+            table.rooms.push(room);
+            if let Some(density) = density(display, room) {
+                table.densities.insert(key, density);
+            }
         }
         Some(table)
     })
@@ -125,14 +141,37 @@ fn in_steps(headroom: f64) -> f32 {
     stops.exp2() as f32
 }
 
-/// A screen's Core Graphics identifier, as [`key_of`] writes it.
-fn identifier(screen: &NSScreen) -> Option<String> {
+/// The display's logical pixels to the millimeter — see
+/// [`super::density`] — where Core Graphics read its size rather than made
+/// one up: a size that comes out at 72 to the inch of either its points or
+/// its pixels is the one it makes up.
+fn density(display: u32, room: Room) -> Option<[f64; 2]> {
+    // SAFETY: a plain C function of a display number, which answers zero
+    // for a number that is no display.
+    let size = unsafe { CGDisplayScreenSize(display) };
+    let mm = [size.width, size.height];
+    let guessed = [room.logical, room.device].iter().any(|pixels| {
+        (0..2).all(|axis| (f64::from(pixels[axis]) / GUESSED_PER_MM - mm[axis]).abs() < 1.0)
+    });
+    if guessed {
+        return None;
+    }
+    super::density(room.logical, mm)
+}
+
+/// A screen's Core Graphics identifier.
+fn display_id(screen: &NSScreen) -> Option<u32> {
     let number = screen
         .deviceDescription()
         .objectForKey(&NSString::from_str("NSScreenNumber"))?
         .downcast::<NSNumber>()
         .ok()?;
-    Some(number.unsignedIntValue().to_string())
+    Some(number.unsignedIntValue())
+}
+
+/// The same, as [`key_of`] writes it.
+fn identifier(screen: &NSScreen) -> Option<String> {
+    display_id(screen).map(|display| display.to_string())
 }
 
 #[cfg(test)]

@@ -269,7 +269,7 @@ fn view(b: &mut Builder) -> Vec<Node> {
         .map(|choice| {
             let key = match choice {
                 ZoomChoice::Scale(scale) => Some(Action::ZoomTo(*scale)),
-                ZoomChoice::Fit(_) | ZoomChoice::Filter(_) => None,
+                ZoomChoice::Print | ZoomChoice::Fit(_) | ZoomChoice::Filter(_) => None,
             };
             b.control(&choice.label(), Control::ZoomTo(*choice), key)
         })
@@ -741,7 +741,12 @@ impl App {
                 Control::ZoomTo(choice) => {
                     let zoom = self.view.zoom(self.image_size(), self.viewport());
                     (current.is_some() || matches!(choice, ZoomChoice::Filter(_)))
-                        && choice.active(self.view.fit(), zoom, self.view.upscale())
+                        && choice.active(
+                            self.view.fit(),
+                            zoom,
+                            self.view.upscale(),
+                            self.print_zoom(),
+                        )
                 }
                 Control::Reading(reading) => {
                     current.is_some_and(|current| Reading::of(&current.image) == reading)
@@ -822,7 +827,7 @@ fn about_picture(does: Does) -> bool {
                 | Action::StepBlack(_)
                 | Action::StepWhite(_)
         ) | Does::Control(
-            Control::ZoomTo(ZoomChoice::Scale(_) | ZoomChoice::Fit(_))
+            Control::ZoomTo(ZoomChoice::Scale(_) | ZoomChoice::Print | ZoomChoice::Fit(_))
                 | Control::Window(_)
                 | Control::Curve(_)
                 | Control::Ramp(_)

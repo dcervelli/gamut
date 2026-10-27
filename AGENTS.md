@@ -213,10 +213,12 @@ no_replace.rs  rename_no_replace(): a rename that refuses rather than replace wh
 trash/         the desktop's trash: mod.rs Refused; freedesktop.rs the Linux trash by the
                specification — put() moves a file into it and says which Entry it became,
                restore() moves that entry back — and the tests' on both; macos.rs Finder's
-monitor/       what each monitor is, SDR or HDR and how large in logical pixels: mod.rs
-               Monitors, the table the platform fills, and key_of(), what it is keyed by;
-               wayland.rs the compositor's answer, over a Wayland connection of its own;
-               macos.rs NSScreen's, read on the main thread each time it is asked
+monitor/       what each monitor is, SDR or HDR, how large in logical pixels, and how many
+               of them to the millimeter: mod.rs Monitors, the table the platform fills,
+               key_of(), what it is keyed by, and density(), the check every size is
+               believed through; wayland.rs the compositor's answer, over a Wayland
+               connection of its own; macos.rs NSScreen's and Core Graphics', read on the
+               main thread each time it is asked
 clipboard/     putting text or a file: URI on the clipboard, and reading a pasted picture
                off it: mod.rs the types, IMAGE_TYPES and the thread that watches for a
                picture; wayland.rs the selection, held by a process that outlives the window;
@@ -386,6 +388,7 @@ still agrees with both, so renaming either is editing the constant —
 | Where a georeferenced file lands beside another | `app/ground.rs::aligned` for the view — what overlapping is and what lines up — and `Georeference::shares_system` for which two systems are one; `App::on_the_same_ground` gathers the two placements in `App::apply`, where a step to another file takes its view ahead of `arriving_view`, and in `App::standin`, from the georeference the header pass put in `thumbnailer::Facts` |
 | What moves the moment a step is asked for, and what waits for the file | `Files::target` is the file last asked for, which the count, the file list's highlight, the bar's name (`FrameInput::arriving`) and the title read, and `App::send` owes the frame for; `App::arriving` is what makes the controls acting on the file dead meanwhile (`Reasons::arriving`), what clears the bars' words about the file (the top bar's facts, `status::state_words`, the camera switch), and what makes the transport bar the arriving file's (`App::arriving_transport`). `files::SLOW_READ` is when the picture leaves the screen — `App::replacing` — for `App::standin` and the panels' `FrameInput::waiting`; `App::predicted_slow`, from `App::read_rates`, announces a read at once; `App::arrived_in` notes the rate and asks for the neighbors' thumbnails |
 | Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION`. The drag and the wheel themselves arrive from `ui::show` as `Command::Drag` and `Command::Wheel`, off the picture's own response in `Pass::picture` |
+| The print size: the zoom at which the file's inch is an inch on the monitor | `App::print_zoom` for the zoom, from `Exif::density` and `App::surface_density`; `monitor::density` for which monitor sizes are believed, filled by `monitor/wayland.rs` and `monitor/macos.rs`; `ZoomChoice::Print` for the cell, its dead reasons in `ui/tooltip.rs::disabled` from `Conditions::{density, monitor_size}` |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display/mod.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
 | Where the pointer's pixel is on the ground, for a georeferenced file | `image/geo.rs::Georeference` for the placement and the lift to latitude and longitude, read in `image/exif.rs` beside the panel's rows and carried on `Exif::georeference`; `ui/pixel.rs` for `CoordinateFormat`, `GeographicFormat` and how each is written, `CoordinateFormat::offered` being the one reading of what a file can answer that the menu, the key and the `When` conditions share |
 | What the window says about something that just happened | `ui/toast.rs` for how long it stays and how it is drawn, `App::toast` to raise one, and `App::poll_copies` for the copies that only know how they went once their thread is done |

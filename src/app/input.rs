@@ -444,6 +444,8 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::ZoomTo(ZoomChoice::Scale(scale))) => ZoomTo(scale),
         Tip::Control(Control::ZoomTo(ZoomChoice::Fit(_))) => CycleFit,
         Tip::Control(Control::ZoomTo(ZoomChoice::Filter(_))) => CycleUpscale,
+        // The print size has no key: it wears its own words.
+        Tip::Control(Control::ZoomTo(ZoomChoice::Print)) => return None,
         Tip::Control(Control::Format(_)) => CyclePixelFormat,
         Tip::Control(Control::Coordinates(_)) => CycleCoordinates,
         Tip::Control(Control::Geographic(_)) => CycleGeographicFormat,
@@ -2735,6 +2737,8 @@ impl App {
             nothing_open: current.is_none(),
             arriving: self.arriving().is_some(),
             tags_in: self.tags.tags_in(),
+            density: current.is_some_and(|current| current.exif.density.is_some()),
+            monitor_size: self.surface_density().is_some(),
         }
     }
 
@@ -3612,7 +3616,10 @@ impl App {
             // A cell of the zoom menu: a zoom chosen here is a move.
             Control::ZoomTo(choice) => {
                 let anchor = self.zoom_anchor();
-                self.animate(|view, image, viewport| choice.apply(view, anchor, image, viewport));
+                let print = self.print_zoom();
+                self.animate(|view, image, viewport| {
+                    choice.apply(view, anchor, image, viewport, print);
+                });
                 Effect::Redraw
             }
             Control::Format(format) => {

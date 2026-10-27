@@ -5511,3 +5511,50 @@ fn the_horizon_grid_takes_a_heading_alone() {
     assert_eq!(app.perform(Action::CycleHorizonStep), Effect::Nothing);
     assert_eq!(app.panels.horizon_step, 10.0);
 }
+
+/// The print size is the zoom that makes the file's inch an inch on the
+/// monitor: dead, saying why, until the file says its density and the
+/// monitor its size, and then a press that goes there.
+#[test]
+fn the_print_size_needs_the_file_and_the_monitor_to_say_their_sizes() {
+    use crate::image::density::Density;
+    use crate::ui::Naming;
+    use crate::ui::menu::ZoomChoice;
+
+    let (mut app, _dir) = app_over("print", &[("a.png", 300, 200)]);
+    let print = ui::Control::ZoomTo(ZoomChoice::Print);
+    let said = |app: &App| {
+        app.namer()
+            .tooltip(ui::Tip::Control(print))
+            .map(|tooltip| tooltip.title)
+    };
+    assert_eq!(app.press(print), Effect::Nothing);
+    assert_eq!(
+        said(&app),
+        Some(vec!["This file doesn't say its print size.".to_string()])
+    );
+
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([100.0, 100.0], 25.4);
+    assert_eq!(app.print_zoom(), None);
+    assert_eq!(app.press(print), Effect::Nothing);
+    assert_eq!(
+        said(&app),
+        Some(vec![
+            "This display doesn't report its physical size.".to_string()
+        ])
+    );
+
+    let monitors = Monitors::stub(true);
+    monitors.set_density("DP-1", 4.0);
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("DP-1".to_string());
+    let zoom = app.print_zoom().expect("both say their sizes");
+    assert!((zoom - 4.0 * 25.4 / 100.0).abs() < 1e-5, "{zoom}");
+    assert_eq!(app.press(print), Effect::Redraw);
+    assert!((app.view.zoom(app.image_size(), app.viewport()) - zoom).abs() < 1e-5);
+    assert_eq!(said(&app), Some(vec![ZoomChoice::Print.describe()]));
+}

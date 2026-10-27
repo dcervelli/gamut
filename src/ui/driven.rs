@@ -166,6 +166,7 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         standin: None,
         thumb: None,
         waiting: false,
+        print_zoom: None,
     }
 }
 

@@ -17,7 +17,7 @@ use super::Room;
 use super::control::Control;
 use super::histogram::WINDOWS;
 use super::info::Copyable;
-use super::menu::{self, Copies};
+use super::menu::{self, Copies, ZoomChoice};
 use super::tags::{Fold, Tab, Table};
 use crate::image::sensor::Demosaic;
 
@@ -211,6 +211,11 @@ pub const GAIN_MAP_FROM_PROFILE: &str = "The gain map is calculated from the cam
 /// histogram's Profile section, which is not drawn for such a file.
 pub const NO_PROFILE: &str = "This file carries no camera profile.";
 
+/// What the zoom menu's print size says while it is dead: the file does not
+/// say how many of its pixels go to an inch, or the monitor how large it is.
+const NO_DENSITY: &str = "This file doesn't say its print size.";
+const NO_MONITOR_SIZE: &str = "This display doesn't report its physical size.";
+
 /// What the Raw Data tab's copy button says while there are no tags to
 /// copy: exiftool is not there, is reading the file, or could not.
 pub const NO_TAGS: &str = "No tags to copy.";
@@ -352,6 +357,11 @@ pub struct Conditions {
     /// Whether exiftool's tags for the file on screen are in, which is what
     /// the Raw Data tab's copy button copies.
     pub tags_in: bool,
+    /// Whether the file on screen says how many of its pixels go to an
+    /// inch, and whether the monitor the window is on says how large it is:
+    /// the two the print size needs.
+    pub density: bool,
+    pub monitor_size: bool,
 }
 
 impl Default for Conditions {
@@ -393,6 +403,8 @@ impl Default for Conditions {
             nothing_open: true,
             arriving: false,
             tags_in: false,
+            density: false,
+            monitor_size: false,
         }
     }
 }
@@ -442,6 +454,8 @@ impl Conditions {
         nothing_open: false,
         arriving: false,
         tags_in: true,
+        density: true,
+        monitor_size: true,
     };
 }
 
@@ -496,6 +510,8 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         heading,
         located,
         geographic,
+        density,
+        monitor_size,
         ..
     } = conditions;
     let said = |said| Some(Refused { said, hint: None });
@@ -538,6 +554,14 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
     }
     if tip == Tip::Control(Control::OpenMapBounds) && !geographic {
         return said(NO_BOUNDS);
+    }
+    if tip == Tip::Control(Control::ZoomTo(ZoomChoice::Print)) {
+        if !density {
+            return said(NO_DENSITY);
+        }
+        if !monitor_size {
+            return said(NO_MONITOR_SIZE);
+        }
     }
     if tip == Tip::Control(Control::Profile) && !profile {
         return said(NO_PROFILE);

@@ -8,6 +8,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- **Print size** in the zoom menu shows the picture at the size the file
+  says it prints, on the display the window is on, from the density the
+  file gives and the physical size the display reports. Resting on it while
+  it is dead says which of the two is missing.
 - Stepping between two georeferenced files in the same coordinate system
   lines them up on the ground: when the file arriving covers any of the
   ground on screen, that ground stays in the middle of the window at the

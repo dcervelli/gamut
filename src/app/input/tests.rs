@@ -622,9 +622,11 @@ fn a_menu_cell_is_named_in_its_own_words_and_by_the_key_that_reaches_it() {
     assert_eq!(named(ZOOM_CHOICES[4]).as_deref(), Some("Zoom to 200% (2)"));
     assert_eq!(named(ZOOM_CHOICES[7]).as_deref(), Some("Zoom to 1600% (5)"));
 
+    // The print size has no key yet, and so names itself alone.
     for choice in ZOOM_CHOICES {
         let words = named(choice).unwrap_or_else(|| panic!("{choice:?} is named"));
-        assert!(words.ends_with(')'), "{words} says what to press");
+        let keyed = choice != ZoomChoice::Print;
+        assert_eq!(words.ends_with(')'), keyed, "{words} says what to press");
     }
 }
 

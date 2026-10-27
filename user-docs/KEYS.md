@@ -1156,7 +1156,7 @@ at that edge.
 | Click or drag the exposure's slider | Set the exposure to the quarter stop under the pointer | |
 | Wheel over the file information | Scroll it | |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle | |
-| Click the zoom percentage | Open the zoom menu: scale, fit and the magnification filter | |
+| Click the zoom percentage | Open the zoom menu: scale, print size, fit and the magnification filter | |
 | Click the dot beside the grid button | Choose how a pixel's value is read out | |
 | Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
 | Click the camera button reading **RAW** or **JPEG**, near the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
@@ -1174,8 +1174,15 @@ while the menu is open, so there would be no pixel under it to copy. Pressing
 anywhere outside the menu, or `Esc`, closes it without copying anything.
 
 The percentage in the top bar, just inside the button that hides the
-interface, is itself a button. Pressing it opens a menu hanging under it, under three headings.
-**Zoom** is 10% through 1600%. **Fit** is the two fits — the whole image, or
+interface, is itself a button. Pressing it opens a menu hanging under it, under four headings.
+**Zoom** is 10% through 1600%. **Physical** holds **Print size**, which shows
+the picture at the size the file says it prints, on the display the window is
+on: an inch of the print is an inch of the glass. It needs the file to say how
+many pixels go to an inch, as the info panel's *Density* row shows, and the
+display to report how large it is, which most do; resting on a dead **Print
+size** says which is missing. A display that misreports its size — some
+televisions and projectors do — shows the print at the wrong size. A window
+straddling two displays is sized for the one holding most of it. **Fit** is the two fits — the whole image, or
 the window filled by it. The chevrons on the second point the way it fills,
 across the window or down it, which follows the shape of the image.
 **Up-scaling** is the filter the image is magnified with, `Nearest` or
