@@ -5556,5 +5556,6 @@ fn the_print_size_needs_the_file_and_the_monitor_to_say_their_sizes() {
     assert!((zoom - 4.0 * 25.4 / 100.0).abs() < 1e-5, "{zoom}");
     assert_eq!(app.press(print), Effect::Redraw);
     assert!((app.view.zoom(app.image_size(), app.viewport()) - zoom).abs() < 1e-5);
-    assert_eq!(said(&app), Some(vec![ZoomChoice::Print.describe()]));
+    let named = said(&app).expect("named").concat();
+    assert!(named.starts_with(&ZoomChoice::Print.describe()), "{named}");
 }

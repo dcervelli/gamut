@@ -904,7 +904,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 107, "{uncommented}");
+        assert_eq!(keys, 108, "{uncommented}");
         // A Mac's three more: the scroll, the scroll with Command, and the
         // pinch.
         let slots = if cfg!(target_os = "macos") { 13 } else { 10 };

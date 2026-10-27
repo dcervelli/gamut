@@ -83,6 +83,9 @@ pub enum Action {
     /// Go to this zoom, or from it back to the whole image — see
     /// [`View::toggle_zoom`](crate::view::View::toggle_zoom).
     ToggleZoom(f32),
+    /// Go to the zoom that shows the picture at the size it prints — see
+    /// [`App::print_zoom`].
+    PrintSize,
     Pan(Direction, PanStep),
     /// Move the region's current handle a pixel that way — the whole of it,
     /// while that is the middle. Nothing without a region, as for the two
@@ -444,8 +447,7 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::ZoomTo(ZoomChoice::Scale(scale))) => ZoomTo(scale),
         Tip::Control(Control::ZoomTo(ZoomChoice::Fit(_))) => CycleFit,
         Tip::Control(Control::ZoomTo(ZoomChoice::Filter(_))) => CycleUpscale,
-        // The print size has no key: it wears its own words.
-        Tip::Control(Control::ZoomTo(ZoomChoice::Print)) => return None,
+        Tip::Control(Control::ZoomTo(ZoomChoice::Print)) => PrintSize,
         Tip::Control(Control::Format(_)) => CyclePixelFormat,
         Tip::Control(Control::Coordinates(_)) => CycleCoordinates,
         Tip::Control(Control::Geographic(_)) => CycleGeographicFormat,
@@ -918,6 +920,14 @@ pub static ROWS: &[Row] = &[
                 defaults: &[digit(SHIFT, KeyCode::Digit4)],
             },
         ]),
+    },
+    // Beside `0`, which is a pixel to a pixel, Shift+`0` is an inch to an
+    // inch.
+    Row {
+        section: Section::Zoom,
+        when: None,
+        help: "Print size, the file's inch an inch on the screen",
+        keys: one!("zoom.print", PrintSize, [digit(SHIFT, KeyCode::Digit0)]),
     },
     Row {
         section: Section::Zoom,
@@ -2225,6 +2235,8 @@ impl App {
                     view.toggle_zoom(scale, anchor, image, viewport);
                 });
             }
+            // The menu's cell, so that the two are refused alike.
+            PrintSize => return self.press(Control::ZoomTo(ZoomChoice::Print)),
             Pan(direction, step) => {
                 let sign = direction.sign();
                 match step.pixels() {
