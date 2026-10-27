@@ -8,6 +8,12 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- Keys for the file list's order: `O` opens the sort menu, even with the
+  list hidden, and while it is open a letter chooses each sort: `n` name,
+  `p` path, `e` type, `m` modified, `t` captured, `s` size, `w` width,
+  `h` height, `a` area. Each letter appears beside its sort in the menu.
+  `R` reverses the order, with or without the menu.
+
 - The top bar gives the folder the file is in after its name, dimmed:
   *photo.png · ~/Pictures/2026*. When the bar runs short of room the
   folder is shortened in the middle, keeping the folder nearest the file,

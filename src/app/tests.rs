@@ -3471,7 +3471,7 @@ fn the_messages_name_the_key_that_undoes() {
             &winit::keyboard::Key::Character("z".into()),
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ),
             winit::keyboard::ModifiersState::CONTROL,
-            false
+            &[]
         ),
         Some(Action::Undo),
         "the plain letter under Ctrl"

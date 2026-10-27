@@ -2208,6 +2208,7 @@ impl App {
             aspect: self.marking.aspect,
             transport: self.transport(),
             filmstrip,
+            order: self.filmstrip.order(),
             side: self.side_showing(),
             chooser,
             tags,
@@ -3811,11 +3812,13 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput { event: key, .. }
                 if key.state == winit::event::ElementState::Pressed =>
             {
-                let region = matches!(self.marking.selection, ui::Selection::Shown(_));
                 let logical = input::logical_key(key, self.pointer.modifiers);
-                self.keys
-                    .action_for(&logical, key.physical_key, self.pointer.modifiers, region)
-                    == Some(input::Action::OpenChooser)
+                self.keys.action_for(
+                    &logical,
+                    key.physical_key,
+                    self.pointer.modifiers,
+                    &self.holding(),
+                ) == Some(input::Action::OpenChooser)
             }
             _ => false,
         };

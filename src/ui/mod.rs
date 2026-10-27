@@ -732,6 +732,9 @@ pub struct FrameInput {
     /// not — which is what decides whether the panel is there, and so
     /// where the picture starts.
     pub filmstrip: Option<filmstrip::Input>,
+    /// The order the list is in, which the menu of sorts is lit against
+    /// whether or not the list is up.
+    pub order: filmstrip::Order,
     /// The side panel, on every frame it is up, and `None` while it is not:
     /// asked for, with room for what it holds, and something open.
     pub side: Option<side::Side>,
@@ -849,6 +852,12 @@ pub fn show(
     // file has been read.
     if let Some(chooser) = &input.chooser {
         chooser::show(&mut pass, ui, chooser);
+    }
+    // The menu of sorts with no bars to hang from, at the corner of the
+    // picture the list's head would be beside.
+    if !panels.show_ui {
+        let corner = egui::pos2(pass.content.x + PADDING, pass.content.y + PADDING);
+        filmstrip::loose_sort_menu(&mut pass, ui, corner.into(), 0.0);
     }
     // And the keys, which are the same whatever is on screen.
     help::show(&mut pass, ui);

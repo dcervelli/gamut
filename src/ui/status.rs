@@ -12,7 +12,8 @@ use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
 use super::{
-    COUNTER_GAP, Current, TEXT_SIZE, capitalized, filmstrip, fonts, histogram, icon, menu,
+    COUNTER_GAP, Current, MENU_OFFSET, TEXT_SIZE, capitalized, filmstrip, fonts, histogram, icon,
+    menu,
 };
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
@@ -156,7 +157,7 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
     if let Some(counter) = counter(pass.input.index, pass.input.count) {
         // Before the pair: the list they step through, laid out down the
         // side of the window, and this the toggle that puts it there.
-        pass.toggle(
+        let toggle = pass.toggle(
             ui,
             icon::PANEL_LEFT,
             Control::Filmstrip,
@@ -164,6 +165,12 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
             true,
             Corners::All,
         );
+        // The menu of sorts, while the list whose head it hangs from is
+        // down: from the toggle that would put the list up, as the menu
+        // that list would wear.
+        if pass.parts.filmstrip.is_none() {
+            filmstrip::loose_sort_menu(pass, ui, (&toggle).into(), MENU_OFFSET);
+        }
         ui.add_space(COUNTER_GAP);
         pass.toggle(
             ui,

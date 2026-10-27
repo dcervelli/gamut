@@ -427,8 +427,13 @@ pub(super) fn titled(
 /// set apart, the two ways the sort can run, the one in force lit.
 pub(super) fn sort_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
     titled(pass, ui, &Control::Sorting.label(), |pass, ui| {
+        // Each with the key that does the same while the menu is open.
         let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
-            let response = ui.add(Button::new(control.label()).selected(active));
+            let mut button = Button::new(control.label()).selected(active);
+            if let Some(key) = pass.namer.shortcut(control) {
+                button = button.shortcut_text(key);
+            }
+            let response = ui.add(button);
             let response = pass.tooltip(response, Tip::Control(control));
             if response.clicked() {
                 pass.press(control);

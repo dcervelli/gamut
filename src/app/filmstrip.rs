@@ -223,7 +223,6 @@ impl Filmstrip {
             slot: self.slot,
             listing: self.listing,
             current,
-            order: self.order,
             back,
             forward,
             reveal: std::mem::take(&mut self.reveal),

@@ -256,6 +256,14 @@ impl Direction {
             .into_iter()
             .find(|direction| direction.word() == word)
     }
+
+    /// The other way round.
+    pub fn reversed(self) -> Direction {
+        match self {
+            Direction::Ascending => Direction::Descending,
+            Direction::Descending => Direction::Ascending,
+        }
+    }
 }
 
 /// One key of an order: what is sorted by, and which way.
@@ -386,8 +394,6 @@ pub struct Input {
     pub listing: u64,
     /// Which row is the file on screen, if it is in the list.
     pub current: Option<usize>,
-    /// The order in force, which the menus are lit against.
-    pub order: Order,
     /// Whether there is a file seen before this one to go back to, and one
     /// seen after it to go forward to: what the pair at the head answers.
     pub back: bool,
@@ -506,6 +512,27 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     rows(pass, ui, input);
 }
 
+/// The id the menu of sorts is open under: its button's at the list's head,
+/// which the key opens it under too, wherever it is hung from.
+pub fn sort_menu_id() -> egui::Id {
+    Pass::menu_id(Control::Sorting)
+}
+
+/// The menu of sorts while the list's head is not on screen to hang it
+/// from, which only the key opens: hung below `anchor` instead, and drawn
+/// on every frame it is open, as a popup not drawn is a popup egui closes.
+pub(super) fn loose_sort_menu(pass: &mut Pass, ui: &egui::Ui, anchor: egui::PopupAnchor, gap: f32) {
+    let order = pass.input.order;
+    egui::Popup::new(sort_menu_id(), ui.ctx().clone(), anchor, ui.layer_id())
+        .open_memory(None)
+        .kind(egui::PopupKind::Menu)
+        .layout(Layout::top_down_justified(Align::Min))
+        .style(egui::containers::menu::menu_style)
+        .align(RectAlign::BOTTOM_START)
+        .gap(gap)
+        .show(|ui| menu::sort_cells(pass, ui, order));
+}
+
 /// The head: the menu of sorts, and the pair that go back and forward
 /// through the files seen, on one row a bar high with a hairline under it.
 fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
@@ -520,11 +547,11 @@ fn head(pass: &mut Pass, ui: &mut egui::Ui, input: &Input) {
     // The menu first, lit while it is open, as the other menu buttons are,
     // and hung below. The button wears the way the sort runs: bars growing
     // down the mark for ascending, shrinking for descending.
-    let mark = match input.order.direction {
+    let mark = match pass.input.order.direction {
         Direction::Ascending => icon::ARROW_DOWN_NARROW_WIDE,
         Direction::Descending => icon::ARROW_DOWN_WIDE_NARROW,
     };
-    let order = input.order;
+    let order = pass.input.order;
     pass.menu_button(
         &mut row,
         mark,
@@ -755,11 +782,11 @@ fn file(
     // label centered across the foot of the slot, a little way up it, on
     // a rounded wash of the bar's ground just wide enough for its words,
     // so that the picture shows round it.
-    if let Some(value) = known.sorted_by(input.order.sort, path) {
+    if let Some(value) = known.sorted_by(pass.input.order.sort, path) {
         let ink: egui::Color32 = theme.text_primary.into();
         let font = egui::FontId::proportional(VALUE_SIZE);
         let room = (slot.width() - 2.0 * VALUE_PAD_X).max(0.0);
-        let value = match input.order.sort {
+        let value = match pass.input.order.sort {
             // A folder keeps its last part, the one its files are in.
             Sort::Path => {
                 let last = value.rsplit('/').next().unwrap_or_default();

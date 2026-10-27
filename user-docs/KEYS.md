@@ -133,6 +133,9 @@ on screen, since there is then nowhere to pan to.
 | `End` | Last file | `files.last` |
 | `Ctrl+P` | Choose a file from the list: type to filter it, arrows to move, `Enter` to open, `Esc` to close | `files.chooser` |
 | `Tab` | Show or hide the file list down the left of the picture | `files.list` |
+| `O` (`Shift+O`) | Open the sort menu, or close it | `files.sort` |
+| `n`, `p`, `e`, `m`, `t`, `s`, `w`, `h`, `a`, while the sort menu is open | Sort by name, path, type, modified date, capture date, size, width, height, area | `files.sort.name`, `files.sort.path`, `files.sort.type`, `files.sort.modified`, `files.sort.taken`, `files.sort.size`, `files.sort.width`, `files.sort.height`, `files.sort.area` |
+| `R` (`Shift+R`) | Reverse file list sort order | `files.sort.reverse` |
 | `Alt+Left`, `Alt+[`, `Alt+Page Up` | Back in image history | `files.back` |
 | `Alt+Right`, `Alt+]`, `Alt+Page Down` | Forward in image history | `files.forward` |
 | `Ctrl+O` | Open image files chosen in the desktop's file dialog | `files.open` |
@@ -225,7 +228,14 @@ the strip shows. Files a sort cannot tell apart go by the sort chosen
 before it, so sorting by size and then by kind leaves each kind in size
 order, the way sorting a spreadsheet twice does, and the list stays that
 way across restarts and as files arrive. Choosing the earlier sort again
-swaps the two. Resting the pointer on the button says both. Whatever both
+swaps the two. Resting the pointer on the button says both.
+
+`O` opens the same menu from the keyboard, whether or not the list is up:
+from the list's button when it is, and otherwise from the file list button
+in the top bar, or from the corner of the picture when the bars are hidden.
+While the menu is open, the letter beside each sort chooses it, and every
+other key does what it always does. `R` reverses the order with the menu
+open or closed. Whatever both
 leave tied goes by folder and then by name. Sorting by path sorts by
 folder alone, a folder's own files before its subfolders', so sorting by
 capture date and then by path leaves each folder in capture order. The kind of a file, its size, its dates
