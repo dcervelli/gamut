@@ -25,6 +25,7 @@
 //! the terminal and in the window, and skipped, the rest still taken; the state file is ours,
 //! so a line in it that does not read is only dropped.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
@@ -440,7 +441,7 @@ impl Config {
 }
 
 /// What the program keeps for itself from one run to the next.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct State {
     /// The width each of the file list's thumbnails is fitted into, in
     /// logical pixels, which the panel's own width is made from.
@@ -468,6 +469,10 @@ pub struct State {
     pub geographic_format: GeographicFormat,
     /// Whether the folder dialog's box for subfolders was last left ticked.
     pub include_subfolders: bool,
+    /// The size each model of monitor was measured at by hand, in
+    /// millimeters across and down, by the word `monitor::Screen::model`
+    /// makes of it: one `display.<model> = <across>x<down>` line each.
+    pub displays: BTreeMap<String, [f64; 2]>,
 }
 
 impl Default for State {
@@ -484,8 +489,29 @@ impl Default for State {
             pixel_format: PixelFormat::default(),
             coordinate_format: CoordinateFormat::default(),
             geographic_format: GeographicFormat::default(),
+            displays: BTreeMap::new(),
         }
     }
+}
+
+/// What starts a line of the state file that gives a monitor's size: the
+/// rest of its name is the model.
+const DISPLAY: &str = "display.";
+
+/// The largest side a monitor measured by hand is believed at, in
+/// millimeters: a wall a projector lights, and then some.
+const DISPLAY_MAX_MM: f64 = 10_000.0;
+
+/// A monitor's size as its line writes it: `597.3x336`.
+fn display_size(value: &str) -> Option<[f64; 2]> {
+    let (across, down) = value.split_once('x')?;
+    let mm = [
+        across.trim().parse::<f64>().ok()?,
+        down.trim().parse::<f64>().ok()?,
+    ];
+    mm.iter()
+        .all(|side| side.is_finite() && *side > 0.0 && *side <= DISPLAY_MAX_MM)
+        .then_some(mm)
 }
 
 /// One line of the state file: its name, and the field it is, written as
@@ -627,6 +653,12 @@ impl State {
             if let Some(kept) = KEPT.iter().find(|kept| kept.name == name) {
                 (kept.set)(&mut state, value);
             }
+            if let Some(model) = name.strip_prefix(DISPLAY)
+                && !model.is_empty()
+                && let Some(mm) = display_size(value)
+            {
+                state.displays.insert(model.to_string(), mm);
+            }
         }
         state
     }
@@ -638,6 +670,9 @@ impl State {
         );
         for kept in &KEPT {
             text.push_str(&format!("{} = {}\n", kept.name, (kept.get)(self)));
+        }
+        for (model, [across, down]) in &self.displays {
+            text.push_str(&format!("{DISPLAY}{model} = {across:.2}x{down:.2}\n"));
         }
         text
     }
@@ -685,7 +720,7 @@ impl StateFile {
     }
 
     pub fn state(&self) -> State {
-        self.loaded
+        self.loaded.clone()
     }
 
     /// Writes `state` back where it was read from, where it differs from
@@ -1102,8 +1137,29 @@ mod tests {
             pixel_format: PixelFormat::Depth,
             coordinate_format: CoordinateFormat::Geographic,
             geographic_format: GeographicFormat::Dms,
+            displays: BTreeMap::from([
+                ("Dell-Inc.-DELL-U2720Q".to_string(), [596.74, 335.66]),
+                ("display-0610-a050".to_string(), [326.6, 211.4]),
+            ]),
         };
         assert_eq!(State::parse(&state.render()), state);
+    }
+
+    /// A monitor's line that is not a size, or names no model, is passed
+    /// over.
+    #[test]
+    fn a_display_line_that_is_not_a_size_is_passed_over() {
+        let state = State::parse(
+            "display.a = 0x10\n\
+             display.b = 10\n\
+             display. = 10x10\n\
+             display.c = 20000x10\n\
+             display.d = 300 x 200\n",
+        );
+        assert_eq!(
+            state.displays,
+            BTreeMap::from([("d".to_string(), [300.0, 200.0])])
+        );
     }
 
     /// The readout's formats were settings of the configuration once, and

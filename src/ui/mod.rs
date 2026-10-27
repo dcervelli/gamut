@@ -7,6 +7,7 @@
 //! frame can be built and driven with no application behind it.
 
 pub mod attitude;
+pub mod calibrate;
 pub mod chooser;
 pub mod chrome;
 pub mod control;
@@ -783,6 +784,11 @@ pub struct FrameInput {
     /// on the monitor the window is on, where the file says its density and
     /// the monitor its size: what the zoom menu's print size goes to.
     pub print_zoom: Option<f32>,
+    /// The print size's calibration, while it is up; and whether the
+    /// button that puts it up is alive, the window's monitor being one
+    /// that can be told apart from another.
+    pub calibrate: Option<calibrate::Input>,
+    pub calibratable: bool,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -860,6 +866,9 @@ pub fn show(
     }
     if let Some(export) = &input.export {
         export::show(&mut pass, ui, export);
+    }
+    if let Some(calibrate) = &input.calibrate {
+        calibrate::show(&mut pass, ui, calibrate);
     }
     pass.commands
 }

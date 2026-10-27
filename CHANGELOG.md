@@ -11,7 +11,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - **Print size** in the zoom menu shows the picture at the size the file
   says it prints, on the display the window is on, from the density the
   file gives and the physical size the display reports. Resting on it while
-  it is dead says which of the two is missing.
+  it is dead says which of the two is missing. `Shift+0` does the same.
+- The ruler beside **Print size** calibrates the display against a credit
+  card held to the screen, for a display that reports its size wrongly or
+  not at all. The size is kept for that make and model of display.
 - Stepping between two georeferenced files in the same coordinate system
   lines them up on the ground: when the file arriving covers any of the
   ground on screen, that ground stays in the middle of the window at the

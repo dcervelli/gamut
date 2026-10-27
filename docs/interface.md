@@ -149,6 +149,29 @@ axes could ask for two zooms; `print_zoom` takes their geometric mean, and
 they differ only for a file whose pixels are not square. It is a zoom, not a
 fit: the view keeps it when the window moves to another monitor.
 
+A size measured by hand — `app/calibration.rs`, the dialog `ui/calibrate.rs` —
+is kept in the state file as millimeters, not as pixels to the millimeter: a
+scale changed later changes the second and not the first, so millimeters stay
+true across a change of the Mac's "looks like" mode or the compositor's scale.
+It is kept against `Screen::model`, the make and model the EDID gives (on a
+Mac, Core Graphics' vendor and model numbers), rather than against
+`monitor::key_of`, because the connector's name belongs to the port: a
+monitor moved to another port keeps its calibration, and two of the same model
+share one, which is right, since they are the same size. `App::screen_size`
+reads the calibration ahead of the reported size, so it also gives a monitor
+that reports none a print size.
+
+The dialog's slider is in stops of the card's size from the reported size (or,
+for a monitor that reports none, from 96 logical pixels to the inch), so its
+mark and the start of its fill stand at what the monitor says; OK with the
+slider on that mark lets the calibration go rather than keeping a copy of the
+reported size. It runs `calibration::RANGE` either side of where the dialog
+opened, which keeps the card's room — the card at the far end of the run, so
+that the dialog does not resize under the hand — small enough to fit a window.
+The dialog has no text field, so keys never reach egui while it is up:
+`App::handle_key` hands every one to `App::calibration_key` instead, and the
+keys bound to the picture wait.
+
 The interface's scale is kept in the state file and not set in the
 configuration: it is set by hand, with the picture on screen, as the file
 list's width and the loupe's magnification are — see

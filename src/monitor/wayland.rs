@@ -61,7 +61,7 @@ use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::{
     self as xdg_output, ZxdgOutputV1,
 };
 
-use super::{Mode, Monitors, Room, Table};
+use super::{Mode, Monitors, Room, Screen, Table};
 
 /// Starts listening. `None` off Wayland, or under a compositor that speaks
 /// none of color management, `xdg_output` and dmabuf feedback: nothing then
@@ -195,6 +195,9 @@ struct Output {
     /// Its size in millimeters, as the panel is built: zero on a side the
     /// monitor does not say.
     physical: [i32; 2],
+    /// Its make and model, as the geometry says them.
+    make: String,
+    model: String,
 }
 
 impl Output {
@@ -205,10 +208,15 @@ impl Output {
         })
     }
 
-    /// Its logical pixels to the millimeter — see [`super::density`].
-    fn density(&self) -> Option<[f64; 2]> {
+    /// Its size and model, once its logical size is known.
+    fn screen(&self) -> Option<Screen> {
+        let logical = self.logical?;
         let mm = device_size(self.physical.map(|side| side.max(0) as u32), self.transform);
-        super::density(self.logical?, mm.map(f64::from))
+        Some(Screen {
+            logical,
+            reported: super::believed(logical, mm.map(f64::from)),
+            model: super::model_word(&self.make, &self.model).or_else(|| self.name.clone())?,
+        })
     }
 }
 
@@ -267,10 +275,10 @@ impl Listener {
                 })
                 .collect(),
             rooms: self.outputs.iter().filter_map(Output::room).collect(),
-            densities: self
+            screens: self
                 .outputs
                 .iter()
-                .filter_map(|output| Some((output.name.clone()?, output.density()?)))
+                .filter_map(|output| Some((output.name.clone()?, output.screen()?)))
                 .collect(),
         };
         let Ok(mut shared) = self.table.lock() else {
@@ -314,6 +322,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Listener {
                         transform: Transform::Normal,
                         logical: None,
                         physical: [0, 0],
+                        make: String::new(),
+                        model: String::new(),
                     });
                     state.subscribe(handle);
                 }
@@ -374,11 +384,15 @@ impl Dispatch<wl_output::WlOutput, u32> for Listener {
             wl_output::Event::Geometry {
                 physical_width,
                 physical_height,
+                make,
+                model,
                 transform: WEnum::Value(transform),
                 ..
             } => {
                 output.transform = transform;
                 output.physical = [physical_width, physical_height];
+                output.make = make;
+                output.model = model;
             }
             _ => return,
         }

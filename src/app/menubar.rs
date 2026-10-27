@@ -328,6 +328,7 @@ fn view(b: &mut Builder) -> Vec<Node> {
         b.action("Zoom Out", Action::ZoomOut),
         b.action("Cycle Fit", Action::CycleFit),
         b.submenu("Zoom", Some(Control::ZoomTo(ZoomChoice::Scale(1.0))), zooms),
+        b.button("Calibrate Print Size\u{2026}", Control::Calibrate),
         b.submenu("Upscaling", None, filters),
         Node::Separator,
         b.control("Rotate Left", Control::TurnLeft, Some(Action::TurnLeft)),

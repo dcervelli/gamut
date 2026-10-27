@@ -224,6 +224,8 @@ fn every_chrome_button_has_something_to_say() {
                 | Control::TagRow(_)
                 | Control::RenameTo
                 | Control::CancelRename
+                | Control::CalibrateOk
+                | Control::CancelCalibrate
                 | Control::ExportAs(_)
                 | Control::ExportTo
                 | Control::CancelExport

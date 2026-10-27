@@ -215,6 +215,10 @@ pub const NO_PROFILE: &str = "This file carries no camera profile.";
 /// say how many of its pixels go to an inch, or the monitor how large it is.
 const NO_DENSITY: &str = "This file doesn't say its print size.";
 const NO_MONITOR_SIZE: &str = "This display doesn't report its physical size.";
+/// What the calibration's button says while it is dead: the window's
+/// monitor cannot be told apart from another, so nothing measured could be
+/// kept for it.
+const NO_SCREEN: &str = "This display can't be calibrated.";
 
 /// What the Raw Data tab's copy button says while there are no tags to
 /// copy: exiftool is not there, is reading the file, or could not.
@@ -362,6 +366,9 @@ pub struct Conditions {
     /// the two the print size needs.
     pub density: bool,
     pub monitor_size: bool,
+    /// Whether the window's monitor can be told apart from another, which
+    /// is what a size measured by hand is kept against.
+    pub screen: bool,
 }
 
 impl Default for Conditions {
@@ -405,6 +412,7 @@ impl Default for Conditions {
             tags_in: false,
             density: false,
             monitor_size: false,
+            screen: false,
         }
     }
 }
@@ -456,6 +464,7 @@ impl Conditions {
         tags_in: true,
         density: true,
         monitor_size: true,
+        screen: true,
     };
 }
 
@@ -512,6 +521,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         geographic,
         density,
         monitor_size,
+        screen,
         ..
     } = conditions;
     let said = |said| Some(Refused { said, hint: None });
@@ -562,6 +572,9 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         if !monitor_size {
             return said(NO_MONITOR_SIZE);
         }
+    }
+    if tip == Tip::Control(Control::Calibrate) && !screen {
+        return said(NO_SCREEN);
     }
     if tip == Tip::Control(Control::Profile) && !profile {
         return said(NO_PROFILE);
@@ -696,6 +709,9 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Coordinates(format)) => menu::describe_coordinates(format),
         Tip::Control(Control::Geographic(format)) => menu::describe_geographic(format),
         Tip::Control(Control::Zoom) => "Open zoom menu",
+        // No key puts it up: it is only ever reached from beside the print
+        // size.
+        Tip::Control(Control::Calibrate) => "Measure this display against a credit card",
         // No one key opens it — every cell of it has a key of its own —
         // so the button says what the menu is of.
         Tip::Control(Control::Copy) => "Copy the file or image",
@@ -879,6 +895,8 @@ pub fn words(tip: Tip) -> Option<String> {
             | Control::CancelExport
             | Control::RenameTo
             | Control::CancelRename
+            | Control::CalibrateOk
+            | Control::CancelCalibrate
             | Control::Back
             | Control::Forward
             | Control::Thumb(_)

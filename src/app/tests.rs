@@ -5549,7 +5549,7 @@ fn the_print_size_needs_the_file_and_the_monitor_to_say_their_sizes() {
     );
 
     let monitors = Monitors::stub(true);
-    monitors.set_density("DP-1", 4.0);
+    monitors.set_screen("DP-1", [1600, 1000], Some([400.0, 250.0]));
     app.output.monitors = Some(monitors);
     app.headless_monitor = Some("DP-1".to_string());
     let zoom = app.print_zoom().expect("both say their sizes");
@@ -5558,4 +5558,109 @@ fn the_print_size_needs_the_file_and_the_monitor_to_say_their_sizes() {
     assert!((app.view.zoom(app.image_size(), app.viewport()) - zoom).abs() < 1e-5);
     let named = said(&app).expect("named").concat();
     assert!(named.starts_with(&ZoomChoice::Print.describe()), "{named}");
+}
+
+/// The calibration keeps the size its slider says against the monitor's
+/// model, which the print size then reads in place of the size the monitor
+/// says; Cancel keeps nothing; and while it is up, the keys are its own.
+#[test]
+fn the_calibration_keeps_the_size_the_slider_says() {
+    use crate::image::density::Density;
+    use winit::event::ElementState;
+    use winit::keyboard::{Key, NamedKey, NativeKeyCode, PhysicalKey};
+
+    let (mut app, _dir) = app_over("calibrate", &[("a.png", 300, 200)]);
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([100.0, 100.0], 25.4);
+    assert_eq!(
+        app.press(ui::Control::Calibrate),
+        Effect::Nothing,
+        "no monitor"
+    );
+    assert!(app.calibrating.is_none());
+
+    let monitors = Monitors::stub(true);
+    monitors.set_screen("DP-1", [1600, 1000], Some([400.0, 250.0]));
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("DP-1".to_string());
+    let said = app.print_zoom().expect("the monitor says its size");
+
+    // Cancel, by the key: nothing kept.
+    assert_eq!(app.press(ui::Control::Calibrate), Effect::Redraw);
+    let input = app.calibration_input().expect("the dialog is up");
+    assert_eq!(input.stops, 0.0);
+    assert!((input.points_per_mm[0] - 4.0).abs() < 1e-5);
+    let step = |app: &mut App, key| {
+        app.handle_key(
+            &key,
+            PhysicalKey::Unidentified(NativeKeyCode::Unidentified),
+            ElementState::Pressed,
+        )
+    };
+    assert_eq!(
+        step(&mut app, Key::Named(NamedKey::ArrowRight)),
+        Effect::Redraw
+    );
+    assert_eq!(
+        step(&mut app, Key::Character("n".into())),
+        Effect::Nothing,
+        "the picture's keys wait"
+    );
+    assert_eq!(step(&mut app, Key::Named(NamedKey::Escape)), Effect::Redraw);
+    assert!(app.calibrating.is_none());
+    assert!(app.displays.is_empty());
+
+    // A card a tenth larger: the monitor is a tenth smaller than it says,
+    // and the print size a tenth larger.
+    let _ = app.press(ui::Control::Calibrate);
+    let stops = 1.1_f32.log2();
+    let _ = app.act(ui::Command::Calibration(stops));
+    assert_eq!(app.press(ui::Control::CalibrateOk), Effect::Redraw);
+    let kept = app.displays.get("model-of-DP-1").expect("kept by model");
+    assert!((kept[0] - 400.0 / 1.1).abs() < 1e-3, "{kept:?}");
+    let zoom = app.print_zoom().expect("calibrated");
+    assert!((zoom / said - 1.1).abs() < 1e-4, "{zoom} after {said}");
+    assert_eq!(app.kept_state().displays, app.displays);
+
+    // Opened again, it starts where it was left; moved back to what the
+    // monitor says, OK lets the measured size go.
+    let _ = app.press(ui::Control::Calibrate);
+    let input = app.calibration_input().expect("up again");
+    assert!(
+        (input.stops - stops).abs() <= calibration::STEP / 2.0,
+        "on the slider's steps"
+    );
+    let _ = app.act(ui::Command::Calibration(0.0));
+    let _ = app.handle_key(
+        &Key::Named(NamedKey::Enter),
+        PhysicalKey::Unidentified(NativeKeyCode::Unidentified),
+        ElementState::Pressed,
+    );
+    assert!(app.displays.is_empty());
+}
+
+/// A monitor that says nothing of its size can be measured, and then has a
+/// print size.
+#[test]
+fn a_monitor_that_says_no_size_is_measured() {
+    use crate::image::density::Density;
+
+    let (mut app, _dir) = app_over("measured", &[("a.png", 300, 200)]);
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([100.0, 100.0], 25.4);
+    let monitors = Monitors::stub(true);
+    monitors.set_screen("HDMI-A-1", [1920, 1080], None);
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("HDMI-A-1".to_string());
+    assert_eq!(app.print_zoom(), None);
+    let _ = app.press(ui::Control::Calibrate);
+    assert_eq!(app.press(ui::Control::CalibrateOk), Effect::Redraw);
+    let zoom = app.print_zoom().expect("measured at the guess");
+    assert!((zoom - 96.0 / 100.0).abs() < 1e-4, "{zoom}");
 }

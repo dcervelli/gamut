@@ -501,6 +501,9 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
             | Control::Thumb(_)
             | Control::RenameTo
             | Control::CancelRename
+            | Control::Calibrate
+            | Control::CalibrateOk
+            | Control::CancelCalibrate
             | Control::ExportAs(_)
             | Control::ExportTo
             | Control::CancelExport
@@ -2116,6 +2119,11 @@ impl App {
                 _ => Effect::Nothing,
             };
         }
+        // The calibration takes every key while it is up — see
+        // `app::calibration`.
+        if self.calibrating.is_some() {
+            return self.calibration_key(key);
+        }
         let region_selected = matches!(self.marking.selection, Selection::Shown(_));
         match self
             .keys
@@ -2751,6 +2759,7 @@ impl App {
             tags_in: self.tags.tags_in(),
             density: current.is_some_and(|current| current.exif.density.is_some()),
             monitor_size: self.surface_density().is_some(),
+            screen: self.screen().is_some(),
         }
     }
 
@@ -2869,6 +2878,9 @@ impl App {
             ui::Command::Name(name) => self.set_rename_name(name),
             ui::Command::ExportName(name) => self.set_export_name(name),
             ui::Command::ExportQuality(quality) => self.set_export_quality(quality),
+            ui::Command::Calibration(stops) => {
+                let _ = self.set_calibration(stops);
+            }
             ui::Command::ExportSize(dimension, text) => self.set_export_size(dimension, text),
             ui::Command::Cursor(step) => self.chooser.step(step),
             ui::Command::Visible(rows) => {
@@ -3517,6 +3529,12 @@ impl App {
                 self.cancel_export();
                 Effect::Redraw
             }
+            Control::Calibrate => {
+                self.open_calibration();
+                Effect::Redraw
+            }
+            Control::CalibrateOk => self.calibrated(),
+            Control::CancelCalibrate => self.cancel_calibration(),
             Control::RenameTo => {
                 self.rename_shown();
                 Effect::Redraw

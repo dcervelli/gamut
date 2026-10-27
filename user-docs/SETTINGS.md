@@ -202,6 +202,8 @@ list, what the list is sorted by and which way, how far the loupe
 magnifies, how large you made the interface, whether a raw opens as the camera's JPEG,
 whether the folder dialog's *Include subfolders* box was left ticked, and how the pixel
 under the pointer is read out: its value, and for a map its place and how a
-latitude is written. It is written when the window closes and read when the next window
+latitude is written. It also keeps the size of each display you have
+calibrated for the print size, one `display.` line per make and model of
+display. It is written when the window closes and read when the next window
 opens. You never need to edit it, and deleting it resets them all to their
 defaults.

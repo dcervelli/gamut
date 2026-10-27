@@ -173,6 +173,25 @@ pub(super) const MONITOR: &[Mark] = &[
     Mark::Line([12.0, 17.0], [12.0, 21.0]),
 ];
 
+/// Lucide's `ruler`: a rule laid corner to corner with its marks along one
+/// side, for the print size's calibration, which measures the screen. Its
+/// rounded corners are written out as sides and quarter turns, the rule
+/// standing at 45 degrees where `Mark::Rect` stands square.
+pub(super) const RULER: &[Mark] = &[
+    Mark::arc([19.6, 17.0], 2.4, -45.0, 90.0),
+    Mark::Line([21.3, 18.7], [18.7, 21.3]),
+    Mark::arc([17.0, 19.6], 2.4, 45.0, 90.0),
+    Mark::Line([15.3, 21.3], [2.7, 8.7]),
+    Mark::arc([4.4, 7.0], 2.4, 135.0, 90.0),
+    Mark::Line([2.7, 5.3], [5.3, 2.7]),
+    Mark::arc([7.0, 4.4], 2.4, 225.0, 90.0),
+    Mark::Line([8.7, 2.7], [21.3, 15.3]),
+    Mark::Line([14.5, 12.5], [16.5, 10.5]),
+    Mark::Line([11.5, 9.5], [13.5, 7.5]),
+    Mark::Line([8.5, 6.5], [10.5, 4.5]),
+    Mark::Line([17.5, 15.5], [19.5, 13.5]),
+];
+
 /// Lucide's `sliders-horizontal`: three tracks with a handle on each, for
 /// the histogram's section on the display, whose window, exposure and curve
 /// are set there.

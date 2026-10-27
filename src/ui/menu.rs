@@ -44,6 +44,9 @@ const MENU_SECTION_GAP: f32 = 10.0;
 /// The room set aside for the mark in a fit cell. Larger than a toggle's,
 /// the cells of a menu being larger than a button in a bar.
 const FIT_ICON: f32 = 24.0;
+/// The room set aside for the ruler on the calibration's button, which is
+/// as tall as a cell and no wider.
+const CALIBRATE_ICON: f32 = 18.0;
 
 /// A copy the interface can be asked for, and so an item of the menu of
 /// copies.
@@ -280,12 +283,16 @@ pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
                         }
                         // Dead where the file or the monitor does not say
                         // its size, and its tooltip says which.
-                        ZoomChoice::Print => ui.add_enabled(
-                            print.is_some(),
-                            egui::Button::new(choice.label())
-                                .selected(active)
-                                .min_size(vec2(MENU_WORD_CELL, MENU_CELL[1])),
-                        ),
+                        ZoomChoice::Print => {
+                            let response = ui.add_enabled(
+                                print.is_some(),
+                                egui::Button::new(choice.label())
+                                    .selected(active)
+                                    .min_size(vec2(MENU_WORD_CELL, MENU_CELL[1])),
+                            );
+                            calibrate_cell(pass, ui);
+                            response
+                        }
                         // In marks, where the filters below are in words.
                         ZoomChoice::Fit(fit) => fit_cell(pass, ui, *fit, fills, active),
                         // The two filters are not a direction or a size, and
@@ -308,6 +315,31 @@ pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
                     }
                 }
             });
+    }
+}
+
+/// The button beside the print size that puts up its calibration: a
+/// square the cell's height, wearing a ruler. A press closes the menu, the
+/// dialog being a question asked over the window.
+fn calibrate_cell(pass: &mut Pass, ui: &mut Ui) {
+    let control = Control::Calibrate;
+    let live = pass.input.calibratable;
+    let sense = if live { Sense::CLICK } else { Sense::HOVER };
+    let (rect, response) = ui.allocate_exact_size(vec2(MENU_CELL[1], MENU_CELL[1]), sense);
+    let (background, ink) = pass.button_ink(false, &response, live);
+    ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+    icon::paint(
+        ui.painter(),
+        icon::RULER,
+        icon::square(pass.grid, rect, CALIBRATE_ICON),
+        ink,
+        background,
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, live, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control));
+    if response.clicked() {
+        pass.press(control);
+        ui.close();
     }
 }
 

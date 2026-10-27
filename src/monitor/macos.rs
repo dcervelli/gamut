@@ -17,13 +17,16 @@ use objc2_foundation::{NSNumber, NSRect, NSSize, NSString};
 use winit::monitor::MonitorHandle;
 use winit::platform::macos::MonitorHandleExtMacOS as _;
 
-use super::{Mode, Monitors, Room, Table};
+use super::{Mode, Monitors, Room, Screen, Table};
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     /// The display's size in millimeters; `NSSize` is `CGSize` by another
     /// name.
     fn CGDisplayScreenSize(display: u32) -> NSSize;
+    /// The numbers its EDID gives its maker and its model.
+    fn CGDisplayVendorNumber(display: u32) -> u32;
+    fn CGDisplayModelNumber(display: u32) -> u32;
 }
 
 /// The pixels to the millimeter Core Graphics assumes — 72 to the inch — for
@@ -117,9 +120,7 @@ fn read() -> Option<Table> {
                 logical: logical.map(|side| side.round() as u32),
             };
             table.rooms.push(room);
-            if let Some(density) = density(display, room) {
-                table.densities.insert(key, density);
-            }
+            table.screens.insert(key, screen_of(display, room));
         }
         Some(table)
     })
@@ -141,22 +142,34 @@ fn in_steps(headroom: f64) -> f32 {
     stops.exp2() as f32
 }
 
-/// The display's logical pixels to the millimeter — see
-/// [`super::density`] — where Core Graphics read its size rather than made
-/// one up: a size that comes out at 72 to the inch of either its points or
-/// its pixels is the one it makes up.
-fn density(display: u32, room: Room) -> Option<[f64; 2]> {
-    // SAFETY: a plain C function of a display number, which answers zero
-    // for a number that is no display.
-    let size = unsafe { CGDisplayScreenSize(display) };
+/// The display's size and model. Its size is believed — see
+/// [`super::believed`] — only where Core Graphics read it rather than made it
+/// up: a size that comes out at 72 to the inch of either its points or its
+/// pixels is the one it makes up. Its model is its maker's and its model's
+/// numbers, which is all a display without a name is sure to have.
+fn screen_of(display: u32, room: Room) -> Screen {
+    // SAFETY: plain C functions of a display number, which answer zero for a
+    // number that is no display.
+    let (size, vendor, model) = unsafe {
+        (
+            CGDisplayScreenSize(display),
+            CGDisplayVendorNumber(display),
+            CGDisplayModelNumber(display),
+        )
+    };
     let mm = [size.width, size.height];
     let guessed = [room.logical, room.device].iter().any(|pixels| {
         (0..2).all(|axis| (f64::from(pixels[axis]) / GUESSED_PER_MM - mm[axis]).abs() < 1.0)
     });
-    if guessed {
-        return None;
+    Screen {
+        logical: room.logical,
+        reported: if guessed {
+            None
+        } else {
+            super::believed(room.logical, mm)
+        },
+        model: format!("display-{vendor:04x}-{model:04x}"),
     }
-    super::density(room.logical, mm)
 }
 
 /// A screen's Core Graphics identifier.

@@ -17,6 +17,9 @@
 //! The same answers say how large each monitor is on the desk, in
 //! millimeters, which with its logical size is how many of its logical
 //! pixels go to a millimeter: what shows a picture at the size it prints.
+//! And they say what make and model it is, which is what a size measured
+//! by hand is kept against — a model is the same size wherever it is
+//! plugged in, where a connector's name belongs to the port.
 //!
 //! The table is keyed by what [`key_of`] makes of winit's handle for the
 //! same monitor, so that the application never has to know what a platform
@@ -81,10 +84,60 @@ pub(super) struct Table {
     /// over its reference white.
     pub(super) headrooms: HashMap<String, f32>,
     pub(super) rooms: Vec<Room>,
-    /// Each monitor's logical pixels to the millimeter, across and down,
-    /// where it has said how large it is and the size is believable — see
-    /// [`density`].
-    pub(super) densities: HashMap<String, [f64; 2]>,
+    /// Each monitor's size and model, where its logical size is known.
+    pub(super) screens: HashMap<String, Screen>,
+}
+
+/// A monitor as the print size sees it.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Screen {
+    /// How large it is laid out, in logical pixels, across and down.
+    pub logical: [u32; 2],
+    /// How large it says it is in millimeters, across and down as the
+    /// pixels stand, where it says and the size is believable — see
+    /// [`believed`].
+    pub reported: Option<[f64; 2]>,
+    /// Its make and model, as one word that a line of the state file can be
+    /// named by; the connector's name where the monitor does not say.
+    pub model: String,
+}
+
+impl Screen {
+    /// Its logical pixels to the millimeter, across and down, were it `mm`
+    /// millimeters on a side.
+    pub fn density(&self, mm: [f64; 2]) -> [f64; 2] {
+        let mm = turned(self.logical, mm);
+        [0, 1].map(|axis| f64::from(self.logical[axis]) / mm[axis])
+    }
+
+    /// Its diagonal in inches, were it `mm` millimeters on a side: what a
+    /// monitor is sold by.
+    pub fn diagonal(mm: [f64; 2]) -> f64 {
+        mm[0].hypot(mm[1]) / 25.4
+    }
+}
+
+/// `make` and `model` as one word: what a monitor's size measured by hand is
+/// kept against. Anything but a letter, a digit, `.` and `-` becomes `-`.
+/// `None` where neither says anything.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(super) fn model_word(make: &str, model: &str) -> Option<String> {
+    let said = format!("{} {}", make.trim(), model.trim());
+    let said = said.trim();
+    if said.is_empty() || said.eq_ignore_ascii_case("unknown unknown") {
+        return None;
+    }
+    Some(
+        said.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect(),
+    )
 }
 
 /// The least and the most logical pixels to the millimeter a monitor is
@@ -99,23 +152,28 @@ const DENSITY_RANGE: std::ops::RangeInclusive<f64> = 1.0..=20.0;
 /// the millimeter it is rounded to.
 const SQUARE_WITHIN: f64 = 0.05;
 
-/// `logical` pixels over a monitor `mm` millimeters on a side: its logical
-/// pixels to the millimeter, across and down. The size is turned to stand
-/// the way the pixels do, since not every platform turns it with the
-/// monitor. `None` for a monitor that gave no size — a projector, most
-/// televisions — or one that is not believable.
-pub(super) fn density(logical: [u32; 2], mm: [f64; 2]) -> Option<[f64; 2]> {
-    let mm = if (logical[0] >= logical[1]) == (mm[0] >= mm[1]) {
+/// `mm` turned to stand the way `logical` does: not every platform turns a
+/// monitor's size with it, and a size measured by hand is kept whichever
+/// way the monitor stood.
+pub fn turned(logical: [u32; 2], mm: [f64; 2]) -> [f64; 2] {
+    if (logical[0] >= logical[1]) == (mm[0] >= mm[1]) {
         mm
     } else {
         [mm[1], mm[0]]
-    };
+    }
+}
+
+/// The size a monitor `logical` pixels across says it is, `mm` on a side,
+/// turned to stand as the pixels do — or `None` for a monitor that gave no
+/// size, as a projector and most televisions do, or one not to be believed.
+pub(super) fn believed(logical: [u32; 2], mm: [f64; 2]) -> Option<[f64; 2]> {
+    let mm = turned(logical, mm);
     if mm.iter().any(|side| !side.is_finite() || *side <= 0.0) {
         return None;
     }
     let per_mm = [0, 1].map(|axis| f64::from(logical[axis]) / mm[axis]);
     let square = (per_mm[0] / per_mm[1] - 1.0).abs() <= SQUARE_WITHIN;
-    (square && per_mm.iter().all(|value| DENSITY_RANGE.contains(value))).then_some(per_mm)
+    (square && per_mm.iter().all(|value| DENSITY_RANGE.contains(value))).then_some(mm)
 }
 
 /// The monitors' modes and rooms, kept current by a thread that listens for
@@ -149,11 +207,10 @@ impl Monitors {
         self.read()?.headrooms.get(name).copied()
     }
 
-    /// How many logical pixels of the monitor [`key_of`] calls `name` go to
-    /// a millimeter on its glass, across and down. `None` for a monitor that
-    /// has not said how large it is, or said something not to be believed.
-    pub fn density(&self, name: &str) -> Option<[f64; 2]> {
-        self.read()?.densities.get(name).copied()
+    /// The size and model of the monitor [`key_of`] calls `name`. `None`
+    /// for one whose logical size has not been said.
+    pub fn screen(&self, name: &str) -> Option<Screen> {
+        self.read()?.screens.get(name).cloned()
     }
 
     /// Whether the compositor can say what mode a monitor is in. Where it
@@ -209,11 +266,16 @@ impl Monitors {
         table.headrooms.insert(name.to_string(), headroom);
     }
 
-    /// How large the compositor would have said the monitor called `name`
-    /// is, as logical pixels to the millimeter.
-    pub fn set_density(&self, name: &str, per_mm: f64) {
+    /// What the compositor would have said of the monitor called `name`:
+    /// its logical size, and its size in millimeters where it says one.
+    pub fn set_screen(&self, name: &str, logical: [u32; 2], mm: Option<[f64; 2]>) {
         let mut table = self.table.lock().expect("the table is not poisoned");
-        table.densities.insert(name.to_string(), [per_mm, per_mm]);
+        let screen = Screen {
+            logical,
+            reported: mm.and_then(|mm| believed(logical, mm)),
+            model: format!("model-of-{name}"),
+        };
+        table.screens.insert(name.to_string(), screen);
     }
 }
 
@@ -225,25 +287,41 @@ mod tests {
     /// pixels over 597 by 336 millimeters.
     #[test]
     fn a_density_is_the_logical_pixels_over_the_millimeters() {
-        let [across, down] = density([2560, 1440], [597.0, 336.0]).unwrap();
+        let screen = Screen {
+            logical: [2560, 1440],
+            reported: None,
+            model: String::new(),
+        };
+        let [across, down] = screen.density([597.0, 336.0]);
         assert!((across - 2560.0 / 597.0).abs() < 1e-9);
         assert!((down - 1440.0 / 336.0).abs() < 1e-9);
+        assert!((Screen::diagonal([597.0, 336.0]) - 26.97).abs() < 0.01);
     }
 
     /// A monitor stood on its side whose size was given as it was built.
     #[test]
     fn a_size_is_turned_to_stand_as_the_pixels_do() {
-        let stood = density([1440, 2560], [597.0, 336.0]);
-        assert!(stood.is_some());
-        assert_eq!(stood, density([1440, 2560], [336.0, 597.0]));
+        assert_eq!(believed([1440, 2560], [597.0, 336.0]), Some([336.0, 597.0]));
+        assert_eq!(turned([2560, 1440], [336.0, 597.0]), [597.0, 336.0]);
     }
 
     /// No size, an aspect ratio where the size belongs, and pixels that
-    /// would not be square: none of them is a density.
+    /// would not be square: none of them is believed.
     #[test]
     fn a_size_not_to_be_believed_is_none() {
-        assert_eq!(density([1920, 1080], [0.0, 0.0]), None);
-        assert_eq!(density([1920, 1080], [16.0, 9.0]), None);
-        assert_eq!(density([1920, 1080], [600.0, 200.0]), None);
+        assert_eq!(believed([1920, 1080], [0.0, 0.0]), None);
+        assert_eq!(believed([1920, 1080], [16.0, 9.0]), None);
+        assert_eq!(believed([1920, 1080], [600.0, 200.0]), None);
+    }
+
+    /// A model is one word a state file's line can be named by.
+    #[test]
+    fn a_model_is_one_word() {
+        assert_eq!(
+            model_word("Dell Inc.", "DELL U2720Q").as_deref(),
+            Some("Dell-Inc.-DELL-U2720Q")
+        );
+        assert_eq!(model_word("", " "), None);
+        assert_eq!(model_word("Unknown", "Unknown"), None);
     }
 }

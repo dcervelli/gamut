@@ -1183,7 +1183,17 @@ many pixels go to an inch, as the info panel's *Density* row shows, and the
 display to report how large it is, which most do; resting on a dead **Print
 size** says which is missing. A display that misreports its size — some
 televisions and projectors do — shows the print at the wrong size. A window
-straddling two displays is sized for the one holding most of it. **Fit** is the two fits — the whole image, or
+straddling two displays is sized for the one holding most of it.
+
+The ruler beside **Print size** calibrates the display the window is on. It
+shows the outline of a credit card at the size the display is taken to be:
+hold a real card to the screen and move the slider until the outline covers
+it exactly, using the arrow keys for fine steps (`Shift` for larger ones), and
+press **OK** or `Enter`. The size is kept for that make and model of display
+whichever port it is plugged into, and overrides what the display reports. A
+display that reports no size at all can be calibrated too, after which
+**Print size** works on it. The mark on the slider is the size the display
+reports; move the slider back onto it and press **OK** to go back to that. **Fit** is the two fits — the whole image, or
 the window filled by it. The chevrons on the second point the way it fills,
 across the window or down it, which follows the shape of the image.
 **Up-scaling** is the filter the image is magnified with, `Nearest` or
