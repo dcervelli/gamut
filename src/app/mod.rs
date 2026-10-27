@@ -78,7 +78,7 @@ use kept::{Kept, Left, Settings};
 use measuring::{Measured, Measuring};
 use region::Marking;
 use tags::Tags;
-use window::{file_label, initial_window_size, loading_title, window_title};
+use window::{file_label, folder_label, initial_window_size, loading_title, window_title};
 
 /// What wakes the event loop from another thread.
 pub enum UserEvent {
@@ -2149,6 +2149,11 @@ impl App {
             index: self.files.target(),
             count: self.files.len(),
             arriving: self.arriving().map(file_label),
+            directory: self
+                .arriving()
+                .or_else(|| self.files.shown_path())
+                .map(folder_label)
+                .unwrap_or_default(),
             deleted: self.watch.missing(),
             headroom: self.headroom(),
             hdr_available: self.hdr_available(),

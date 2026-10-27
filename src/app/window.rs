@@ -153,6 +153,36 @@ pub(super) fn file_label(path: &Path) -> String {
     }
 }
 
+/// The directory `path` sits in, for after its name in the top bar: made
+/// absolute, so that a file named from the working directory says where
+/// that is, and with the home directory written `~`. Held to the last
+/// [`MAX_LABEL_CHARS`] characters for the same reason the name is, the end
+/// of a path being the part nearest the file.
+pub(super) fn folder_label(path: &Path) -> String {
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let Some(folder) = path.parent() else {
+        return String::new();
+    };
+    folder_under(folder, crate::xdg::home().as_deref())
+}
+
+/// `folder` written with `home`, where it is under it, as `~`.
+fn folder_under(folder: &Path, home: Option<&Path>) -> String {
+    let written = match home.and_then(|home| folder.strip_prefix(home).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) => Path::new("~").join(rest).display().to_string(),
+        None => folder.display().to_string(),
+    };
+    let count = written.chars().count();
+    match count.checked_sub(MAX_LABEL_CHARS) {
+        Some(skip) if skip > 0 => {
+            let kept: String = written.chars().skip(skip).collect();
+            format!("\u{2026}{kept}")
+        }
+        _ => written,
+    }
+}
+
 pub(super) fn window_title(path: &Path) -> String {
     format!("{} — {PROGRAM}", file_label(path))
 }
@@ -520,6 +550,27 @@ mod tests {
     }
 
     use crate::ui::chrome::{Parts, content_area};
+
+    /// The folder is written from the home directory where it is under it,
+    /// and in full where it is not; a name that merely starts with the
+    /// home directory's is not under it.
+    #[test]
+    fn the_folder_is_written_from_home() {
+        let home = Some(Path::new("/home/someone"));
+        let under = |folder: &str| folder_under(Path::new(folder), home);
+        assert_eq!(under("/home/someone"), "~");
+        assert_eq!(under("/home/someone/Pictures/2026"), "~/Pictures/2026");
+        assert_eq!(under("/home/someoneelse/a"), "/home/someoneelse/a");
+        assert_eq!(under("/mnt/photos"), "/mnt/photos");
+        assert_eq!(
+            folder_under(Path::new("/home/someone"), None),
+            "/home/someone"
+        );
+        let deep = format!("/{}", "a/".repeat(MAX_LABEL_CHARS));
+        let held = folder_under(Path::new(&deep), None);
+        assert!(held.starts_with('\u{2026}'));
+        assert_eq!(held.chars().count(), MAX_LABEL_CHARS + 1);
+    }
 
     /// A monitor as the event loop reports it, which is the only way a test
     /// can be handed one that says nothing.

@@ -8,6 +8,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The top bar gives the folder the file is in after its name, dimmed:
+  *photo.png · ~/Pictures/2026*. When the bar runs short of room the
+  folder is shortened in the middle, keeping the folder nearest the file,
+  and then left out. The size and color facts keep their place before it.
 - The info panel's Image section gives the density the file says it has —
   *600 dpi* — and the size the picture prints at at that density, naming
   the sheet where it is one: *420 × 297 mm · A3*. A size no sheet is is
