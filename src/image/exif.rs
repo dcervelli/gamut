@@ -2744,6 +2744,19 @@ mod tests {
         assert_eq!(Exif::read(&fixture("jpeg-rgb.jpg")).density, None);
     }
 
+    /// The print size's ruler says 150 dpi in its `pHYs` chunk, as near as
+    /// whole pixels to the meter come, and the rulers drawn in it are only
+    /// true at that.
+    #[test]
+    fn the_print_size_ruler_is_150_dpi() {
+        let read = Exif::read(&fixture("print-size/ruler-150dpi.png"));
+        let density = read.density.expect("the ruler says its density");
+        for per_inch in density.per_inch {
+            assert!((per_inch - 150.0).abs() < 0.02, "{per_inch}");
+        }
+        assert_eq!(density.words(), "150 dpi");
+    }
+
     #[test]
     fn a_camera_is_named_once() {
         let name = |make: &str, model: &str| {

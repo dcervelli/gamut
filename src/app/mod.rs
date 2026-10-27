@@ -2,6 +2,7 @@
 
 mod animation;
 pub mod arranging;
+mod calibration;
 mod chooser;
 mod copying;
 mod edits;
@@ -585,6 +586,11 @@ pub struct App {
     renaming: Option<Renaming>,
     /// The export dialog, while it is up.
     exporting: Option<Exporting>,
+    /// The print size's calibration, while it is up.
+    calibrating: Option<calibration::Calibrating>,
+    /// The size each model of monitor was measured at by hand, kept in the
+    /// state file — see [`calibration`].
+    displays: std::collections::BTreeMap<String, [f64; 2]>,
     /// How the desktop's file dialog hands its answer back: what `main`
     /// made from the loop's proxy.
     picker: portal::Deliver,
@@ -811,6 +817,8 @@ impl App {
             edits: Vec::new(),
             renaming: None,
             exporting: None,
+            calibrating: None,
+            displays: kept_state.displays.clone(),
             picker,
             picking: false,
             clipboard_offers: false,
@@ -1382,6 +1390,50 @@ impl App {
             .and_then(|monitor| monitor::key_of(&monitor))
     }
 
+    /// The window's physical pixels to the millimeter on the monitor it is
+    /// on, across and down: the monitor's logical density at the scale the
+    /// window is drawn at, which on a compositor that cannot run a
+    /// fractional scale is not the monitor's own. `None` where the monitor
+    /// has neither said how large it is nor been measured by hand.
+    fn surface_density(&self) -> Option<[f64; 2]> {
+        let screen = self.screen()?;
+        let mm = self.screen_size(&screen)?;
+        let scale = f64::from(self.device_scale());
+        Some(screen.density(mm).map(|per_mm| per_mm * scale))
+    }
+
+    /// The zoom that shows the picture at the size the file says it prints:
+    /// as many of the window's pixels to an image pixel as make the file's
+    /// inch an inch on the glass. `None` where the file does not say its
+    /// density or the monitor its size.
+    ///
+    /// The file's density is of its pixels as stored, and the monitor's is
+    /// across and down the desk, so each is read along the axis of the other
+    /// it lies on — through the orientation the file asks for and the turn
+    /// on screen. A map shown in the picture's place is at the picture's size
+    /// on the glass, its pixels larger as it has fewer. The zoom is one number
+    /// where the two axes could ask for two, and is the mean of them; they
+    /// differ only where a file says its pixels are not square.
+    pub(super) fn print_zoom(&self) -> Option<f32> {
+        let current = self.current.as_ref()?;
+        let density = current.exif.density?;
+        let surface = self.surface_density()?;
+        let stood = current
+            .exif
+            .orientation
+            .is_some_and(crate::image::orient::quarter_turn);
+        let per_mm = if stood { density.swapped() } else { density }.per_mm();
+        let picture = current.picture().0;
+        let upright = [picture.width, picture.height];
+        let shown = [current.image.width, current.image.height];
+        let zooms = [0, 1].map(|axis| {
+            let across = usize::from(current.turn.is_quarter()) ^ axis;
+            surface[across] / per_mm[axis] * f64::from(upright[axis]) / f64::from(shown[axis])
+        });
+        let zoom = (zooms[0] * zooms[1]).sqrt() as f32;
+        zoom.is_finite().then_some(zoom)
+    }
+
     /// [`App::hdr_state`] read as the yes or no the button is drawn from.
     fn hdr_available(&self) -> bool {
         self.hdr_state() == Hdr::Available
@@ -1761,6 +1813,7 @@ impl App {
             coordinate_format: self.panels.coordinate_format,
             geographic_format: self.panels.geographic_format,
             include_subfolders: self.trees.include_subfolders,
+            displays: self.displays.clone(),
         }
     }
 
@@ -2227,6 +2280,9 @@ impl App {
                 .shown_path()
                 .and_then(|path| self.thumbs.get(path)),
             waiting: self.replacing().is_some(),
+            print_zoom: self.print_zoom(),
+            calibrate: self.calibration_input(),
+            calibratable: conditions.screen,
         }
     }
 

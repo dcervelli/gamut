@@ -167,6 +167,9 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         standin: None,
         thumb: None,
         waiting: false,
+        print_zoom: None,
+        calibrate: None,
+        calibratable: false,
     }
 }
 
@@ -3638,5 +3641,52 @@ fn the_region_panel_hands_over_what_is_typed_when_it_is_let_go() {
     assert_eq!(
         asked(&harness),
         [Command::Press(Control::Aspect(Aspect::Ratio(16.0, 9.0)))]
+    );
+}
+
+/// Beside the zoom menu's print size, a button puts up its calibration.
+#[test]
+fn the_zoom_menu_offers_the_calibration() {
+    let mut harness = open(WINDOW, 1, panels());
+    harness.state_mut().input.calibratable = true;
+    assert_eq!(click(&mut harness, "Zoom"), []);
+    assert_eq!(
+        click(&mut harness, &Control::Calibrate.label()),
+        [Command::Press(Control::Calibrate)]
+    );
+}
+
+/// The calibration's dialog: the slider, and OK and Cancel, each asking
+/// for what it says.
+#[test]
+fn the_calibration_asks_for_its_buttons() {
+    let mut harness = open(WINDOW, 1, panels());
+    harness.state_mut().input.calibrate = Some(super::calibrate::Input {
+        points_per_mm: [4.0, 4.0],
+        stops: 0.0,
+        low: -0.5,
+        high: 0.5,
+        step: 0.001,
+        diagonal: 15.3,
+    });
+    harness.run();
+    assert_eq!(
+        click(&mut harness, "OK"),
+        [Command::Press(Control::CalibrateOk)]
+    );
+    assert_eq!(
+        click(&mut harness, "Cancel"),
+        [Command::Press(Control::CancelCalibrate)]
+    );
+    // The reset, alive once the slider is off the size the monitor says —
+    // the card larger with it, as the application makes it.
+    if let Some(input) = harness.state_mut().input.calibrate.as_mut() {
+        input.stops = 0.1;
+        input.points_per_mm = [4.0 * 0.1_f32.exp2(); 2];
+    }
+    harness.run();
+    assert_eq!(
+        click(&mut harness, "Reset"),
+        [Command::Press(Control::CalibrateReset)]
     );
 }

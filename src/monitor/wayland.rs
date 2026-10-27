@@ -25,6 +25,10 @@
 //! asked for. `xdg_output` says how large the output is in the logical pixels
 //! the compositor lays windows out in, and that with the mode is the scale it
 //! is really running.
+//!
+//! The `wl_output`'s geometry says how large the output is in millimeters,
+//! from the monitor's EDID, which over the same logical size is the density
+//! a picture is shown at the size it prints by.
 
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -57,7 +61,7 @@ use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::{
     self as xdg_output, ZxdgOutputV1,
 };
 
-use super::{Mode, Monitors, Room, Table};
+use super::{Mode, Monitors, Room, Screen, Table};
 
 /// Starts listening. `None` off Wayland, or under a compositor that speaks
 /// none of color management, `xdg_output` and dmabuf feedback: nothing then
@@ -188,6 +192,12 @@ struct Output {
     scanned: Option<[u32; 2]>,
     transform: Transform,
     logical: Option<[u32; 2]>,
+    /// Its size in millimeters, as the panel is built: zero on a side the
+    /// monitor does not say.
+    physical: [i32; 2],
+    /// Its make and model, as the geometry says them.
+    make: String,
+    model: String,
 }
 
 impl Output {
@@ -195,6 +205,17 @@ impl Output {
         Some(Room {
             device: device_size(self.scanned?, self.transform),
             logical: self.logical?,
+        })
+    }
+
+    /// Its size and model, once its logical size is known.
+    fn screen(&self) -> Option<Screen> {
+        let logical = self.logical?;
+        let mm = device_size(self.physical.map(|side| side.max(0) as u32), self.transform);
+        Some(Screen {
+            logical,
+            reported: super::believed(logical, mm.map(f64::from)),
+            model: super::model_word(&self.make, &self.model).or_else(|| self.name.clone())?,
         })
     }
 }
@@ -254,6 +275,11 @@ impl Listener {
                 })
                 .collect(),
             rooms: self.outputs.iter().filter_map(Output::room).collect(),
+            screens: self
+                .outputs
+                .iter()
+                .filter_map(|output| Some((output.name.clone()?, output.screen()?)))
+                .collect(),
         };
         let Ok(mut shared) = self.table.lock() else {
             return;
@@ -295,6 +321,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Listener {
                         scanned: None,
                         transform: Transform::Normal,
                         logical: None,
+                        physical: [0, 0],
+                        make: String::new(),
+                        model: String::new(),
                     });
                     state.subscribe(handle);
                 }
@@ -353,9 +382,18 @@ impl Dispatch<wl_output::WlOutput, u32> for Listener {
                     .map(|(width, height)| [width, height]);
             }
             wl_output::Event::Geometry {
+                physical_width,
+                physical_height,
+                make,
+                model,
                 transform: WEnum::Value(transform),
                 ..
-            } => output.transform = transform,
+            } => {
+                output.transform = transform;
+                output.physical = [physical_width, physical_height];
+                output.make = make;
+                output.model = model;
+            }
             _ => return,
         }
         state.publish();

@@ -107,12 +107,72 @@ loupe's rings would sit off its glass, and the picture would be fitted to a
 content area the panels do not leave. `redraw` checks in debug builds that
 egui's figure and the application's agree.
 
-`device_scale` is read in three places only. `app/window.rs` sizes the window
+`device_scale` is read in four places only. `app/window.rs` sizes the window
 in the monitor's logical pixels, where the interface's scale is a
 multiplier on the chrome (`window::Chrome`) and not a unit. The checkerboard
 behind a transparent picture is drawn at the device scale (`Scene::scale`),
-since it is the picture's backdrop rather than part of the interface. And
-egui is told the native scale by egui-winit itself.
+since it is the picture's backdrop rather than part of the interface.
+`App::surface_density` turns a monitor's size into the window's pixels to
+the millimeter, below. And egui is told the native scale by egui-winit
+itself.
+
+### The print size
+
+`App::print_zoom` is the zoom at which the file's inch is an inch on the
+glass: the window's physical pixels to the millimeter over the image's. The
+monitor's side is `monitor::Monitors::density`, keyed by `monitor::key_of` of
+`window.current_monitor()` — on a Mac the screen holding most of the window,
+on Wayland whichever output winit last saw the surface enter — and is kept in
+*logical* pixels to the millimeter, the platform's logical size over the
+size in millimeters its EDID gives (`wl_output`'s geometry,
+`CGDisplayScreenSize`). `App::surface_density` multiplies that by
+`device_scale`, not by the monitor's own device-over-logical ratio, because
+the zoom is in the window's buffer pixels: under a compositor running 1.6
+without the fractional-scale protocol, the window draws at 2 and is shrunk,
+and only the window's own scale accounts for that. On a Mac in a scaled
+"looks like" mode the same holds — the backing scale is 2 and the panel is
+not 2× the points — which is why the panel's native resolution is never
+read.
+
+EDID sizes are wrong often enough to check. `monitor::density` turns the
+size to stand as the pixels do (Core Graphics does not say whether it turns
+it with the display), refuses a zero side, pixels that come out more than
+`SQUARE_WITHIN` from square and a density outside `DENSITY_RANGE` — which
+catches the panels that put their aspect ratio, 16 by 9, where their size
+belongs. A Mac with no EDID makes a size up at 72 to the inch;
+`monitor/macos.rs` recognizes that and says nothing instead.
+
+The file's density is of its pixels as stored, so it is read through the
+orientation tag and `Current::turn` onto the monitor's axes, and a map shown
+in the picture's place is scaled by its size against the picture's. The two
+axes could ask for two zooms; `print_zoom` takes their geometric mean, and
+they differ only for a file whose pixels are not square. It is a zoom, not a
+fit: the view keeps it when the window moves to another monitor.
+
+A size measured by hand — `app/calibration.rs`, the dialog `ui/calibrate.rs` —
+is kept in the state file as millimeters, not as pixels to the millimeter: a
+scale changed later changes the second and not the first, so millimeters stay
+true across a change of the Mac's "looks like" mode or the compositor's scale.
+It is kept against `Screen::model`, the make and model the EDID gives (on a
+Mac, Core Graphics' vendor and model numbers), rather than against
+`monitor::key_of`, because the connector's name belongs to the port: a
+monitor moved to another port keeps its calibration, and two of the same model
+share one, which is right, since they are the same size. `App::screen_size`
+reads the calibration ahead of the reported size, so it also gives a monitor
+that reports none a print size.
+
+The dialog's slider is in stops of the card's size from the reported size (or,
+for a monitor that reports none, from 96 logical pixels to the inch), so its
+mark and the start of its fill stand at what the monitor says; OK with the
+slider on that mark lets the calibration go rather than keeping a copy of the
+reported size. The reset (`App::reset_calibration`) puts it there and centers
+the run on it as well, since a calibration kept far from the reported size
+opens with the mark outside the run. It runs `calibration::RANGE` either side of where the dialog
+opened, which keeps the card's room — the card at the far end of the run, so
+that the dialog does not resize under the hand — small enough to fit a window.
+The dialog has no text field, so keys never reach egui while it is up:
+`App::handle_key` hands every one to `App::calibration_key` instead, and the
+keys bound to the picture wait.
 
 The interface's scale is kept in the state file and not set in the
 configuration: it is set by hand, with the picture on screen, as the file
@@ -1718,13 +1778,16 @@ tooltip on it is named from the key table by the same `action_of` that names
 a button: a numbered cell by the key that goes to that zoom, a fit by the key
 that toggles the fit, a copy by the very line that describes the copy.
 
-The zoom menu holds three kinds of thing, and says so: **Zoom**, eight
-percentages four to a row; **Fit**, the two fits as arrows; and
+The zoom menu holds four kinds of thing, and says so: **Zoom**, eight
+percentages four to a row; **Physical**, the print size, a scale like the
+others but not one the menu knows — `ZoomChoice::Print` carries no number, and
+`App::print_zoom` hands it to `ZoomChoice::apply` and `active` as `print`;
+**Fit**, the two fits as arrows; and
 **Up-scaling**, the magnification filter as the two words `Nearest` and
 `Bicubic`. Undivided, those last two read as a third fit — and there is no
 picture of "bicubic" a reader arrives at unaided, so theirs are the one pair
 of cells cut wider than the rest, by exactly what the words need.
-`ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into three and a test holds the two in
+`ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into four and a test holds the two in
 step, since a choice in no section could never be pressed. The menu of copies
 is a list rather than a grid, each item with its key printed beside it: the
 items are things done rather than states to be in, and what a reader wants
