@@ -173,6 +173,36 @@ impl Ruler {
         }
     }
 
+    /// How wide a pixel is over how tall, in the measure's units: one for
+    /// square pixels, and the pixels' own shape on a print or the ground
+    /// whose pixels are not — what turns a ratio in the unit into one in
+    /// pixels.
+    pub fn shape(&self) -> f64 {
+        self.per_pixel(0) / self.per_pixel(1)
+    }
+
+    /// The unit's own word, for a box to wear after its number: none for a
+    /// pixel, nor for coordinates whose unit the file does not name.
+    pub fn unit_word(&self) -> Option<&'static str> {
+        match self.unit {
+            Unit::Pixel | Unit::Ground(None) => None,
+            Unit::Print(unit) => Some(unit.word()),
+            Unit::Ground(Some(unit)) => Some(unit),
+        }
+    }
+
+    /// A reading typed in: a number, signed or not, with the unit's own word
+    /// after it or not. `None` for anything else.
+    pub fn read(&self, typed: &str) -> Option<f64> {
+        let typed = typed.trim();
+        let number = self
+            .unit_word()
+            .and_then(|word| typed.strip_suffix(word))
+            .unwrap_or(typed)
+            .trim_end();
+        number.parse::<f64>().ok().filter(|value| value.is_finite())
+    }
+
     /// What follows a reading, space and all: nothing for a pixel, nor for
     /// a file that does not say what its coordinates are in, and an angle's
     /// mark set against the number as an angle is written.

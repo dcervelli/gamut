@@ -1723,6 +1723,20 @@ numbers come back from the arithmetic a hair off it. The spacing is chosen
 along the axis the lines fall closer together on, so a print or a raster
 whose pixels are not square keeps squares of its own unit.
 
+The region panel's boxes read the same `Ruler` (`region_panel::Field::of`
+and `read`). A region stays whole pixels, so a typed reading goes to the
+nearest pixel edge and the box then says where that is. The box hands what
+was typed over only where it differs from what it said: a reading written
+to the places a pixel is worth goes back to its pixel, except on a tie — a
+pixel exactly a power of ten across, on a raster whose corners fall half a
+unit off a round coordinate — where a box let go of unchanged would have
+moved the region by one. A box is kept in egui's memory under its measure
+as well as its name, so text half typed when the measure changes is thrown
+away rather than read in another unit. A held ratio is in the measure's
+units too, which on pixels that are not square is another shape in them:
+`Aspect::ratio` takes the pixels' `Ruler::shape`, and `Aspect::in_pixels`
+is what `Marking` holds a region to.
+
 The lines are numbered by `grid::labels`, which is geometry only and is
 tested with a stand-in for the font. A label goes beside the picture where
 the content area has room past the picture's edge — the near side first,

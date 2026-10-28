@@ -130,7 +130,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  area, glass() is the magnified draw the image layer makes of it, show() the rings
   region_panel.rs  the panel up while a region is: its fit, copy and cross,
                  the aspect's box, menu and swap, and the boxes for its place
-                 and size, each handing over what is typed only when let go
+                 and size in what ruler.rs measures, each handing over what is
+                 typed, as the nearest pixel edge, only when let go
   region.rs      the region marked out on the picture: where its outline and
                  eight handles go, which handle the pointer is on, and the
                  words it wears while the pointer is on it — its size at its

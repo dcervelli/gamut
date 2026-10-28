@@ -1139,6 +1139,9 @@ image's own shape; or one of 1:1, 5:4, 4:3, 3:2 and 16:9. Or type a ratio
 into the box: `16:10`, `16/10` and `16x10` all work, as does one number such
 as `2.39`, which means 2.39 to 1. Choosing a shape while a region is on
 screen reshapes it about its center, keeping about the same number of pixels.
+A ratio is in what the picture is measured in — see below — so 1:1 on a map
+whose pixels cover more ground across than down is square on the ground, and
+taller than it is wide in pixels.
 
 While an aspect is chosen, everything that changes the region keeps it to
 that shape. A new drag reaches from where it started as far as the pointer
@@ -1160,8 +1163,15 @@ The aspect stays chosen when the region is taken off and when you step to
 another file, until you choose another or quit.
 
 **X** and **Y** are where the region's top left corner is in the image, and
-**W** and **H** its width and height, all in the image's own pixels. Type a
-number into one and press `Enter` or `Tab`, or click elsewhere, to apply it.
+**W** and **H** its width and height, in whatever the grid and the region's
+own labels are in: the image's pixels; inches or millimeters, with the pixel
+readout on **Print**; or, on a map, its own coordinates, with the readout on
+**Projected** or **Geographic**. The unit follows the number in each box. On
+a map, **Y** is the northing of the top edge. Type a number into one — with
+its unit after it or not — and press `Enter` or `Tab`, or click elsewhere,
+to apply it. A region covers whole pixels, so what you type goes to the
+nearest pixel edge, and the box then says where that is: at 300 dots to
+the inch, `20` millimeters becomes `19.98`. A width less than a pixel is a pixel.
 `Esc` puts the box back as it was. A new position moves the region without
 resizing it. A new width or height keeps the top left corner where it is,
 and with an aspect chosen the other side follows. A region does not reach

@@ -2752,7 +2752,7 @@ impl App {
     /// pixel has nothing to animate.
     fn perform_on_region(&mut self, region: Region, action: Action) -> Option<Effect> {
         let image = self.image_pixels();
-        let ratio = self.marking.ratio(image);
+        let ratio = self.marking.ratio(image, self.ruler().shape());
         Some(match action {
             GrowRegion(direction) => {
                 self.marking
@@ -2824,7 +2824,8 @@ impl App {
         let image = self.image_pixels();
         let axis = field.axis();
         let typed = if field.is_size() {
-            region.sized(axis, number, self.marking.ratio(image), image)
+            let ratio = self.marking.ratio(image, self.ruler().shape());
+            region.sized(axis, number, ratio, image)
         } else {
             let mut by = [0, 0];
             by[axis] = i64::from(number) - i64::from([region.x, region.y][axis]);
@@ -2832,6 +2833,20 @@ impl App {
         };
         self.marking.select(typed);
         Effect::Redraw
+    }
+
+    /// What the picture on screen is measured in, as the grid and the
+    /// region's labels and boxes measure it: the pixels with none.
+    pub(super) fn ruler(&self) -> ui::ruler::Ruler {
+        self.current
+            .as_ref()
+            .map_or(ui::ruler::Ruler::PIXELS, |current| {
+                ui::ruler::Ruler::of(
+                    current,
+                    self.panels.coordinate_format,
+                    self.panels.print_unit,
+                )
+            })
     }
 
     /// The image on screen in whole pixels, which is what a region is
@@ -2858,7 +2873,8 @@ impl App {
     /// The hand is at `to`, in image pixels.
     fn pull(&mut self, to: [f32; 2]) {
         let image = self.image_pixels();
-        self.marking.pull(to, image);
+        let shape = self.ruler().shape();
+        self.marking.pull(to, image, shape);
     }
 
     /// The button came up. A box dragged out is what the view goes to:
@@ -3871,13 +3887,14 @@ impl App {
             Control::RegionCopy => self.perform(CopyImage),
             Control::RegionFit => self.fit_region(),
             Control::RegionSwap => {
-                self.marking.swap(self.image_pixels());
+                self.marking.swap(self.image_pixels(), self.ruler().shape());
                 Effect::Redraw
             }
             // A menu button, which opens its menu by itself.
             Control::AspectMenu => Effect::Nothing,
             Control::Aspect(aspect) => {
-                self.marking.hold_to(aspect, self.image_pixels());
+                self.marking
+                    .hold_to(aspect, self.image_pixels(), self.ruler().shape());
                 Effect::Redraw
             }
             // The keys' own actions, so that the bar and `Enter`, `n` and
