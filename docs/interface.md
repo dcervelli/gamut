@@ -399,10 +399,10 @@ marked-out part under the hand. It comes back from the pass as
 `View::center_on` moves the pan there — clamped as any pan is, so a press by
 an edge stops with the edge as far inside the window's as a drag goes, and
 an axis the image is well short of stays centered. The marker is the
-viewport's rectangle, not clamped to the thumbnail, so a view past the
-image's edge has it hang off the thumbnail's side by as much, over the
-picture; it is cut off at the content area rather than drawn over the
-chrome, and the wash stays on the thumbnail. Not animated, on the rule the rest of the view
+viewport's rectangle cut to the thumbnail, so a view past the image's edge
+has it stop at the thumbnail's edge, and that edge of it is drawn dashed
+(`outline_sides`) to say the view goes on past it; the marker never leaves
+the thumbnail for the picture around it. Not animated, on the rule the rest of the view
 follows: this is the hand on the view, as a drag on the picture is, and it
 lands where it is put. The press is read with `is_pointer_button_down_on`
 rather than `clicked` or `dragged`, both of which wait — the one for the
