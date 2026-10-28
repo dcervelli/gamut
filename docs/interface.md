@@ -1723,6 +1723,22 @@ numbers come back from the arithmetic a hair off it. The spacing is chosen
 along the axis the lines fall closer together on, so a print or a raster
 whose pixels are not square keeps squares of its own unit.
 
+The lines are numbered by `grid::labels`, which is geometry only and is
+tested with a stand-in for the font. A label goes beside the picture where
+the content area has room past the picture's edge — the near side first,
+then the far — since that covers nothing and is where a printed map numbers
+its graticule; with no room it goes over the picture just inside the
+content area, on the menus' ground so it reads against anything. How many
+lines are numbered is `labeled_every`: the widest label any line would wear
+sets the room one needs, and the interval is the first of the ruler's own
+1-2-5 marks that is a whole number of spacings and gives that room, so the
+numbered lines stay round where a bare multiple of the spacing would number
+a grid in fives by twenty-fives. The words are the bare reading in the
+toggle's unit — kilometers where it says kilometers — to as many places as
+the interval needs. The left edge is laid out before the top, its labels
+being short and each one wanted, and a top label that would touch one, or
+the minimap, or the loupe's glass, is the one left out.
+
 Two kinds of raster need one more step to be read at all, and both take the
 same one. A BigTIFF — the same tags and types with eight-byte offsets, which
 is how anything that might pass four gigabytes is written, and how a plain
@@ -1817,8 +1833,9 @@ is a list rather than a grid, each item with its key printed beside it: the
 items are things done rather than states to be in, and what a reader wants
 from one is the key that would have done it without the menu.
 
-The pixel menu is a list too, sectioned — the value, the coordinate, and
-where the file can give them the print's unit and a latitude's degrees —
+The pixel menu is a list too, sectioned — the coordinate, where the file
+can give them the print's unit and a latitude's degrees, and then the value,
+the order the readout writes them in —
 because each of its items has a letter while it is open, as the sort menu's
 have: `When::PixelMenuOpen` is a context (`keymap::Context::PixelMenu`), so
 the letters are tried ahead of the plain names only while

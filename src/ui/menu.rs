@@ -383,9 +383,10 @@ fn fit_cell(pass: &mut Pass, ui: &mut Ui, fit: Fit, fills: Axis, active: bool) -
     response
 }
 
-/// The pixel menu: the ways of writing a pixel's value, and under them the
-/// ways of writing where it is, each item a line with the key that chooses
-/// it while the menu is open beside it, as the sort menu's are.
+/// The pixel menu: the ways of writing where a pixel is, and under them the
+/// ways of writing its value — the order the readout writes the two in —
+/// each item a line with the key that chooses it while the menu is open
+/// beside it, as the sort menu's are.
 ///
 /// Every way of writing where a pixel is keeps its place, dead where the
 /// file cannot answer it, so that a key learned on one file is where it was
@@ -413,13 +414,7 @@ pub(super) fn pixel_items(pass: &mut Pass, ui: &mut Ui) {
             ui.close();
         }
     };
-    heading(pass, ui, "Pixel value", true);
-    let chosen = pass.panels.pixel_format;
-    for format in PixelFormat::ALL {
-        item(pass, ui, Control::Format(format), format == chosen);
-    }
-
-    heading(pass, ui, "Coordinate", false);
+    heading(pass, ui, "Coordinate", true);
     let shown = pass.panels.coordinate_format.shown(answers);
     for format in CoordinateFormat::ALL {
         item(pass, ui, Control::Coordinates(format), format == shown);
@@ -437,6 +432,12 @@ pub(super) fn pixel_items(pass: &mut Pass, ui: &mut Ui) {
         for format in GeographicFormat::ALL {
             item(pass, ui, Control::Geographic(format), format == chosen);
         }
+    }
+
+    heading(pass, ui, "Pixel value", false);
+    let chosen = pass.panels.pixel_format;
+    for format in PixelFormat::ALL {
+        item(pass, ui, Control::Format(format), format == chosen);
     }
 }
 

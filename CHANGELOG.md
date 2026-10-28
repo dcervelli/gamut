@@ -17,7 +17,10 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   or millimeters, or a map's own coordinates — `500 m`, `2 km` — its lines on
   round eastings and northings. With the readout on latitude and longitude,
   which curve across a projected map, the grid uses the map's coordinates.
-  A region's size and edges are written in the same units.
+  A region's size and edges are written in the same units. The grid's lines
+  are numbered along the top and the left of the view, just outside the
+  picture where there is empty space beside it and just inside the window
+  where there is not.
 - Keys for the pixel readout's menu: `.` opens it, even with the interface
   hidden, and while it is open a letter chooses each item — `h` hex, `d`
   decimal, `m` mapped, `z` depth; `x` pixel, `p` print, `e` projected, `g`

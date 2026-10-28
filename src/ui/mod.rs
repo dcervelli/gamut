@@ -1206,6 +1206,7 @@ impl Pass<'_> {
                 &ruler,
                 grid::step(&ruler, zoom, self.input.scale),
                 self.theme,
+                &egui::TextStyle::Small.resolve(ui.style()),
             );
         }
         // The horizon grid, over the pixel grid and under the region, and

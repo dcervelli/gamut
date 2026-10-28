@@ -21,7 +21,7 @@
 use crate::render::Placement;
 
 use super::Rect;
-use super::ruler::{self, Ruler, Unit};
+use super::ruler::{Ruler, Unit};
 use crate::theme::Theme;
 
 /// What the spacing aims at, in logical pixels. Laid out in logical rather
@@ -124,6 +124,7 @@ pub(super) fn paint(
     ruler: &Ruler,
     step: f64,
     theme: &Theme,
+    font: &egui::FontId,
 ) {
     let Clear { minimap, glass } = clear;
     if !placement.zoom.is_finite() || placement.zoom <= 0.0 || scale <= 0.0 {
@@ -184,6 +185,38 @@ pub(super) fn paint(
             glass.and_then(|(center, radius)| chord(line, center, radius)),
         ];
         fill_around(painter, line, &holes, ink);
+    }
+
+    // Laid out with no ink of their own, so that the painter's is the one
+    // they are drawn in, whatever the theme.
+    let laid = |text: &str| {
+        painter.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
+    };
+    let measured = |text: &str| {
+        let size = laid(text).size();
+        [size.x, size.y]
+    };
+    for label in labels(across, down, image, content, clear, measured) {
+        let rect = Rect::new(
+            snap(label.rect.x),
+            snap(label.rect.y),
+            label.rect.width,
+            label.rect.height,
+        );
+        // Over the picture, on a ground of the menus' to be read against
+        // whatever is under it; beside it, on the window's own empty
+        // ground, in the dimmer ink the bars' facts are written in.
+        let text = if label.over {
+            painter.rect_filled(rect.into(), 3.0, theme.menu_background);
+            theme.text_primary
+        } else {
+            theme.text_dim
+        };
+        painter.galley(
+            egui::pos2(rect.x + LABEL_INSET[0], rect.y + LABEL_INSET[1]),
+            laid(&label.text),
+            text.into(),
+        );
     }
 }
 
@@ -291,6 +324,11 @@ impl Along<'_> {
     /// The image's own edges are not lines: the grid divides the image up,
     /// and a line along the edge would draw a frame around it instead.
     fn lines(self, from: f32, to: f32) -> Vec<f32> {
+        self.ticks(from, to).into_iter().map(|(at, _)| at).collect()
+    }
+
+    /// The same lines, each with what the measure reads along it.
+    fn ticks(self, from: f32, to: f32) -> Vec<(f32, f64)> {
         let Along {
             ruler,
             axis,
@@ -321,12 +359,17 @@ impl Along<'_> {
             let pixel = ruler.pixels(axis, index * step);
             let at = origin + (pixel as f32) * per;
             if pixel > ON_EDGE && pixel < extent - ON_EDGE && at >= from && at < to {
-                out.push(at);
+                out.push((at, index * step));
             }
             index += 1.0;
         }
-        out.sort_by(f32::total_cmp);
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
         out
+    }
+
+    /// How far apart the lines are on screen, in logical pixels.
+    fn spacing(self) -> f32 {
+        (self.step / self.ruler.per_pixel(self.axis)) as f32 * self.per
     }
 }
 
@@ -335,15 +378,254 @@ impl Along<'_> {
 /// are as many, which is how a map's scale bar writes them; every other unit
 /// stays as it is, an inch being written in inches however many of them.
 pub(super) fn label(step: f64, ruler: &Ruler) -> String {
-    let written = |value: f64| {
-        let places = ruler::places_for(value, 0, 9);
-        format!("{value:.places$}")
-    };
     match ruler.unit {
         Unit::Pixel => format!("{step:.0} px"),
-        Unit::Ground(Some("m")) if step >= 1000.0 => format!("{} km", written(step / 1000.0)),
-        _ => format!("{}{}", written(step), ruler.suffix()),
+        Unit::Ground(Some("m")) if step >= 1000.0 => {
+            format!("{} km", written(step / 1000.0, step / 1000.0))
+        }
+        _ => format!("{}{}", written(step, step), ruler.suffix()),
     }
+}
+
+/// `value` with as many places as `every`, a round number, needs to be
+/// written exactly, and no sign on a nought.
+fn written(value: f64, every: f64) -> String {
+    // A hair under, so that a tenth worked out as a hair over one place
+    // does not ask for two.
+    let places = (-every.log10() - 1e-9).ceil().clamp(0.0, 9.0) as usize;
+    let text = format!("{value:.places$}");
+    match text.strip_prefix('-') {
+        Some(rest) if rest.chars().all(|c| c == '0' || c == '.') => rest.to_string(),
+        _ => text,
+    }
+}
+
+/// What the line at `value` is labeled, where the lines labeled are
+/// `every` apart: the bare number, in the unit the toggle writes the spacing
+/// in — kilometers where it writes kilometers — the unit being said once
+/// there rather than at every line.
+fn reading(value: f64, every: f64, step: f64, ruler: &Ruler) -> String {
+    match ruler.unit {
+        Unit::Ground(Some("m")) if step >= 1000.0 => written(value / 1000.0, every / 1000.0),
+        _ => written(value, every),
+    }
+}
+
+/// How far apart, in `step`s, the lines that are labeled are: every one
+/// where a label has `room` logical pixels to go between two lines
+/// `spacing` apart, and otherwise the fewest that leave it that much — a
+/// round number of the unit apart, so that the lines labeled read as the
+/// marks a ruler numbers do: by tens on one ruled in fives, never by
+/// fifteens.
+fn labeled_every(step: f64, spacing: f32, room: f32) -> u64 {
+    if !spacing.is_finite() || spacing <= 0.0 {
+        return u64::MAX;
+    }
+    // The ruler's marks from the decade the step is in up, of which only
+    // those a whole number of steps can be.
+    let mut decade = 10f64.powf(step.log10().floor());
+    loop {
+        for mantissa in STEPS {
+            let every = mantissa * decade;
+            let count = (every / step).round();
+            if (every / step - count).abs() > 1e-6 || count < 1.0 {
+                continue;
+            }
+            if count as f32 * spacing >= room {
+                return count as u64;
+            }
+        }
+        decade *= 10.0;
+        if decade / step > 1e9 {
+            return u64::MAX;
+        }
+    }
+}
+
+/// The room between a label's words and the edge of what it is written on,
+/// and between a label and the image it sits beside or the window's edge it
+/// sits inside.
+const LABEL_INSET: [f32; 2] = [4.0, 1.0];
+const LABEL_GAP: f32 = 4.0;
+
+/// The least room between two labels along an edge, beyond their own
+/// width: enough that two numbers do not read as one.
+const LABEL_SPACE: f32 = 12.0;
+
+/// One of the grid's labels: what it says, the rectangle it takes, and
+/// whether it is written over the picture — and so on a ground of its own
+/// to be read against it — or beside it, where the window is empty.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) struct Label {
+    pub text: String,
+    pub rect: Rect,
+    pub over: bool,
+}
+
+/// Which side of the picture the labels along one axis go on, and whether
+/// they are written beside it, in the window's empty space, or over it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Side {
+    /// The near edge — the top or the left — beside the picture, or over
+    /// it, along the near edge of what is visible of it.
+    Near { over: bool },
+    /// Beside the far edge, the bottom or the right.
+    Far,
+}
+
+/// Where the labels go along `axis`'s edges: beside the picture where the
+/// window has room for them on either side of it, the near side first, and
+/// otherwise over the picture along the near edge of what is visible of it.
+fn side(axis: usize, image: Rect, content: Rect, depth: f32) -> Side {
+    let (near, far) = match axis {
+        0 => (image.y - content.y, content.bottom() - image.bottom()),
+        _ => (image.x - content.x, content.right() - image.right()),
+    };
+    let need = depth + 2.0 * LABEL_GAP;
+    if near >= need {
+        Side::Near { over: false }
+    } else if far >= need {
+        Side::Far
+    } else {
+        Side::Near { over: true }
+    }
+}
+
+/// The labels the grid's lines wear, at the edges of what can be seen of
+/// the picture: the reading of each line down the picture beside it across
+/// the top, and of each line across it down the left — or across the
+/// bottom and down the right, where the window has room for them beside
+/// the picture there and not at the top or the left.
+///
+/// Beside the picture is where the window has room to spare, panned or
+/// zoomed out until there is empty space around it: the labels sit just
+/// outside the picture's edge, as a map's sit outside its frame, and cover
+/// none of it. With none, they go over it, just inside the window's edge.
+///
+/// A line is labeled only as often as there is room for its words, by
+/// [`labeled_every`]; a label that would run off the window, cover the
+/// minimap or the loupe, or touch one already placed — the corner the two
+/// edges share — is left out.
+fn labels(
+    across: Along,
+    down: Along,
+    image: Rect,
+    content: Rect,
+    clear: Clear,
+    mut measure: impl FnMut(&str) -> [f32; 2],
+) -> Vec<Label> {
+    let Some(area) = image.intersect(content) else {
+        return Vec::new();
+    };
+    let mut placed: Vec<Label> = Vec::new();
+    // Down the side first: its labels are short and every one is wanted,
+    // where the top has more to give way.
+    for along in [down, across] {
+        let axis = along.axis;
+        let (from, to) = match axis {
+            0 => (area.x, area.right()),
+            _ => (area.y, area.bottom()),
+        };
+        let ticks = along.ticks(from, to);
+        if ticks.is_empty() {
+            continue;
+        }
+        // Sized by the widest of what every line would say at the finest
+        // a label could be: the labels kept are among them.
+        let sizes: Vec<[f32; 2]> = ticks
+            .iter()
+            .map(|&(_, value)| measure(&reading(value, along.step, along.step, along.ruler)))
+            .collect();
+        let widest = sizes.iter().fold([0.0f32; 2], |most, size| {
+            [most[0].max(size[0]), most[1].max(size[1])]
+        });
+        let box_size = [
+            widest[0] + 2.0 * LABEL_INSET[0],
+            widest[1] + 2.0 * LABEL_INSET[1],
+        ];
+        // Along the edge, a label takes its width across the top and its
+        // height down the side.
+        let (length, depth) = match axis {
+            0 => (box_size[0], box_size[1]),
+            _ => (box_size[1], box_size[0]),
+        };
+        let count = labeled_every(along.step, along.spacing(), length + LABEL_SPACE);
+        let every = along.step * count as f64;
+        let side = side(axis, image, content, depth);
+        for (at, value) in ticks {
+            let index = (value / every).round();
+            if (value / every - index).abs() > 1e-6 {
+                continue;
+            }
+            let text = reading(value, every, along.step, along.ruler);
+            let size = measure(&text);
+            let size = [
+                size[0] + 2.0 * LABEL_INSET[0],
+                size[1] + 2.0 * LABEL_INSET[1],
+            ];
+            let over = matches!(side, Side::Near { over: true });
+            let rect = match (axis, side) {
+                (0, Side::Near { over: false }) => Rect::new(
+                    at - size[0] / 2.0,
+                    image.y - LABEL_GAP - size[1],
+                    size[0],
+                    size[1],
+                ),
+                (0, Side::Far) => Rect::new(
+                    at - size[0] / 2.0,
+                    image.bottom() + LABEL_GAP,
+                    size[0],
+                    size[1],
+                ),
+                (0, Side::Near { over: true }) => {
+                    Rect::new(at - size[0] / 2.0, area.y + LABEL_GAP, size[0], size[1])
+                }
+                (_, Side::Near { over: false }) => Rect::new(
+                    image.x - LABEL_GAP - size[0],
+                    at - size[1] / 2.0,
+                    size[0],
+                    size[1],
+                ),
+                (_, Side::Far) => Rect::new(
+                    image.right() + LABEL_GAP,
+                    at - size[1] / 2.0,
+                    size[0],
+                    size[1],
+                ),
+                (_, Side::Near { over: true }) => {
+                    Rect::new(area.x + LABEL_GAP, at - size[1] / 2.0, size[0], size[1])
+                }
+            };
+            let clear_of = |hole: Rect| rect.intersect(hole).is_none();
+            let fits = inside(rect, content)
+                && clear.minimap.is_none_or(clear_of)
+                && clear.glass.is_none_or(|(center, radius)| {
+                    clear_of(Rect::new(
+                        center[0] - radius,
+                        center[1] - radius,
+                        2.0 * radius,
+                        2.0 * radius,
+                    ))
+                })
+                && placed.iter().all(|other| {
+                    rect.inset(-LABEL_GAP, -LABEL_GAP)
+                        .intersect(other.rect)
+                        .is_none()
+                });
+            if fits {
+                placed.push(Label { text, rect, over });
+            }
+        }
+    }
+    placed
+}
+
+/// Whether the whole of `inner` is inside `outer`.
+fn inside(inner: Rect, outer: Rect) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.right() <= outer.right()
+        && inner.bottom() <= outer.bottom()
 }
 
 #[cfg(test)]
@@ -652,6 +934,136 @@ mod tests {
             ]
         );
         assert!(left.iter().all(|piece| piece.intersect(minimap).is_none()));
+    }
+
+    /// A line is labeled as often as its words leave room for, and the
+    /// lines labeled are a round number of the unit apart: on a grid ruled
+    /// in fives, by fives, tens or fifties, never by fifteens.
+    #[test]
+    fn the_lines_labeled_are_a_round_number_apart() {
+        assert_eq!(labeled_every(5.0, 50.0, 40.0), 1);
+        assert_eq!(labeled_every(5.0, 50.0, 60.0), 2);
+        assert_eq!(labeled_every(5.0, 50.0, 120.0), 4);
+        assert_eq!(labeled_every(2.0, 50.0, 60.0), 5);
+        assert_eq!(labeled_every(1.0, 50.0, 60.0), 2);
+        assert_eq!(labeled_every(0.2, 50.0, 60.0), 5);
+        assert_eq!(labeled_every(1000.0, 30.0, 70.0), 5);
+    }
+
+    /// A label is the bare number, to the places the labels' own spacing
+    /// needs, in kilometers where the toggle writes kilometers.
+    #[test]
+    fn a_label_is_the_bare_number() {
+        let inches = Ruler::print([300.0, 300.0], density::Unit::Inches);
+        assert_eq!(reading(0.6000000000000001, 0.2, 0.2, &inches), "0.6");
+        assert_eq!(reading(1.0, 0.1, 0.1, &inches), "1.0");
+        assert_eq!(reading(300.0, 100.0, 100.0, &Ruler::PIXELS), "300");
+        assert_eq!(reading(2_656_000.0, 1000.0, 1000.0, &ground()), "2656");
+        assert_eq!(reading(2_656_500.0, 500.0, 500.0, &ground()), "2656500");
+        assert_eq!(written(-0.0, 1.0), "0");
+    }
+
+    /// What a test's words measure: seven pixels a character, ten high.
+    fn measured(text: &str) -> [f32; 2] {
+        [7.0 * text.chars().count() as f32, 10.0]
+    }
+
+    /// A picture `image` on screen at one logical pixel to its pixel,
+    /// measured in its pixels and ruled every `step`.
+    fn alongs(image: Rect, step: f64) -> (Along<'static>, Along<'static>) {
+        let across = Along {
+            ruler: &Ruler::PIXELS,
+            axis: 0,
+            step,
+            origin: image.x,
+            per: 1.0,
+            extent: f64::from(image.width),
+        };
+        let down = Along {
+            axis: 1,
+            origin: image.y,
+            extent: f64::from(image.height),
+            ..across
+        };
+        (across, down)
+    }
+
+    /// With room around the picture, the labels sit just outside it, above
+    /// it and to its left, each on its line; filling the window, they go
+    /// over it, inside the window's top and left edges.
+    #[test]
+    fn the_labels_sit_beside_the_picture_where_there_is_room() {
+        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let image = Rect::new(100.0, 100.0, 400.0, 300.0);
+        let (across, down) = alongs(image, 100.0);
+        let placed = labels(across, down, image, content, Clear::default(), measured);
+        let texts: Vec<&str> = placed.iter().map(|label| label.text.as_str()).collect();
+        assert_eq!(texts, ["100", "200", "100", "200", "300"]);
+        for label in &placed {
+            assert!(!label.over, "{label:?}");
+            assert!(label.rect.intersect(image).is_none(), "{label:?}");
+        }
+        // The first two are down the left, centered on their lines.
+        assert_eq!(placed[0].rect.right(), image.x - LABEL_GAP);
+        assert_eq!(placed[0].rect.y + placed[0].rect.height / 2.0, 200.0);
+        assert_eq!(placed[2].rect.bottom(), image.y - LABEL_GAP);
+        assert_eq!(placed[2].rect.x + placed[2].rect.width / 2.0, 200.0);
+
+        let image = Rect::new(-50.0, -50.0, 900.0, 700.0);
+        let (across, down) = alongs(image, 100.0);
+        let placed = labels(across, down, image, content, Clear::default(), measured);
+        assert!(!placed.is_empty());
+        for label in &placed {
+            assert!(label.over, "{label:?}");
+            assert!(inside(label.rect, content), "{label:?}");
+        }
+    }
+
+    /// Panned so that the room is on the far side, the labels go there,
+    /// below the picture and to its right.
+    #[test]
+    fn the_labels_go_where_the_room_is() {
+        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let image = Rect::new(-100.0, -100.0, 600.0, 500.0);
+        let (across, down) = alongs(image, 100.0);
+        let placed = labels(across, down, image, content, Clear::default(), measured);
+        assert!(!placed.is_empty());
+        for label in &placed {
+            assert!(!label.over, "{label:?}");
+            let below = label.rect.y >= image.bottom();
+            let right = label.rect.x >= image.right();
+            assert!(below || right, "{label:?}");
+        }
+    }
+
+    /// Lines closer together than their words are labeled every so many,
+    /// and nothing is written over the minimap or over another label.
+    #[test]
+    fn crowded_labels_give_way() {
+        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let image = Rect::new(-50.0, -50.0, 900.0, 700.0);
+        let (across, down) = alongs(image, 10.0);
+        let minimap = Rect::new(600.0, 0.0, 200.0, 150.0);
+        let clear = Clear {
+            minimap: Some(minimap),
+            glass: None,
+        };
+        let placed = labels(across, down, image, content, clear, measured);
+        for (index, label) in placed.iter().enumerate() {
+            assert!(label.rect.intersect(minimap).is_none(), "{label:?}");
+            for other in &placed[index + 1..] {
+                assert!(label.rect.intersect(other.rect).is_none(), "{label:?}");
+            }
+        }
+        // Three-digit labels 21 wide want 45 between them: every fifth
+        // line of ten across, every other one down.
+        let across: Vec<&str> = placed
+            .iter()
+            .filter(|label| label.rect.height == 12.0 && label.rect.y < 10.0)
+            .map(|label| label.text.as_str())
+            .collect();
+        assert!(across.contains(&"100"), "{across:?}");
+        assert!(!across.contains(&"110"), "{across:?}");
     }
 
     #[test]

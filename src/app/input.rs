@@ -1150,33 +1150,6 @@ pub static ROWS: &[Row] = &[
     Row {
         section: Section::Interface,
         when: Some(When::PixelMenuOpen),
-        help: "Show pixel value as hex, decimal, mapped, depth",
-        keys: Keys::Bound(&[
-            Bound {
-                name: "interface.readout.hex",
-                action: ShowValue(PixelFormat::Hex),
-                defaults: &[key('h')],
-            },
-            Bound {
-                name: "interface.readout.decimal",
-                action: ShowValue(PixelFormat::Decimal),
-                defaults: &[key('d')],
-            },
-            Bound {
-                name: "interface.readout.mapped",
-                action: ShowValue(PixelFormat::Mapped),
-                defaults: &[key('m')],
-            },
-            Bound {
-                name: "interface.readout.depth",
-                action: ShowValue(PixelFormat::Depth),
-                defaults: &[key('z')],
-            },
-        ]),
-    },
-    Row {
-        section: Section::Interface,
-        when: Some(When::PixelMenuOpen),
         help: "Show coordinate as pixel, print, projected, geographic, azimuth/elevation",
         keys: Keys::Bound(&[
             Bound {
@@ -1221,6 +1194,33 @@ pub static ROWS: &[Row] = &[
             CycleGeographicFormat,
             [key('s')]
         ),
+    },
+    Row {
+        section: Section::Interface,
+        when: Some(When::PixelMenuOpen),
+        help: "Show pixel value as hex, decimal, mapped, depth",
+        keys: Keys::Bound(&[
+            Bound {
+                name: "interface.readout.hex",
+                action: ShowValue(PixelFormat::Hex),
+                defaults: &[key('h')],
+            },
+            Bound {
+                name: "interface.readout.decimal",
+                action: ShowValue(PixelFormat::Decimal),
+                defaults: &[key('d')],
+            },
+            Bound {
+                name: "interface.readout.mapped",
+                action: ShowValue(PixelFormat::Mapped),
+                defaults: &[key('m')],
+            },
+            Bound {
+                name: "interface.readout.depth",
+                action: ShowValue(PixelFormat::Depth),
+                defaults: &[key('z')],
+            },
+        ]),
     },
     // Outside the menu, the one of them worth flicking through with the
     // pointer held still on the picture.

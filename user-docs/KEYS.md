@@ -905,10 +905,10 @@ where all of it is set.
 | `Ctrl+0` | Reset interface scale to the monitor's own | `interface.scale.reset` |
 | `x` | Select a region of the image; again, or `Esc`, removes it | `region.select` |
 | `.` | Open the pixel readout's menu, or close it | `interface.readout` |
-| `h`, `d`, `m`, `z`, while the pixel menu is open | Read the pixel's value out as hex, decimal, mapped or depth | `interface.readout.hex`, `interface.readout.decimal`, `interface.readout.mapped`, `interface.readout.depth` |
 | `x`, `p`, `e`, `g`, `a`, while the pixel menu is open | Read where the pixel is out as pixel, print, projected, geographic or direction, where the file can say | `interface.readout.pixel`, `interface.readout.print`, `interface.readout.projected`, `interface.readout.geographic`, `interface.readout.direction` |
 | `u`, while the pixel menu is open | Switch a print between inches and millimeters | `interface.readout.print-unit` |
 | `s`, while the pixel menu is open | Switch a latitude and longitude between decimal degrees and degrees, minutes and seconds | `interface.readout.lat-long` |
+| `h`, `d`, `m`, `z`, while the pixel menu is open | Read the pixel's value out as hex, decimal, mapped or depth | `interface.readout.hex`, `interface.readout.decimal`, `interface.readout.mapped`, `interface.readout.depth` |
 | `,` | Cycle where the pixel is read out as, among what the file can say: pixel → print → projected → geographic → direction | `interface.coordinate-format` |
 | `` ` `` | Show or hide the panels around the image | `interface.toggle` |
 | `~` | The same, and closes the histogram, information, minimap and file list | `interface.toggle-panels` |
@@ -997,6 +997,16 @@ neighboring ground are ruled alike. Wherever the readout cannot be followed —
 the direction, or a map turned on the ground — the grid is in image pixels.
 The button at the head of the bottom bar says which spacing is in force, in
 the reading beside its mark, so a distance on screen can be counted off.
+
+The lines are numbered at the edges of what you can see: the lines down the
+picture across the top, the lines across it down the left. Where there is
+empty space beside the picture — zoomed out, or panned past its edge — the
+numbers sit in it, just outside the picture, and move to the bottom or the
+right when that is where the space is; otherwise they sit over the picture,
+just inside the window. The numbers are bare, in the unit the button names —
+kilometers on a map whose button says `1 km` — and as many lines are numbered
+as there is room for, skipping to every second, fifth or tenth line so that
+the numbered ones are still round.
 
 The horizon grid, `b` or the compass button after the grid's, is for a
 picture whose camera recorded which way it faced — see the *Orientation*
@@ -1273,7 +1283,9 @@ whichever is in force is lit, and while the menu is open the letter beside
 each item chooses it. It applies to whichever image is on screen and stays as
 you set it, into the next run too.
 
-The menu's **Coordinate** section chooses how the pixel's place is written.
+The menu's **Coordinate** section, at its head above **Pixel value** as the
+readout writes the place before the value, chooses how the pixel's place is
+written.
 **Pixel** is the column and row, which every image has. **Print** is how far
 the middle of the pixel is from the top left corner of the picture printed at
 the resolution the file records, `(0.998, 0.002) in`, for a file that records

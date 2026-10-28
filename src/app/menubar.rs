@@ -362,7 +362,6 @@ fn view(b: &mut Builder) -> Vec<Node> {
         b.action("Decrease Interface Scale", Action::ScaleDown),
         b.action("Reset Interface Scale", Action::ScaleReset),
         Node::Separator,
-        b.submenu("Pixel Readout", None, formats),
         b.submenu(
             "Coordinates",
             Some(Control::Coordinates(CoordinateFormat::ALL[0])),
@@ -374,6 +373,7 @@ fn view(b: &mut Builder) -> Vec<Node> {
             Some(Control::Geographic(GeographicFormat::ALL[0])),
             geographic,
         ),
+        b.submenu("Pixel Readout", None, formats),
         Node::Separator,
         // AppKit adds an item of its own to a menu called View unless one
         // already sends `toggleFullScreen:`; its icon would indent the group

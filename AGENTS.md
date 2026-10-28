@@ -120,7 +120,8 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  track.rs the band and its handles, slider.rs the exposure's slider, drawn
                  by ui/slider.rs
   minimap.rs / grid.rs   one widget each, drawn with egui's painter; the grid is ruled in
-                 whatever ruler.rs measures, its lines where the measure reads round numbers
+                 whatever ruler.rs measures, its lines where the measure reads round numbers,
+                 and numbered at the edges of the view by labels()
   ruler.rs       Ruler: what the picture as shown is measured in along each axis — its
                  pixels, a print's inches or millimeters at the file's density, or the file's
                  own coordinates on the ground — as the readout's coordinate asks, falling
