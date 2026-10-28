@@ -1694,10 +1694,34 @@ user-defined, or named by a code the table lacks, or whose code has an inverse
 the crate does not implement, has no lift and offers only its own
 coordinates; one in latitude and longitude already offers only those, read
 straight or lifted from its own datum. `CoordinateFormat::offered` is the one
-reading of that — the menu's rows, the key's step and the `When::Georeferenced`
-and `When::Geographic` conditions all ask it — and `CoordinateFormat::shown`
-is what makes the pixel the fallback without forgetting the choice, which is
-held in `Panels` like the pixel format beside it.
+reading of that — the menu's dead items, the key's step, the `Conditions`
+that refuse a press and the `When` conditions all ask it, through
+`pixel::Answers` — and `CoordinateFormat::shown` is what makes the pixel the
+fallback without forgetting the choice, which is held in `Panels` like the
+pixel format beside it. The print's coordinate is offered the same way, for
+a file with a density: `ruler::density` lays the file's pixels to the inch
+along the picture as shown — the orientation tag, the turn, and the size of
+whichever of the file's images is on screen — as `App::print_zoom` does.
+
+What the grid is ruled in and what a region's labels are written in follow
+the coordinate, through `ui/ruler.rs`. A `Ruler` is the picture as shown
+measured along each axis by one straight function — where it reads at the
+near edge and how far it goes per pixel — which is all a grid of straight
+lines can draw and all a region's edges need. The pixel's and the print's are
+that by construction; the ground's is too for a raster whose matrix has no
+rotation (`Georeference::aligned`), worked out through `Turn::stored_point`
+so that a turned map rules its northings across. A latitude is not — on a
+projected raster its lines curve, which is why the user asks for the ground
+when they ask for a latitude — and a slanted raster's coordinates are not
+either, so both fall back: a latitude to the file's own coordinates, a slant
+to the pixel. The grid's lines go where the measure reads a whole number of
+spacings rather than a whole number of spacings in from the edge, so a map's
+fall on round eastings and two maps on one system share them, which is what
+lining them up on the ground (`app/ground.rs::aligned`) is for; `grid::ON_EDGE` keeps a raster cut on
+a round coordinate from drawing a line along its own edge after the large
+numbers come back from the arithmetic a hair off it. The spacing is chosen
+along the axis the lines fall closer together on, so a print or a raster
+whose pixels are not square keeps squares of its own unit.
 
 Two kinds of raster need one more step to be read at all, and both take the
 same one. A BigTIFF — the same tags and types with eight-byte offsets, which
@@ -1792,6 +1816,19 @@ step, since a choice in no section could never be pressed. The menu of copies
 is a list rather than a grid, each item with its key printed beside it: the
 items are things done rather than states to be in, and what a reader wants
 from one is the key that would have done it without the menu.
+
+The pixel menu is a list too, sectioned — the value, the coordinate, and
+where the file can give them the print's unit and a latitude's degrees —
+because each of its items has a letter while it is open, as the sort menu's
+have: `When::PixelMenuOpen` is a context (`keymap::Context::PixelMenu`), so
+the letters are tried ahead of the plain names only while
+`App::pixel_menu_open` says egui has the popup up, and `Naming::shortcut`
+prints each beside its item. That is why the coordinates a file cannot give
+are drawn dead rather than left out: a letter that moved from file to file
+would have to be read off the menu every time. A dead item's letter does
+nothing and leaves the menu up (`App::choose`), as a click on it does. With
+the bars hidden, `.` hangs it from the corner of the picture the dot would
+be above, through `pixel::loose_menu`, under the same `pixel::menu_id`.
 
 The menu of other applications is the one whose contents this program does not
 know: what is on it is whatever the desktop has installed, so an item is asked

@@ -88,6 +88,51 @@ pub enum Unit {
     Inches,
 }
 
+impl Unit {
+    /// Both, in the order the pixel menu offers them.
+    pub const ALL: [Unit; 2] = [Unit::Inches, Unit::Millimeters];
+
+    /// What the interface calls the unit.
+    pub fn label(self) -> &'static str {
+        match self {
+            Unit::Inches => "Inches",
+            Unit::Millimeters => "Millimeters",
+        }
+    }
+
+    /// The word the state file writes the unit as, and the one a length in
+    /// it is written with.
+    pub fn word(self) -> &'static str {
+        match self {
+            Unit::Inches => "in",
+            Unit::Millimeters => "mm",
+        }
+    }
+
+    /// The unit `word` names, in any case.
+    pub fn parse(word: &str) -> Option<Unit> {
+        Self::ALL
+            .into_iter()
+            .find(|unit| unit.word().eq_ignore_ascii_case(word))
+    }
+
+    /// The other one.
+    pub fn other(self) -> Unit {
+        match self {
+            Unit::Inches => Unit::Millimeters,
+            Unit::Millimeters => Unit::Inches,
+        }
+    }
+
+    /// How many of the unit go to an inch.
+    pub fn per_inch(self) -> f64 {
+        match self {
+            Unit::Inches => 1.0,
+            Unit::Millimeters => MM_PER_INCH,
+        }
+    }
+}
+
 /// A sheet a print size can be: its name, its sides in millimeters, the
 /// short one first, and the unit the sheet is spoken of in.
 struct Paper {

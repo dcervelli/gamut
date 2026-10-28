@@ -34,6 +34,7 @@ use anyhow::{Context, Result};
 
 use crate::app::keymap::{Chord, Keymap};
 use crate::gestures::{Behavior, Gestures, Slot};
+use crate::image::density;
 use crate::image::geo::Corners;
 use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
 use crate::ui::{attitude, filmstrip, loupe, scale};
@@ -267,9 +268,15 @@ const RETIRED: [&str; 4] = [
 ];
 
 /// Key names the table once had: the histogram's logarithmic counts, which
-/// its one scale down the column has taken the place of. A `keys.` line
-/// naming one is passed over.
-const RETIRED_KEYS: [&str; 1] = ["interface.log-counts"];
+/// its one scale down the column has taken the place of; and the keys that
+/// stepped the pixel readout's value and switched a latitude's degrees,
+/// which the readout's menu and its letters have. A `keys.` line naming one
+/// is passed over.
+const RETIRED_KEYS: [&str; 3] = [
+    "interface.log-counts",
+    "interface.pixel-format",
+    "interface.geographic-format",
+];
 
 impl Config {
     /// The configuration as a file: every setting at its default, commented
@@ -463,8 +470,12 @@ pub struct State {
     pub profile: bool,
     /// How the pointer's pixel was last written.
     pub pixel_format: PixelFormat,
-    /// How its place was last written, in a georeferenced file.
+    /// How its place was last written, in a file that can say more than its
+    /// column and row.
     pub coordinate_format: CoordinateFormat,
+    /// What a print was last measured in: the locale's unit until one is
+    /// chosen.
+    pub print_unit: density::Unit,
     /// And a latitude and longitude, where it was one.
     pub geographic_format: GeographicFormat,
     /// Whether the folder dialog's box for subfolders was last left ticked.
@@ -488,6 +499,7 @@ impl Default for State {
             include_subfolders: false,
             pixel_format: PixelFormat::default(),
             coordinate_format: CoordinateFormat::default(),
+            print_unit: crate::measurement::unit(),
             geographic_format: GeographicFormat::default(),
             displays: BTreeMap::new(),
         }
@@ -526,7 +538,7 @@ struct Kept {
 }
 
 /// Every line of the state file, in the order it is written.
-const KEPT: [Kept; 14] = [
+const KEPT: [Kept; 15] = [
     Kept {
         name: "filmstrip_width",
         get: |state| state.filmstrip_width.to_string(),
@@ -644,6 +656,15 @@ const KEPT: [Kept; 14] = [
         set: |state, value| {
             if let Some(format) = CoordinateFormat::parse(value) {
                 state.coordinate_format = format;
+            }
+        },
+    },
+    Kept {
+        name: "print_unit",
+        get: |state| state.print_unit.word().to_string(),
+        set: |state, value| {
+            if let Some(unit) = density::Unit::parse(value) {
+                state.print_unit = unit;
             }
         },
     },
@@ -878,9 +899,11 @@ mod tests {
              show_minimap=false   # it gets in the way\n\
              show_histogram = true\n\
              log_counts = true\n\
-             keys.interface.log-counts = y\n",
+             keys.interface.log-counts = y\n\
+             keys.interface.pixel-format = .\n\
+             keys.interface.geographic-format = <\n",
         );
-        // `log_counts` and its key are retired, and passed over rather than
+        // `log_counts` and the keys are retired, and passed over rather than
         // called mistakes.
         assert_eq!(problems, Vec::new());
         assert_eq!(
@@ -957,7 +980,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 120, "{uncommented}");
+        assert_eq!(keys, 130, "{uncommented}");
         // A Mac's three more: the scroll, the scroll with Command, and the
         // pinch.
         let slots = if cfg!(target_os = "macos") { 13 } else { 10 };
@@ -1158,6 +1181,7 @@ mod tests {
             include_subfolders: true,
             pixel_format: PixelFormat::Depth,
             coordinate_format: CoordinateFormat::Geographic,
+            print_unit: density::Unit::Millimeters,
             geographic_format: GeographicFormat::Dms,
             displays: BTreeMap::from([
                 ("Dell-Inc.-DELL-U2720Q".to_string(), [596.74, 335.66]),

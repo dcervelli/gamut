@@ -38,7 +38,9 @@ use crate::ui::region_panel::Field;
 use crate::ui::toast::Level;
 pub(super) use crate::ui::tooltip::Conditions;
 use crate::ui::tooltip::Hdr;
-use crate::ui::{self, Control, Current, Grab, Naming, Selection, Tip};
+use crate::ui::{
+    self, Control, CoordinateFormat, Current, Grab, Naming, PixelFormat, Selection, Tip,
+};
 
 use super::region::Framing;
 use crate::view::Fit;
@@ -214,9 +216,15 @@ pub enum Action {
     /// Write the picture on the clipboard to a file of its own, put it in the
     /// list beside the one on screen, and show it.
     Paste,
-    /// Step the bottom bar's readout through the ways of writing a pixel's
-    /// value: hexadecimal, decimal, mapped.
-    CyclePixelFormat,
+    /// Open the menu of the bottom bar's readout, hung from the dot at its
+    /// head, or close it; and, while it is open, write the pixel's value or
+    /// its coordinate one way, as the menu's item does.
+    OpenPixelMenu,
+    ShowValue(PixelFormat),
+    ShowCoordinates(CoordinateFormat),
+    /// Switch a print coordinate, and a print size, between inches and
+    /// millimeters.
+    TogglePrintUnit,
     /// Step the same readout's coordinate through the ways a georeferenced
     /// file can say where a pixel is — pixel, projected, geographic — past
     /// any this file cannot answer.
@@ -437,9 +445,9 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::Play) => TogglePlay,
         Tip::Control(Control::StepBack) => PreviousFrame,
         Tip::Control(Control::StepForward) => NextFrame,
-        // The dot at the head of the pixel readout, which the key steps
-        // through exactly as a press on one of its cells chooses.
-        Tip::Control(Control::PixelFormat) => CyclePixelFormat,
+        // The dot at the head of the pixel readout, which the key opens the
+        // menu of as a press does.
+        Tip::Control(Control::PixelFormat) => OpenPixelMenu,
         // The histogram panel's own, and the row of false colors a key
         // cycles through.
         Tip::Control(Control::Marks) => MarkClipped,
@@ -464,8 +472,11 @@ pub(super) fn action_of(tip: Tip) -> Option<Action> {
         Tip::Control(Control::ZoomTo(ZoomChoice::Filter(_))) => CycleUpscale,
         Tip::Control(Control::ZoomTo(ZoomChoice::Print)) => PrintSize,
         Tip::Control(Control::Calibrate) => CalibratePrintSize,
-        Tip::Control(Control::Format(_)) => CyclePixelFormat,
-        Tip::Control(Control::Coordinates(_)) => CycleCoordinates,
+        // The pixel menu's items, which the keys read while it is open do
+        // exactly what they do; the two pairs that switch are one key each.
+        Tip::Control(Control::Format(format)) => ShowValue(format),
+        Tip::Control(Control::Coordinates(format)) => ShowCoordinates(format),
+        Tip::Control(Control::PrintUnit(_)) => TogglePrintUnit,
         Tip::Control(Control::Geographic(_)) => CycleGeographicFormat,
         // The one menu whose items are things done rather than states to be
         // in: the key does exactly what the item does, and its line of the
@@ -645,10 +656,11 @@ impl Section {
 /// right now as well as what it is.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum When {
-    /// The two conditions that are also contexts: their names are tried
+    /// The three conditions that are also contexts: their names are tried
     /// before the plain ones while they hold — see [`When::context`].
     RegionSelected,
     SortMenuOpen,
+    PixelMenuOpen,
     SeveralFiles,
     Animation,
     AnimationOrPages,
@@ -698,9 +710,10 @@ impl When {
     /// Every condition, for a test to hold them all up against the
     /// application.
     #[cfg(test)]
-    pub const ALL: [When; 24] = [
+    pub const ALL: [When; 25] = [
         When::RegionSelected,
         When::SortMenuOpen,
+        When::PixelMenuOpen,
         When::SeveralFiles,
         When::Animation,
         When::AnimationOrPages,
@@ -730,6 +743,7 @@ impl When {
     pub fn describe(self) -> &'static str {
         match self {
             When::SortMenuOpen => "the sort menu open",
+            When::PixelMenuOpen => "the pixel menu open",
             When::RegionSelected => "a region selected",
             When::SeveralFiles => "more than one file",
             When::Animation => "an animation",
@@ -757,12 +771,13 @@ impl When {
     }
 
     /// The context a line under this condition binds its names in, where
-    /// it is one. Only the menu of sorts' and the region's are: what the
-    /// other conditions decide is whether a key does anything, not which key
-    /// it is.
+    /// it is one. Only the two menus' and the region's are: what the other
+    /// conditions decide is whether a key does anything, not which key it
+    /// is.
     pub fn context(self) -> Option<Context> {
         match self {
             When::SortMenuOpen => Some(Context::SortMenu),
+            When::PixelMenuOpen => Some(Context::PixelMenu),
             When::RegionSelected => Some(Context::Region),
             _ => None,
         }
@@ -774,6 +789,7 @@ impl Conditions {
     pub fn met(&self, when: When) -> bool {
         match when {
             When::SortMenuOpen => self.sort_menu,
+            When::PixelMenuOpen => self.pixel_menu,
             When::RegionSelected => self.region_selected,
             When::SeveralFiles => self.several_files,
             When::Animation => self.animation,
@@ -1122,31 +1138,97 @@ pub static ROWS: &[Row] = &[
             [digit(CTRL, KeyCode::Digit0)]
         ),
     },
-    // The same key as the two pixel copies, with nothing held: what it
-    // switches is what they take away with them.
+    // The same key as the two pixel copies, with nothing held: what its
+    // menu chooses is what they take away with them. While the menu is
+    // open a letter is each of its items, as the sort menu's are.
     Row {
         section: Section::Interface,
         when: None,
-        help: "Cycle the pixel readout: hex, decimal, mapped, depth",
-        keys: one!("interface.pixel-format", CyclePixelFormat, [key('.')]),
+        help: "Open the pixel readout menu",
+        keys: one!("interface.readout", OpenPixelMenu, [key('.')]),
     },
-    // The key beside it, and that key with Shift: where the pixel is,
-    // rather than what is in it.
+    Row {
+        section: Section::Interface,
+        when: Some(When::PixelMenuOpen),
+        help: "Show pixel value as hex, decimal, mapped, depth",
+        keys: Keys::Bound(&[
+            Bound {
+                name: "interface.readout.hex",
+                action: ShowValue(PixelFormat::Hex),
+                defaults: &[key('h')],
+            },
+            Bound {
+                name: "interface.readout.decimal",
+                action: ShowValue(PixelFormat::Decimal),
+                defaults: &[key('d')],
+            },
+            Bound {
+                name: "interface.readout.mapped",
+                action: ShowValue(PixelFormat::Mapped),
+                defaults: &[key('m')],
+            },
+            Bound {
+                name: "interface.readout.depth",
+                action: ShowValue(PixelFormat::Depth),
+                defaults: &[key('z')],
+            },
+        ]),
+    },
+    Row {
+        section: Section::Interface,
+        when: Some(When::PixelMenuOpen),
+        help: "Show coordinate as pixel, print, projected, geographic, azimuth/elevation",
+        keys: Keys::Bound(&[
+            Bound {
+                name: "interface.readout.pixel",
+                action: ShowCoordinates(CoordinateFormat::Pixel),
+                defaults: &[key('x')],
+            },
+            Bound {
+                name: "interface.readout.print",
+                action: ShowCoordinates(CoordinateFormat::Print),
+                defaults: &[key('p')],
+            },
+            Bound {
+                name: "interface.readout.projected",
+                action: ShowCoordinates(CoordinateFormat::Projected),
+                defaults: &[key('e')],
+            },
+            Bound {
+                name: "interface.readout.geographic",
+                action: ShowCoordinates(CoordinateFormat::Geographic),
+                defaults: &[key('g')],
+            },
+            Bound {
+                name: "interface.readout.direction",
+                action: ShowCoordinates(CoordinateFormat::Direction),
+                defaults: &[key('a')],
+            },
+        ]),
+    },
+    Row {
+        section: Section::Interface,
+        when: Some(When::PixelMenuOpen),
+        help: "Switch print unit between inches and millimeters",
+        keys: one!("interface.readout.print-unit", TogglePrintUnit, [key('u')]),
+    },
+    Row {
+        section: Section::Interface,
+        when: Some(When::PixelMenuOpen),
+        help: "Switch latitude and longitude between decimal and DMS",
+        keys: one!(
+            "interface.readout.lat-long",
+            CycleGeographicFormat,
+            [key('s')]
+        ),
+    },
+    // Outside the menu, the one of them worth flicking through with the
+    // pointer held still on the picture.
     Row {
         section: Section::Interface,
         when: Some(When::Coordinates),
-        help: "Cycle the coordinate readout: pixel, projected, geographic, direction",
+        help: "Cycle the coordinate readout: pixel, print, projected, geographic, direction",
         keys: one!("interface.coordinate-format", CycleCoordinates, [key(',')]),
-    },
-    Row {
-        section: Section::Interface,
-        when: Some(When::Geographic),
-        help: "Switch latitude and longitude between decimal and DMS",
-        keys: one!(
-            "interface.geographic-format",
-            CycleGeographicFormat,
-            [key('<')]
-        ),
     },
     // The key every desktop's programs open their settings with; the
     // button at the foot of the help popup, and a Mac's Settings item.
@@ -1847,18 +1929,15 @@ impl Naming for Namer {
                     .collect(),
             ),
             Tip::Control(Control::PixelFormat) => (
-                vec![ui::tooltip::words(at)?],
+                vec![with_key(
+                    &ui::tooltip::words(at)?,
+                    key_of(keys, OpenPixelMenu),
+                )],
                 [
-                    (ui::tooltip::PIXEL_CYCLE, CyclePixelFormat, true),
                     (
                         ui::tooltip::PIXEL_COORDINATE_CYCLE,
                         CycleCoordinates,
                         self.conditions.coordinates,
-                    ),
-                    (
-                        ui::tooltip::PIXEL_GEOGRAPHIC_CYCLE,
-                        CycleGeographicFormat,
-                        self.conditions.geographic,
                     ),
                     (ui::tooltip::PIXEL_COPY_VALUE, CopyPixelValue, true),
                     (
@@ -2241,14 +2320,25 @@ impl App {
     /// The contexts that hold now, whose names a key is looked for among
     /// before the plain ones.
     pub(super) fn holding(&self) -> Vec<Context> {
-        let mut holding = Vec::with_capacity(2);
+        let mut holding = Vec::with_capacity(3);
         if matches!(self.marking.selection, Selection::Shown(_)) {
             holding.push(Context::Region);
         }
         if self.sort_menu_open() {
             holding.push(Context::SortMenu);
         }
+        if self.pixel_menu_open() {
+            holding.push(Context::PixelMenu);
+        }
         holding
+    }
+
+    /// Whether the pixel readout's menu is up. Asked of egui, as the
+    /// sort menu's is.
+    pub(super) fn pixel_menu_open(&self) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|shown| egui::Popup::is_id_open(&shown.gui.ctx, ui::pixel::menu_id()))
     }
 
     /// Whether the menu of sorts is up. Asked of egui, whose popup it is.
@@ -2572,9 +2662,14 @@ impl App {
             // Nothing to draw yet either: the picture is being written and
             // then read, and what is on screen stays until it arrives.
             Paste => return self.paste(),
-            // The bar alone changes, but that is a frame all the same.
-            CyclePixelFormat => {
-                self.panels.pixel_format = self.panels.pixel_format.next();
+            // The menu's own button, and its items, which close it as a
+            // press on one does.
+            OpenPixelMenu => return self.press(Control::PixelFormat),
+            ShowValue(format) => return self.choose(Control::Format(format)),
+            ShowCoordinates(format) => return self.choose(Control::Coordinates(format)),
+            TogglePrintUnit => {
+                let unit = self.panels.print_unit.other();
+                return self.choose(Control::PrintUnit(unit));
             }
             // Past the formats this file cannot answer, from the one the bar
             // is showing rather than the one last chosen: a key that stepped
@@ -2585,7 +2680,8 @@ impl App {
                 self.panels.coordinate_format = self.panels.coordinate_format.next(answers);
             }
             CycleGeographicFormat => {
-                self.panels.geographic_format = self.panels.geographic_format.next();
+                let format = self.panels.geographic_format.next();
+                return self.choose(Control::Geographic(format));
             }
             // As the copies above, with the one case a pixel copy has and the
             // others do not: the pointer nowhere near a pixel, which is worth
@@ -2781,6 +2877,18 @@ impl App {
     /// Asked of egui rather than of a flag of our own, the menus being its:
     /// it closes one on Escape itself, and this is what keeps the key that
     /// puts things away from quitting out from under one.
+    /// An item of a menu chosen by its key: pressed as a click on it is,
+    /// and the menu closed as the click closes it — unless the item is
+    /// dead, which leaves the menu up and nothing done, as a click on it
+    /// does.
+    fn choose(&mut self, control: Control) -> Effect {
+        if self.refuses(control) {
+            return Effect::Nothing;
+        }
+        self.close_menus();
+        self.press(control).also(Effect::Redraw)
+    }
+
     pub(super) fn close_menus(&mut self) -> bool {
         let Some(shown) = &self.shown else {
             return false;
@@ -2840,8 +2948,10 @@ impl App {
     pub(super) fn conditions(&self) -> Conditions {
         let current = self.current.as_ref();
         let georeference = current.and_then(|current| current.exif.georeference.as_ref());
+        let answers = ui::pixel::Answers::of(current);
         Conditions {
             sort_menu: self.sort_menu_open(),
+            pixel_menu: self.pixel_menu_open(),
             region_selected: matches!(self.marking.selection, Selection::Shown(_)),
             region_held: self.marking.aspect != crate::image::aspect::Aspect::Free,
             several_files: self.files.len() > 1 || self.beside.folder.unread(),
@@ -2862,8 +2972,10 @@ impl App {
             visited_after: self
                 .visited
                 .can_forward(|path| self.files.position(path).is_some()),
-            coordinates: ui::pixel::Answers::of(current).beyond_pixel(),
+            coordinates: answers.beyond_pixel(),
+            projected: CoordinateFormat::Projected.offered(answers),
             geographic: georeference.is_some_and(|geo| geo.offers_geographic()),
+            direction: CoordinateFormat::Direction.offered(answers),
             orientation: current.is_some_and(|current| current.exif.attitude.is_some()),
             heading: current.is_some_and(|current| current.exif.heading.is_some()),
             located: current.is_some_and(|current| current.exif.position.is_some()),
@@ -3480,7 +3592,7 @@ impl App {
         let Some(current) = &self.current else {
             return;
         };
-        let rows = ui::info::copied(current, copies);
+        let rows = ui::info::copied(current, copies, self.panels.print_unit);
         if rows.is_empty() {
             return;
         }
@@ -3585,11 +3697,7 @@ impl App {
             }
             // The buttons that open a menu: the menu is egui's, and opens
             // itself on the press, so there is nothing here to do.
-            Control::Zoom
-            | Control::PixelFormat
-            | Control::Copy
-            | Control::OpenIn
-            | Control::FileMenu => Effect::Nothing,
+            Control::Zoom | Control::Copy | Control::OpenIn | Control::FileMenu => Effect::Nothing,
             // And the menu of sorts, which a key opens too: toggled as the
             // chooser is, and with one file, after the folder beside it is
             // read. Hung from the list's head, or with the list down from
@@ -3606,6 +3714,21 @@ impl App {
                 egui::Popup::close_all(ctx);
                 if !open && self.files.len() > 1 {
                     egui::Popup::open_id(ctx, ui::filmstrip::sort_menu_id());
+                }
+                Effect::Redraw
+            }
+            // And the pixel readout's, which a key opens too, from the dot
+            // where the bars are up and from the corner of the picture where
+            // they are not — see `ui::pixel::menu_id`.
+            Control::PixelFormat => {
+                let open = self.pixel_menu_open();
+                let Some(shown) = &self.shown else {
+                    return Effect::Nothing;
+                };
+                let ctx = &shown.gui.ctx;
+                egui::Popup::close_all(ctx);
+                if !open {
+                    egui::Popup::open_id(ctx, ui::pixel::menu_id());
                 }
                 Effect::Redraw
             }
@@ -3817,6 +3940,10 @@ impl App {
                 self.panels.geographic_format = format;
                 Effect::Redraw
             }
+            Control::PrintUnit(unit) => {
+                self.panels.print_unit = unit;
+                Effect::Redraw
+            }
             // An item of the menu of copies runs the key's action, as the
             // reset and the paste buttons do: what it asks for is done rather
             // than set.
@@ -4026,6 +4153,7 @@ impl App {
                 at,
                 self.panels.coordinate_format,
                 self.panels.geographic_format,
+                self.panels.print_unit,
                 false,
             ));
         }

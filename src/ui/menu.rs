@@ -10,6 +10,7 @@
 use egui::{Button, RichText, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
 
 use crate::image::aspect::Aspect;
+use crate::image::density::Unit;
 use crate::render::Upscale;
 use crate::view::{Axis, Fit, View, Viewport};
 
@@ -235,9 +236,18 @@ pub fn describe_format(format: PixelFormat) -> &'static str {
 pub fn describe_coordinates(format: CoordinateFormat) -> &'static str {
     match format {
         CoordinateFormat::Pixel => "Column and row of the pixel",
+        CoordinateFormat::Print => "Distance from top left when printed at the image's DPI",
         CoordinateFormat::Projected => "Coordinates in the file's own system",
         CoordinateFormat::Geographic => "Latitude and longitude on WGS 84",
         CoordinateFormat::Direction => "Azimuth and elevation toward the pixel",
+    }
+}
+
+/// What each unit of a print measures in, for its item's tooltip.
+pub fn describe_print_unit(unit: Unit) -> &'static str {
+    match unit {
+        Unit::Inches => "Measure print size in inches",
+        Unit::Millimeters => "Measure print size in millimeters",
     }
 }
 
@@ -373,72 +383,61 @@ fn fit_cell(pass: &mut Pass, ui: &mut Ui, fit: Fit, fills: Axis, active: bool) -
     response
 }
 
-/// The pixel-format menu: the three formats abreast, in cells cut for
-/// words, under the one heading that says what the menu is of — it hangs
-/// from a dot rather than from a word.
+/// The pixel menu: the ways of writing a pixel's value, and under them the
+/// ways of writing where it is, each item a line with the key that chooses
+/// it while the menu is open beside it, as the sort menu's are.
 ///
-/// A file that says where its pixels are on the ground brings two rows more:
-/// the coordinates it can give, and — where one of them is a latitude — the
-/// two ways of writing one. Every other file brings neither, so a menu that
-/// nearly everyone opens for the value alone is never longer for it. The
+/// Every way of writing where a pixel is keeps its place, dead where the
+/// file cannot answer it, so that a key learned on one file is where it was
+/// on the next. The two pairs that only say how one of them is written —
+/// the print's unit, and a latitude's degrees — come only with the file
+/// that can give that one, being nothing to choose between otherwise. The
 /// lit coordinate is the one the bar is showing, which is the pixel's where
 /// the file cannot answer what was chosen.
-pub(super) fn pixel_cells(pass: &mut Pass, ui: &mut Ui) {
-    ui.spacing_mut().item_spacing = Vec2::ZERO;
+pub(super) fn pixel_items(pass: &mut Pass, ui: &mut Ui) {
+    let answers = Answers::of(pass.current);
+    let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
+        // Dead by the reading the application refuses the press by.
+        let enabled = match control {
+            Control::Coordinates(format) => format.offered(answers),
+            _ => true,
+        };
+        let mut button = Button::new(control.label()).selected(active);
+        if let Some(key) = pass.namer.shortcut(control) {
+            button = button.shortcut_text(key);
+        }
+        let response = ui.add_enabled(enabled, button);
+        let response = pass.tooltip(response, Tip::Control(control));
+        if response.clicked() {
+            pass.press(control);
+            ui.close();
+        }
+    };
     heading(pass, ui, "Pixel value", true);
     let chosen = pass.panels.pixel_format;
-    cell_row(
-        pass,
-        ui,
-        PixelFormat::ALL.map(|format| (Control::Format(format), format == chosen)),
-    );
-
-    let answers = Answers::of(pass.current);
-    let offered: Vec<CoordinateFormat> = CoordinateFormat::ALL
-        .into_iter()
-        .filter(|format| format.offered(answers))
-        .collect();
-    if offered.len() < 2 {
-        return;
+    for format in PixelFormat::ALL {
+        item(pass, ui, Control::Format(format), format == chosen);
     }
+
     heading(pass, ui, "Coordinate", false);
     let shown = pass.panels.coordinate_format.shown(answers);
-    cell_row(
-        pass,
-        ui,
-        offered
-            .iter()
-            .map(|format| (Control::Coordinates(*format), *format == shown)),
-    );
-    if !offered.contains(&CoordinateFormat::Geographic) {
-        return;
+    for format in CoordinateFormat::ALL {
+        item(pass, ui, Control::Coordinates(format), format == shown);
     }
-    heading(pass, ui, "Latitude and longitude", false);
-    let chosen = pass.panels.geographic_format;
-    cell_row(
-        pass,
-        ui,
-        GeographicFormat::ALL.map(|format| (Control::Geographic(format), format == chosen)),
-    );
-}
-
-/// One row of word cells of the pixel menu, each lit where it is `active`,
-/// each closing the menu on the press it sends.
-fn cell_row(pass: &mut Pass, ui: &mut Ui, cells: impl IntoIterator<Item = (Control, bool)>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = vec2(MENU_GAP, 0.0);
-        for (control, active) in cells {
-            let response = ui.add_sized(
-                [MENU_WORD_CELL, MENU_CELL[1]],
-                Button::new(control.label()).selected(active),
-            );
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
-                ui.close();
-            }
+    if CoordinateFormat::Print.offered(answers) {
+        heading(pass, ui, "Print unit", false);
+        let chosen = pass.panels.print_unit;
+        for unit in Unit::ALL {
+            item(pass, ui, Control::PrintUnit(unit), unit == chosen);
         }
-    });
+    }
+    if CoordinateFormat::Geographic.offered(answers) {
+        heading(pass, ui, "Latitude and longitude", false);
+        let chosen = pass.panels.geographic_format;
+        for format in GeographicFormat::ALL {
+            item(pass, ui, Control::Geographic(format), format == chosen);
+        }
+    }
 }
 
 /// A menu of items under a name — the name of the button that opened it, so

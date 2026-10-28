@@ -113,6 +113,7 @@ pub(super) fn panels() -> Panels {
         loupe_magnification: super::loupe::DEFAULT_MAGNIFICATION,
         pixel_format: PixelFormat::default(),
         coordinate_format: CoordinateFormat::default(),
+        print_unit: crate::image::density::Unit::Inches,
         geographic_format: GeographicFormat::default(),
         info_tab: super::tags::Tab::Facts,
     }
@@ -2244,7 +2245,7 @@ fn the_minimap_asks_to_center_on_what_is_pressed() {
 }
 
 /// The dot at the head of the pixel readout opens the menu of formats, and
-/// a cell of it chooses that format.
+/// an item of it chooses that format.
 #[test]
 fn the_pixel_menu_offers_every_format() {
     let mut harness = open(WINDOW, 1, panels());
@@ -2255,15 +2256,45 @@ fn the_pixel_menu_offers_every_format() {
     );
 }
 
-/// Only a georeferenced file brings the rows of coordinates to that menu,
-/// and only the coordinates it can give: a raster in a system the table
-/// holds offers all three and the two ways of writing a latitude.
+/// Every way of writing where a pixel is is on that menu, and those the
+/// file cannot give are dead: a raster in a system the table holds can
+/// give the ground's two and brings the two ways of writing a latitude,
+/// and a file that says its density can give the print's and brings its
+/// two units.
 #[test]
-fn the_pixel_menu_offers_coordinates_only_for_a_map() {
+fn the_pixel_menu_offers_the_coordinates_a_file_can_give() {
     let mut harness = open(WINDOW, 1, panels());
     assert_eq!(click(&mut harness, "Pixel format"), []);
-    assert!(harness.query_by_label("Projected").is_none());
+    for dead in ["Print", "Projected", "Geographic", "Azimuth/Elevation"] {
+        let node = harness.get_by_role_and_label(egui::accesskit::Role::Button, dead);
+        assert!(node.accesskit_node().is_disabled(), "{dead}");
+    }
     assert!(harness.query_by_label("DMS").is_none());
+    assert!(harness.query_by_label("Millimeters").is_none());
+
+    let mut harness = build(WINDOW, 1, panels());
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture")
+        .exif
+        .density = crate::image::density::Density::new([300.0, 300.0], 25.4);
+    harness.run();
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "Print"),
+        [Command::Press(Control::Coordinates(
+            CoordinateFormat::Print
+        ))]
+    );
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "Millimeters"),
+        [Command::Press(Control::PrintUnit(
+            crate::image::density::Unit::Millimeters
+        ))]
+    );
 
     let mut harness = build(WINDOW, 1, panels());
     let placed = crate::image::geo::Tags {
@@ -3570,6 +3601,7 @@ fn the_readout_says_which_way_a_pixel_looks() {
             [2, 1],
             CoordinateFormat::Direction,
             GeographicFormat::Decimal,
+            crate::image::density::Unit::Inches,
             padded,
         )
     };

@@ -5450,6 +5450,35 @@ fn i_and_shift_i_each_put_up_their_own_tab() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The pixel menu's items, chosen by their keys, are refused where the
+/// file cannot answer them — the print's for a file that does not say its
+/// density — and the readout stays as it was; where it can, the readout
+/// takes the choice, and the print's unit switches with its one key.
+#[test]
+fn the_print_coordinate_needs_the_files_density() {
+    use crate::image::density::{Density, Unit};
+    use crate::ui::CoordinateFormat;
+    use input::Action;
+
+    let (mut app, _dir) = app_over("print-coordinate", &[("a.png", 64, 48)]);
+    let print = Action::ShowCoordinates(CoordinateFormat::Print);
+    assert_eq!(app.perform(print), Effect::Nothing);
+    assert_eq!(app.panels.coordinate_format, CoordinateFormat::Pixel);
+    assert_eq!(app.perform(Action::TogglePrintUnit), Effect::Nothing);
+
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([300.0, 300.0], 25.4);
+    assert_eq!(app.perform(print), Effect::Redraw);
+    assert_eq!(app.panels.coordinate_format, CoordinateFormat::Print);
+    app.panels.print_unit = Unit::Inches;
+    assert_eq!(app.perform(Action::TogglePrintUnit), Effect::Redraw);
+    assert_eq!(app.panels.print_unit, Unit::Millimeters);
+    assert_eq!(app.kept_state().print_unit, Unit::Millimeters);
+}
+
 /// The horizon grid is refused for a picture that does not say which way
 /// its camera faced, and its tooltip says so. For one that does, it comes
 /// on with the pointer's readout following it into the ways the pixels

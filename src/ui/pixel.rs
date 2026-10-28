@@ -18,6 +18,7 @@
 
 use egui::{Label, RichText, Sense, StrokeKind, vec2};
 
+use crate::image::density;
 use crate::image::depth::{Accuracy, Depth, Distance, Unit};
 use crate::image::display::Mapped;
 use crate::image::geo::Georeference;
@@ -26,6 +27,8 @@ use crate::render::Color;
 
 use super::Current;
 use super::chrome::{Pass, measure};
+use super::control::Control;
+use super::ruler::{self, Ruler, places_for};
 
 /// Side of the color swatch, in logical pixels: the height of a line of
 /// text, so that it reads as part of the sentence beside it.
@@ -42,8 +45,8 @@ const SEPARATOR: &str = "\u{00b7}";
 /// How the pixel's value is written out.
 ///
 /// Four ways of saying what is at one pixel, of which the bar shows one:
-/// chosen from the menu the dot at the head of the readout opens, or stepped
-/// through with the key that does the same.
+/// chosen from the menu the dot at the head of the readout opens, or with
+/// the item's key while it is open.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum PixelFormat {
     /// The codes the file holds, run together in hexadecimal with no prefix
@@ -65,9 +68,7 @@ pub enum PixelFormat {
 }
 
 impl PixelFormat {
-    /// Every format, in the order the menu offers them — the same order
-    /// [`PixelFormat::next`] steps through, so the key and the cells agree
-    /// about what comes after what.
+    /// Every format, in the order the menu offers them.
     pub const ALL: [PixelFormat; 4] = [
         PixelFormat::Hex,
         PixelFormat::Decimal,
@@ -92,21 +93,14 @@ impl PixelFormat {
             .into_iter()
             .find(|format| format.label().eq_ignore_ascii_case(value))
     }
-
-    pub fn next(self) -> Self {
-        match self {
-            PixelFormat::Hex => PixelFormat::Decimal,
-            PixelFormat::Decimal => PixelFormat::Mapped,
-            PixelFormat::Mapped => PixelFormat::Depth,
-            PixelFormat::Depth => PixelFormat::Hex,
-        }
-    }
 }
 
 /// How the pointer's place is written: which pixel of the raster it is,
-/// where that pixel is on the ground, or which way it looks.
+/// where that pixel is on a print, where it is on the ground, or which way
+/// it looks.
 ///
-/// The two ground readings are offered only for a file that places its
+/// The print's is offered only for a file that says how many of its pixels
+/// go to an inch; the two ground readings only for a file that places its
 /// pixels — a GeoTIFF — and each only where the file can answer it; the way
 /// a pixel looks only for one that says which way its camera faced and at
 /// what focal length. Wherever the file cannot answer, the readout is the
@@ -117,6 +111,9 @@ pub enum CoordinateFormat {
     /// Column and row, from the top left. The default, and every image's.
     #[default]
     Pixel,
+    /// How far the pixel is from the top left of the picture printed at
+    /// the density the file says, in inches or millimeters.
+    Print,
     /// The file's own coordinates: easting and northing on its projection,
     /// in its units.
     Projected,
@@ -127,11 +124,13 @@ pub enum CoordinateFormat {
     Direction,
 }
 
-/// What a file can say of where a pixel is beyond its column and row: the
-/// georeference that places its pixels on the ground, and whether it says
-/// which way each looks.
+/// What a file can say of where a pixel is beyond its column and row: how
+/// many of its pixels go to an inch across and down the picture as shown,
+/// the georeference that places its pixels on the ground, and whether it
+/// says which way each looks.
 #[derive(Clone, Copy, Default)]
 pub struct Answers<'a> {
+    pub density: Option<[f64; 2]>,
     pub georeference: Option<&'a Georeference>,
     pub direction: bool,
 }
@@ -143,6 +142,7 @@ impl<'a> Answers<'a> {
             return Self::default();
         };
         Answers {
+            density: ruler::density(current),
             georeference: current.exif.georeference.as_ref(),
             direction: current.exif.attitude.is_some() && current.exif.focal_equivalent.is_some(),
         }
@@ -160,8 +160,9 @@ impl<'a> Answers<'a> {
 impl CoordinateFormat {
     /// Every format, in the order the menu offers them and the key steps
     /// through them.
-    pub const ALL: [CoordinateFormat; 4] = [
+    pub const ALL: [CoordinateFormat; 5] = [
         CoordinateFormat::Pixel,
+        CoordinateFormat::Print,
         CoordinateFormat::Projected,
         CoordinateFormat::Geographic,
         CoordinateFormat::Direction,
@@ -170,6 +171,7 @@ impl CoordinateFormat {
     pub fn label(self) -> &'static str {
         match self {
             CoordinateFormat::Pixel => "Pixel",
+            CoordinateFormat::Print => "Print",
             CoordinateFormat::Projected => "Projected",
             CoordinateFormat::Geographic => "Geographic",
             CoordinateFormat::Direction => "Azimuth/Elevation",
@@ -181,6 +183,7 @@ impl CoordinateFormat {
     pub fn word(self) -> &'static str {
         match self {
             CoordinateFormat::Pixel => "pixel",
+            CoordinateFormat::Print => "print",
             CoordinateFormat::Projected => "projected",
             CoordinateFormat::Geographic => "geographic",
             CoordinateFormat::Direction => "direction",
@@ -199,6 +202,7 @@ impl CoordinateFormat {
     pub fn offered(self, answers: Answers) -> bool {
         match (self, answers.georeference) {
             (CoordinateFormat::Pixel, _) => true,
+            (CoordinateFormat::Print, _) => answers.density.is_some(),
             (CoordinateFormat::Direction, _) => answers.direction,
             (_, None) => false,
             (CoordinateFormat::Projected, Some(geo)) => geo.offers_projected(),
@@ -267,6 +271,25 @@ impl GeographicFormat {
     }
 }
 
+/// The id the pixel menu is open under: its dot's, which the key opens it
+/// under too, wherever it is hung from.
+pub fn menu_id() -> egui::Id {
+    Pass::menu_id(Control::PixelFormat)
+}
+
+/// The pixel menu while the bottom bar is not on screen to hang it from,
+/// which only the key opens: hung above `anchor` instead, and drawn on
+/// every frame it is open, as a popup not drawn is a popup egui closes.
+pub(super) fn loose_menu(pass: &mut Pass, ui: &egui::Ui, anchor: egui::PopupAnchor) {
+    egui::Popup::new(menu_id(), ui.ctx().clone(), anchor, ui.layer_id())
+        .open_memory(None)
+        .kind(egui::PopupKind::Menu)
+        .layout(egui::Layout::top_down_justified(egui::Align::Min))
+        .style(egui::containers::menu::menu_style)
+        .align(egui::RectAlign::TOP_START)
+        .show(|ui| super::menu::pixel_items(pass, ui));
+}
+
 /// Draws the readout for the pixel the pointer is over, if it is over one, in
 /// what is left of the bottom bar between the dot that chooses the format and
 /// the state text at the other end.
@@ -295,6 +318,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
         at,
         pass.panels.coordinate_format,
         pass.panels.geographic_format,
+        pass.panels.print_unit,
         true,
     );
     ui.add(Label::new(RichText::new(coordinate).monospace().color(ink)).truncate());
@@ -375,6 +399,7 @@ pub fn place(
     at: [u32; 2],
     format: CoordinateFormat,
     geographic: GeographicFormat,
+    print: density::Unit,
     padded: bool,
 ) -> String {
     let pixel = || match padded {
@@ -385,6 +410,9 @@ pub fn place(
     let format = format.shown(answers);
     if format == CoordinateFormat::Direction {
         return direction(current, at, padded).unwrap_or_else(pixel);
+    }
+    if let (CoordinateFormat::Print, Some(density)) = (format, answers.density) {
+        return printed(Ruler::print(density, print), at, current.pixels(), padded);
     }
     let Some(geo) = answers
         .georeference
@@ -400,8 +428,26 @@ pub fn place(
             Some(point) => latitude_longitude(point, geographic, padded),
             None => pixel(),
         },
-        CoordinateFormat::Pixel | CoordinateFormat::Direction => pixel(),
+        CoordinateFormat::Pixel | CoordinateFormat::Print | CoordinateFormat::Direction => pixel(),
     }
+}
+
+/// How far the middle of the pixel `at` is from the top left of a print
+/// measured by `ruler`, to as many places as a pixel of it is worth, with
+/// the unit after them. Padded, each as wide as the far edge of a picture
+/// `size` pixels across makes it, for the reason the pixel's is.
+fn printed(ruler: Ruler, at: [u32; 2], size: [u32; 2], padded: bool) -> String {
+    let [x, y] = [0, 1].map(|axis| ruler.write(ruler.at(axis, f64::from(at[axis]) + 0.5)));
+    if !padded {
+        return format!("{x},{y}");
+    }
+    let widest = |axis: usize| ruler.write(ruler.at(axis, f64::from(size[axis]))).len();
+    format!(
+        "({x:>w$}, {y:>h$}){}",
+        ruler.suffix(),
+        w = widest(0),
+        h = widest(1)
+    )
 }
 
 /// The way the pixel `at` looks, to a tenth of a degree: its bearing where
@@ -478,16 +524,6 @@ fn projected(geo: &Georeference, at: [u32; 2], size: [u32; 2], padded: bool) -> 
             .unwrap_or(0)
     };
     format!("({x:>w$}, {y:>h$}){unit}", w = widest(0), h = widest(1))
-}
-
-/// How many places after the point a coordinate is worth when one pixel
-/// covers `step` of its units: enough to tell one pixel from the next and no
-/// more, between `least` and `most`.
-fn places_for(step: f64, least: usize, most: usize) -> usize {
-    if !(step.is_finite() && step > 0.0) {
-        return most;
-    }
-    (-step.log10()).ceil().clamp(least as f64, most as f64) as usize
 }
 
 /// Places after the point of a decimal degree: six, about a tenth of a
@@ -867,19 +903,45 @@ mod tests {
         assert_eq!(read(&image, &display, [3, 4], PixelFormat::Hex), "E78040");
     }
 
-    /// The key steps through every format and comes back to where it started,
-    /// in the order the menu lays them out.
+    /// A print's coordinate is the pixel's middle measured from the top
+    /// left at the file's density, to as many places as a pixel of it is
+    /// worth: padded in the bar as wide as the far edge makes it, with the
+    /// unit after it, and bare in a copy. A file that does not say its
+    /// density is read out by its pixels.
     #[test]
-    fn the_formats_cycle_in_the_order_the_menu_offers_them() {
-        let mut format = PixelFormat::ALL[0];
-        for expected in PixelFormat::ALL
-            .iter()
-            .skip(1)
-            .chain([&PixelFormat::ALL[0]])
-        {
-            format = format.next();
-            assert_eq!(format, *expected);
-        }
+    fn a_print_coordinate_is_measured_from_the_top_left() {
+        let image = DecodedImage::new(
+            600,
+            300,
+            Samples::U8 {
+                channels: Channels::Gray,
+                data: vec![0; 600 * 300],
+            },
+            ColorSpace::SRGB,
+            AlphaMode::Opaque,
+        );
+        let mut current = Current::of(image, "scan.tif");
+        let write = |current: &Current, unit, padded| {
+            place(
+                current,
+                [299, 0],
+                CoordinateFormat::Print,
+                GeographicFormat::Decimal,
+                unit,
+                padded,
+            )
+        };
+        assert_eq!(write(&current, density::Unit::Inches, true), "(299, 000)");
+        current.exif.density = crate::image::density::Density::new([300.0, 300.0], 25.4);
+        assert_eq!(
+            write(&current, density::Unit::Inches, true),
+            "(0.998, 0.002) in"
+        );
+        assert_eq!(write(&current, density::Unit::Inches, false), "0.998,0.002");
+        assert_eq!(
+            write(&current, density::Unit::Millimeters, true),
+            "(25.36,  0.04) mm"
+        );
     }
 
     /// A copy of the coordinate is bound for somewhere else, so it is the two
@@ -918,6 +980,7 @@ mod tests {
         let geographic = georeference(2, 4326);
 
         let on = |geo| Answers {
+            density: None,
             georeference: Some(geo),
             direction: false,
         };
@@ -939,6 +1002,7 @@ mod tests {
         // A photograph that says which way it looked offers the way, and
         // a map that does as well offers it after the ground's.
         let looks = Answers {
+            density: None,
             georeference: None,
             direction: true,
         };

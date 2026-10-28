@@ -58,7 +58,7 @@ fn photograph() -> Exif {
 /// Every row of the column, in reading order: a section's name, then
 /// each of its fields as its name and its value.
 fn written(current: &Current) -> Vec<String> {
-    contents(current)
+    contents(current, crate::measurement::unit())
         .sections
         .iter()
         .flat_map(|section| {
@@ -75,7 +75,7 @@ fn written(current: &Current) -> Vec<String> {
 /// The rows a section writes under its heading, its heading left out: the
 /// rows from it up to the next section's heading, or the end.
 fn rows_under(rows: &[String], current: &Current, at: usize) -> Vec<String> {
-    let headings: Vec<_> = contents(current)
+    let headings: Vec<_> = contents(current, crate::measurement::unit())
         .sections
         .iter()
         .map(|section| section.name.to_string())
@@ -209,7 +209,7 @@ fn a_depth_map_is_described_after_the_image() {
     // rows go on describing the picture, the map saying what it lost on
     // its way to the device.
     let showing = |current: &Current, name: &str| {
-        contents(current)
+        contents(current, crate::measurement::unit())
             .sections
             .iter()
             .find(|section| section.name == name)
@@ -217,7 +217,7 @@ fn a_depth_map_is_described_after_the_image() {
             .showing
     };
     let image = |current: &Current| {
-        contents(current)
+        contents(current, crate::measurement::unit())
             .sections
             .into_iter()
             .find(|section| section.name == "Image")
@@ -250,7 +250,7 @@ fn a_depth_map_is_described_after_the_image() {
 #[test]
 fn a_picture_alone_is_showing() {
     let current = current();
-    let showing: Vec<_> = contents(&current)
+    let showing: Vec<_> = contents(&current, crate::measurement::unit())
         .sections
         .iter()
         .filter(|section| section.showing)
@@ -278,7 +278,7 @@ fn the_regions_are_where_the_turn_puts_them() {
     }];
     // A table of its own, a region beside each row, named by who is
     // in it and saying what kind of region it is in its tooltip.
-    let contents = contents(&current);
+    let contents = contents(&current, crate::measurement::unit());
     let section = contents
         .sections
         .iter()
@@ -297,14 +297,21 @@ fn the_regions_are_where_the_turn_puts_them() {
         .facts()
         .position(|(name, _)| name == REGIONS)
         .expect("a region's row");
-    assert_eq!(copied(&current, Copyable::Fact(at)), "Jane Doe,0,0,2,2");
+    assert_eq!(
+        copied(&current, Copyable::Fact(at), crate::measurement::unit()),
+        "Jane Doe,0,0,2,2"
+    );
     let place = contents
         .sections
         .iter()
         .position(|section| section.name == REGIONS)
         .expect("a regions section");
     assert_eq!(
-        copied(&current, Copyable::Section(place)),
+        copied(
+            &current,
+            Copyable::Section(place),
+            crate::measurement::unit()
+        ),
         "Subject,X,Y,W,H\nJane Doe,0,0,2,2"
     );
     let written_now = written(&current);
@@ -373,7 +380,7 @@ fn a_fact_the_file_will_not_give_up_is_left_out() {
 /// after it are columns of fields.
 #[test]
 fn the_camera_is_headed_by_its_name() {
-    let contents = contents(&current());
+    let contents = contents(&current(), crate::measurement::unit());
     let face = |name: &str| {
         let section = contents
             .sections
@@ -532,7 +539,7 @@ fn a_gain_map_is_described_after_the_image() {
         crate::image::auxiliary::Showing::Auxiliary(crate::image::auxiliary::Auxiliary::GainMap),
         |_| Some(face),
     );
-    let showing: Vec<_> = contents(&current)
+    let showing: Vec<_> = contents(&current, crate::measurement::unit())
         .sections
         .iter()
         .filter(|section| section.showing)
@@ -629,22 +636,27 @@ fn a_file_of_several_pictures_says_how_many() {
 #[test]
 fn a_copy_says_as_much_of_the_table_as_was_clicked() {
     let current = current();
-    let all: Vec<String> = copied(&current, Copyable::All)
+    let all: Vec<String> = copied(&current, Copyable::All, crate::measurement::unit())
         .lines()
         .map(str::to_string)
         .collect();
     assert_eq!(all[0], "File,Name,kingfisher.png");
     assert_eq!(
-        copied(&current, Copyable::Section(0)).lines().nth(1),
+        copied(&current, Copyable::Section(0), crate::measurement::unit())
+            .lines()
+            .nth(1),
         Some("Folder,/home/reader/pictures")
     );
-    assert_eq!(copied(&current, Copyable::Fact(0)), "kingfisher.png");
+    assert_eq!(
+        copied(&current, Copyable::Fact(0), crate::measurement::unit()),
+        "kingfisher.png"
+    );
 
     // A size holds commas, which the two table shapes quote and the
     // field on its own does not: there is nothing there to run into.
     assert_eq!(all[2], "File,Size,\"1.26 MB (1,258,291 bytes)\"");
     assert_eq!(
-        copied(&current, Copyable::Fact(2)),
+        copied(&current, Copyable::Fact(2), crate::measurement::unit()),
         "1.26 MB (1,258,291 bytes)"
     );
 
@@ -652,18 +664,25 @@ fn a_copy_says_as_much_of_the_table_as_was_clicked() {
     // each of them says: a section's rows are the panel's with the
     // column naming the section taken off the front, and a field's is
     // the last column of its own row.
-    let contents = contents(&current);
+    let contents = contents(&current, crate::measurement::unit());
     let mut index = 0;
     for (place, section) in contents.sections.iter().enumerate() {
         let (name, facts) = (section.name, &section.facts);
-        let rows: Vec<String> = copied(&current, Copyable::Section(place))
-            .lines()
-            .map(str::to_string)
-            .collect();
+        let rows: Vec<String> = copied(
+            &current,
+            Copyable::Section(place),
+            crate::measurement::unit(),
+        )
+        .lines()
+        .map(str::to_string)
+        .collect();
         assert_eq!(rows.len(), facts.len(), "section {name}");
         for (row, fact) in rows.iter().zip(facts) {
             assert_eq!(all[index], format!("{},{row}", quoted(name)));
-            assert_eq!(copied(&current, Copyable::Fact(index)), fact.value);
+            assert_eq!(
+                copied(&current, Copyable::Fact(index), crate::measurement::unit()),
+                fact.value
+            );
             index += 1;
         }
     }
@@ -671,8 +690,18 @@ fn a_copy_says_as_much_of_the_table_as_was_clicked() {
 
     // Nothing rather than something wrong for an index off the end,
     // which a click cannot produce but a stale hover could.
-    assert_eq!(copied(&current, Copyable::Fact(9_999)), "");
-    assert_eq!(copied(&current, Copyable::Section(9_999)), "");
+    assert_eq!(
+        copied(&current, Copyable::Fact(9_999), crate::measurement::unit()),
+        ""
+    );
+    assert_eq!(
+        copied(
+            &current,
+            Copyable::Section(9_999),
+            crate::measurement::unit()
+        ),
+        ""
+    );
 }
 
 #[test]

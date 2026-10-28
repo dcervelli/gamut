@@ -119,7 +119,12 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  and the developed picture's channels a pass draws, and its body draws both,
                  track.rs the band and its handles, slider.rs the exposure's slider, drawn
                  by ui/slider.rs
-  minimap.rs / grid.rs   one widget each, drawn with egui's painter
+  minimap.rs / grid.rs   one widget each, drawn with egui's painter; the grid is ruled in
+                 whatever ruler.rs measures, its lines where the measure reads round numbers
+  ruler.rs       Ruler: what the picture as shown is measured in along each axis — its
+                 pixels, a print's inches or millimeters at the file's density, or the file's
+                 own coordinates on the ground — as the readout's coordinate asks, falling
+                 back to the pixels; what the grid and a region's labels read
   loupe.rs       the loupe: place() puts its two circles beside the pointer inside the content
                  area, glass() is the magnified draw the image layer makes of it, show() the rings
   region_panel.rs  the panel up while a region is: its fit, copy and cross,
@@ -142,10 +147,12 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  dimensions over a level floor, and level_line(), the line across the picture
   tags.rs        the Tags tab: the filter field, the count, the tree of groups and tags in
                  rows of two heights laid out only where in view, and csv() and text()
-  pixel.rs       the pointer's readout: coordinate, swatch, and the pixel's
-                 value in whichever of `PixelFormat`'s three ways is in force
-  menu.rs        the popup menus' contents: the zoom menu's choices and cells, the
-                 pixel-format cells, and the menus of copies and of the file with each item's key beside it
+  pixel.rs       the pointer's readout: coordinate, in whichever of `CoordinateFormat`'s
+                 ways is in force, swatch, and the pixel's value in whichever of
+                 `PixelFormat`'s; the menu's id, and the menu hung from the corner with the
+                 bars hidden
+  menu.rs        the popup menus' contents: the zoom menu's choices and cells, and the
+                 pixel menu, the menus of copies and of the file with each item's key beside it
   scale.rs       the interface's scale on top of the monitor's: SCALES, the rungs the keys
                  step along, and RANGE, what the state file keeps
   rename.rs      the rename dialog: a modal with the name in a field, judge() saying what is
@@ -398,6 +405,7 @@ still agrees with both, so renaming either is editing the constant —
 | What moves the moment a step is asked for, and what waits for the file | `Files::target` is the file last asked for, which the count, the file list's highlight, the bar's name (`FrameInput::arriving`) and the title read, and `App::send` owes the frame for; `App::arriving` is what makes the controls acting on the file dead meanwhile (`Reasons::arriving`), what clears the bars' words about the file (the top bar's facts, `status::state_words`, the camera switch), and what makes the transport bar the arriving file's (`App::arriving_transport`). `files::SLOW_READ` is when the picture leaves the screen — `App::replacing` — for `App::standin` and the panels' `FrameInput::waiting`; `App::predicted_slow`, from `App::read_rates`, announces a read at once; `App::arrived_in` notes the rate and asks for the neighbors' thumbnails |
 | Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION`. The drag and the wheel themselves arrive from `ui::show` as `Command::Drag` and `Command::Wheel`, off the picture's own response in `Pass::picture` |
 | The print size: the zoom at which the file's inch is an inch on the monitor | `App::print_zoom` for the zoom, from `Exif::density` and `App::surface_density`; `monitor::density` for which monitor sizes are believed, filled by `monitor/wayland.rs` and `monitor/macos.rs`; `ZoomChoice::Print` for the cell, its dead reasons in `ui/tooltip.rs::disabled` from `Conditions::{density, monitor_size}`; `zoom.print` and `zoom.print.calibrate` for the keys. A monitor measured by hand is `app/calibration.rs` — `App::screen_size` puts the calibration ahead of the reported size, kept in `settings::State::displays` by `Screen::model` — and its dialog `ui/calibrate.rs`, put up by `Control::Calibrate` from `menu::calibrate_cell` |
+| What the grid is ruled in, or what a region's labels are written in | `ui/ruler.rs`: `Ruler::of` for which measure the readout's coordinate gives, `Ruler::write` and `suffix` for how a reading is written; `ui/grid.rs` for `step`, `Along::lines` and `label`; `ui/region.rs::words` for the labels. The print's unit is `Panels::print_unit`, kept in `settings::State::print_unit`, which the info panel's print size reads too |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display/mod.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
 | Where the pointer's pixel is on the ground, for a georeferenced file | `image/geo.rs::Georeference` for the placement and the lift to latitude and longitude, read in `image/exif.rs` beside the panel's rows and carried on `Exif::georeference`; `ui/pixel.rs` for `CoordinateFormat`, `GeographicFormat` and how each is written, `CoordinateFormat::offered` being the one reading of what a file can answer that the menu, the key and the `When` conditions share |
 | What the window says about something that just happened | `ui/toast.rs` for how long it stays and how it is drawn, `App::toast` to raise one, and `App::poll_copies` for the copies that only know how they went once their thread is done |

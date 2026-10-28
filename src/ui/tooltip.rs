@@ -18,6 +18,7 @@ use super::control::Control;
 use super::histogram::WINDOWS;
 use super::info::Copyable;
 use super::menu::{self, Copies, ZoomChoice};
+use super::pixel::CoordinateFormat;
 use super::tags::{Fold, Tab, Table};
 use crate::image::sensor::Demosaic;
 
@@ -110,16 +111,14 @@ pub const MAXIMIZE_SHIFTED: &str = "Hide all panels and toggle the UI";
 pub const COPY_REGION: &str = "Copy the region as displayed";
 
 /// What the dot at the head of the pixel readout says under its name: the
-/// key that cycles the format, and the two copies that take what it is
-/// showing away — each followed by its key, which the application adds.
-pub const PIXEL_CYCLE: &str = "Cycle pixel format: hex, decimal, mapped, depth";
+/// two copies that take what it is showing away — each followed by its
+/// key, which the application adds.
 pub const PIXEL_COPY_VALUE: &str = "Copy pixel value under pointer";
 pub const PIXEL_COPY_COORDINATE: &str = "Copy coordinate of pixel under pointer";
-/// And, for a file with more than the pixel to say, the two keys that change how the
-/// coordinate is written — the second only where it can be a latitude.
+/// And, for a file with more than the pixel to say, the key that steps
+/// through the ways the coordinate can be written.
 pub const PIXEL_COORDINATE_CYCLE: &str =
-    "Cycle coordinate: pixel, projected, geographic, direction";
-pub const PIXEL_GEOGRAPHIC_CYCLE: &str = "Switch latitude and longitude: decimal, DMS";
+    "Cycle coordinate: pixel, print, projected, geographic, direction";
 
 /// What a toggle says when the content area has no room for the panel it
 /// opens, in place of the name of the panel.
@@ -214,6 +213,11 @@ pub const NO_PROFILE: &str = "This file carries no camera profile.";
 /// What the zoom menu's print size says while it is dead: the file does not
 /// say how many of its pixels go to an inch, or the monitor how large it is.
 const NO_DENSITY: &str = "This file doesn't provide DPI";
+/// What the pixel menu's projected coordinate says while it is dead: the
+/// file is not placed on a projection, or not placed at all; and its
+/// latitude and longitude, while the file cannot be placed on the globe.
+const NOT_PROJECTED: &str = "This image isn't on a map projection";
+const NOT_GEOREFERENCED: &str = "This image can't be placed in latitude and longitude";
 const NO_MONITOR_SIZE: &str = "This display didn't report its physical size";
 /// What the calibration's button says while it is dead: the window's
 /// monitor cannot be told apart from another, so nothing measured could be
@@ -292,8 +296,10 @@ pub const STILL_OPENING: &str = "Waiting for file.";
 /// cannot come to disagree.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Conditions {
-    /// Whether the menu of sorts is open, whose keys are tried first then.
+    /// Whether the menu of sorts is open, whose keys are tried first then;
+    /// and the pixel readout's menu, whose are too.
     pub sort_menu: bool,
+    pub pixel_menu: bool,
     pub region_selected: bool,
     /// Whether regions are held to an aspect rather than free.
     pub region_held: bool,
@@ -308,10 +314,13 @@ pub struct Conditions {
     pub visited_before: bool,
     pub visited_after: bool,
     /// Whether the file on screen offers a coordinate other than the
-    /// pixel's — on the ground, or the way the pixel looks — and whether
-    /// one of them is a latitude.
+    /// pixel's — on paper, on the ground, or the way the pixel looks — and
+    /// which of them: its own projection's, a latitude, the way it looks.
+    /// The print's is [`Conditions::density`].
     pub coordinates: bool,
+    pub projected: bool,
     pub geographic: bool,
+    pub direction: bool,
     /// Whether the file on screen says which way its camera faced, which
     /// is what the horizon grid needs; and whether it gives the bearing the
     /// lens pointed along, which is all the ring at the middle needs.
@@ -378,6 +387,7 @@ impl Default for Conditions {
     fn default() -> Self {
         Self {
             sort_menu: false,
+            pixel_menu: false,
             region_selected: false,
             region_held: false,
             several_files: false,
@@ -390,7 +400,9 @@ impl Default for Conditions {
             visited_before: false,
             visited_after: false,
             coordinates: false,
+            projected: false,
             geographic: false,
+            direction: false,
             orientation: false,
             heading: false,
             located: false,
@@ -431,6 +443,7 @@ impl Conditions {
     #[cfg(test)]
     pub const ALIVE: Conditions = Conditions {
         sort_menu: false,
+        pixel_menu: false,
         region_selected: false,
         region_held: false,
         several_files: false,
@@ -443,7 +456,9 @@ impl Conditions {
         visited_before: true,
         visited_after: true,
         coordinates: false,
+        projected: false,
         geographic: false,
+        direction: false,
         orientation: true,
         heading: true,
         located: true,
@@ -522,7 +537,9 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         orientation,
         heading,
         located,
+        projected,
         geographic,
+        direction,
         density,
         monitor_size,
         screen,
@@ -577,6 +594,24 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
             return said(NO_MONITOR_SIZE);
         }
     }
+    // The pixel menu's ways of writing where a pixel is that the file
+    // cannot answer, which the menu keeps in their places, dead, so that
+    // its letters are where they always are.
+    if let Tip::Control(Control::Coordinates(format)) = tip {
+        let refused = match format {
+            CoordinateFormat::Pixel => None,
+            CoordinateFormat::Print => (!density).then_some(NO_DENSITY),
+            CoordinateFormat::Projected => (!projected).then_some(NOT_PROJECTED),
+            CoordinateFormat::Geographic => (!geographic).then_some(NOT_GEOREFERENCED),
+            CoordinateFormat::Direction => (!direction).then_some(NO_ORIENTATION),
+        };
+        if let Some(refused) = refused {
+            return said(refused);
+        }
+    }
+    if matches!(tip, Tip::Control(Control::PrintUnit(_))) && !density {
+        return said(NO_DENSITY);
+    }
     if tip == Tip::Control(Control::Calibrate) && !screen {
         return said(NO_SCREEN);
     }
@@ -603,6 +638,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         tip,
         Tip::Control(
             Control::Copy
+                | Control::PixelFormat
                 | Control::Region
                 | Control::TurnLeft
                 | Control::TurnRight
@@ -712,6 +748,7 @@ pub fn words(tip: Tip) -> Option<String> {
         }
         Tip::Control(Control::Coordinates(format)) => menu::describe_coordinates(format),
         Tip::Control(Control::Geographic(format)) => menu::describe_geographic(format),
+        Tip::Control(Control::PrintUnit(unit)) => menu::describe_print_unit(unit),
         Tip::Control(Control::Zoom) => "Open zoom menu",
         Tip::Control(Control::CalibrateReset) => "Reset to the display's reported size",
         // No one key opens it — every cell of it has a key of its own —

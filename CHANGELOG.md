@@ -8,6 +8,21 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
+- The pixel readout gives a **Print** coordinate for a file that records
+  its dots per inch: how far the pixel is from the picture's top left when
+  printed, `(0.998, 0.002) in`, in inches or millimeters as **Print unit**
+  in the same menu chooses. The file information's *Print size* follows that
+  choice, which starts in the unit the system's region measures in.
+- The grid measures in what the readout shows: image pixels, a print's inches
+  or millimeters, or a map's own coordinates — `500 m`, `2 km` — its lines on
+  round eastings and northings. With the readout on latitude and longitude,
+  which curve across a projected map, the grid uses the map's coordinates.
+  A region's size and edges are written in the same units.
+- Keys for the pixel readout's menu: `.` opens it, even with the interface
+  hidden, and while it is open a letter chooses each item — `h` hex, `d`
+  decimal, `m` mapped, `z` depth; `x` pixel, `p` print, `e` projected, `g`
+  geographic, `a` direction; `u` switches the print unit and `s` a
+  latitude's degrees. Each letter appears beside its item.
 - Keys for the file list's order: `O` opens the sort menu, even with the
   list hidden, and while it is open a letter chooses each sort: `n` name,
   `p` path, `e` type, `m` modified, `t` captured, `s` size, `w` width,
@@ -56,6 +71,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Changed
 
+- The pixel readout's menu is a list with a key beside each item, rather
+  than rows of cells. `.` opens it instead of stepping through the value's
+  formats, and `Shift+,` no longer switches a latitude's degrees: `s` does,
+  in the menu. A configuration file's `interface.pixel-format` or
+  `interface.geographic-format` line is now passed over; bind
+  `interface.readout` or `interface.readout.lat-long` instead. Ways of writing a coordinate that a
+  file cannot give are dimmed in the menu rather than left out.
 - The file list remembers the sort chosen before the one in force and
   breaks ties by it, so sorting by size and then by kind keeps each kind in
   size order across restarts, and a file arriving lands among the files it

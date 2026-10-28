@@ -22,13 +22,12 @@ use egui::{
 };
 
 use crate::clock;
-use crate::measurement;
 
 use crate::image::AlphaMode;
 use crate::image::attitude::{Attitude, Shown, Source};
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{Reading, Rendering};
-use crate::image::density::Density;
+use crate::image::density::{self, Density};
 use crate::image::depth::{Accuracy, Quantity};
 use crate::image::exif::{self, Group, ShownRegion};
 use crate::image::gain_map::{GainMap, Lift};
@@ -513,7 +512,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, panel:
 /// another file starts at the top of its column rather than however far
 /// down the last one had been read.
 fn column(pass: &mut Pass, ui: &mut egui::Ui, current: &Current, picture: &egui::Painter) {
-    let contents = cached(ui, current);
+    let contents = cached(ui, current, pass.panels.print_unit);
     ui.spacing_mut().scroll.bar_inner_margin = SCROLLBAR_GUTTER - SCROLLBAR_WIDTH;
     egui::ScrollArea::vertical()
         .id_salt(("info column", current.file.path.as_str()))
@@ -1544,7 +1543,7 @@ fn offer(
 /// an empty heading being a question about where the rest of it went. In
 /// practice the first and the picture's always stand, since a file always
 /// has a size and a picture always has a color space.
-fn contents(current: &Current) -> Contents {
+fn contents(current: &Current, print: density::Unit) -> Contents {
     let exif = &current.exif;
     let metadata = |group: Group| {
         exif.sections
@@ -1570,7 +1569,7 @@ fn contents(current: &Current) -> Contents {
                 buttons: &[],
                 reading: true,
             },
-            fields(image_facts(current)),
+            fields(image_facts(current, print)),
         )
     });
     sections.extend(metadata(Group::Camera));
@@ -1666,11 +1665,13 @@ struct Key {
     page: usize,
     rendering: Rendering,
     lift: Option<u32>,
+    print: density::Unit,
 }
 
 impl Key {
-    fn of(current: &Current) -> Self {
+    fn of(current: &Current, print: density::Unit) -> Self {
         Self {
+            print,
             image: Arc::as_ptr(&current.image) as *const u8 as usize,
             path: current.file.path.clone(),
             label: current.label.clone(),
@@ -1683,8 +1684,9 @@ impl Key {
     }
 
     /// Whether `current` would make this same key, read without making one.
-    fn is(&self, current: &Current) -> bool {
-        self.image == Arc::as_ptr(&current.image) as *const u8 as usize
+    fn is(&self, current: &Current, print: density::Unit) -> bool {
+        self.print == print
+            && self.image == Arc::as_ptr(&current.image) as *const u8 as usize
             && self.turn == current.turn
             && self.showing == current.showing
             && self.page == current.page
@@ -1707,17 +1709,17 @@ struct Cached {
 /// once per frame: they are a few dozen formatted facts and the regions
 /// placed under the turn, none of which changes while the picture sits
 /// there, and the panel is drawn on every frame it is up.
-fn cached(ui: &egui::Ui, current: &Current) -> Arc<Contents> {
+fn cached(ui: &egui::Ui, current: &Current, print: density::Unit) -> Arc<Contents> {
     let id = egui::Id::new("info contents");
     let held = ui.data(|data| data.get_temp::<Cached>(id));
     if let Some(held) = &held
-        && held.key.is(current)
+        && held.key.is(current, print)
     {
         return Arc::clone(&held.contents);
     }
     let made = Cached {
-        key: Arc::new(Key::of(current)),
-        contents: Arc::new(contents(current)),
+        key: Arc::new(Key::of(current, print)),
+        contents: Arc::new(contents(current, print)),
     };
     ui.data_mut(|data| data.insert_temp(id, made.clone()));
     made.contents
@@ -1791,8 +1793,9 @@ fn fields<'a>(from: impl IntoIterator<Item = (&'a str, String)>) -> Vec<Fact> {
 /// the value, as it is written, with none of the quoting a table needs, since
 /// a path or a coordinate is wanted where it is pasted rather than wanted
 /// back in a spreadsheet.
-pub fn copied(current: &Current, copies: Copyable) -> String {
-    let contents = contents(current);
+/// The print size is in `print`, as the panel writes it.
+pub fn copied(current: &Current, copies: Copyable, print: density::Unit) -> String {
+    let contents = contents(current, print);
     match copies {
         Copyable::All => joined(
             contents
@@ -1870,7 +1873,7 @@ fn file_facts(current: &Current) -> Vec<(&'static str, String)> {
 /// Always the picture's, whichever of the file's images is on screen: a
 /// gain map or a depth map shown in its place is described in a section of
 /// its own.
-fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
+fn image_facts(current: &Current, print: density::Unit) -> Vec<(&'static str, String)> {
     let face = current.picture_face();
     let image = &face.image;
     // The file's density is of the pixels as stored, and the resolution of
@@ -1922,7 +1925,7 @@ fn image_facts(current: &Current) -> Vec<(&'static str, String)> {
         (
             "Print size",
             density
-                .map(|density| density.print_size([image.width, image.height], measurement::unit()))
+                .map(|density| density.print_size([image.width, image.height], print))
                 .unwrap_or_default(),
         ),
         (
