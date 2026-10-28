@@ -1347,6 +1347,34 @@ fn outline(
     thickness: f32,
     color: egui::Color32,
 ) {
+    outline_sides(painter, grid, rect, thickness, color, Sides::default());
+}
+
+/// Which of a rectangle's four edges: what [`outline_sides`] dashes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Sides {
+    top: bool,
+    bottom: bool,
+    left: bool,
+    right: bool,
+}
+
+/// How long each dash of a dashed edge is, and the gap after it, in logical
+/// pixels.
+const OUTLINE_DASH: f32 = 4.0;
+const OUTLINE_GAP: f32 = 3.0;
+
+/// [`outline`], with the edges `dashed` names drawn as dashes rather than a
+/// line: each dash snapped to the device's grid as the solid edges are, so
+/// it is as sharp and as heavy as they are.
+fn outline_sides(
+    painter: &egui::Painter,
+    grid: icon::Grid,
+    rect: Rect,
+    thickness: f32,
+    color: egui::Color32,
+    dashed: Sides,
+) {
     if rect.width <= 0.0 || rect.height <= 0.0 {
         return;
     }
@@ -1367,10 +1395,48 @@ fn outline(
             color,
         );
     };
-    fill(Rect::new(rect.x, rect.y, rect.width, edge));
-    fill(Rect::new(rect.x, rect.bottom() - edge, rect.width, edge));
-    fill(Rect::new(rect.x, rect.y + edge, edge, middle));
-    fill(Rect::new(rect.right() - edge, rect.y + edge, edge, middle));
+    // One edge, `piece`, running along x or down y; dashed, a dash at a time
+    // from its start, the last cut short at its end.
+    let side = |piece: Rect, along_x: bool, dashed: bool| {
+        if !dashed {
+            return fill(piece);
+        }
+        let (start, length) = if along_x {
+            (piece.x, piece.width)
+        } else {
+            (piece.y, piece.height)
+        };
+        let mut at = 0.0;
+        while at < length {
+            let run = OUTLINE_DASH.min(length - at);
+            fill(if along_x {
+                Rect::new(start + at, piece.y, run, piece.height)
+            } else {
+                Rect::new(piece.x, start + at, piece.width, run)
+            });
+            at += OUTLINE_DASH + OUTLINE_GAP;
+        }
+    };
+    side(
+        Rect::new(rect.x, rect.y, rect.width, edge),
+        true,
+        dashed.top,
+    );
+    side(
+        Rect::new(rect.x, rect.bottom() - edge, rect.width, edge),
+        true,
+        dashed.bottom,
+    );
+    side(
+        Rect::new(rect.x, rect.y + edge, edge, middle),
+        false,
+        dashed.left,
+    );
+    side(
+        Rect::new(rect.right() - edge, rect.y + edge, edge, middle),
+        false,
+        dashed.right,
+    );
 }
 
 /// What the compositor paints behind the image: the panel color, with the

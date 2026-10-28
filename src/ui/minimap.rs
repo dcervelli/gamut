@@ -13,7 +13,7 @@ use super::Rect;
 use crate::view::Viewport;
 
 use super::chrome::{Parts, Pass, content_area};
-use super::{Command, PADDING, outline, panel, pointer_button};
+use super::{Command, PADDING, Sides, outline, outline_sides, panel, pointer_button};
 use crate::gestures::{Button, Kind};
 
 /// The largest the minimap's thumbnail may be. It keeps the image's own
@@ -112,8 +112,10 @@ fn image_point(rect: Rect, image: [f32; 2], point: [f32; 2]) -> [f32; 2] {
 ///
 /// The viewport's corners in image pixels, scaled into the thumbnail. Not
 /// clamped to it: a view pulled past the image's edge sees past it, and the
-/// marker hangs off the thumbnail's side by as much, which is what says the
-/// view is overhanging rather than at the edge.
+/// marker runs off the thumbnail's side by as much. What is drawn is cut to
+/// the thumbnail by [`within`], and [`overflowing`] says which of its edges
+/// were cut, which is what says the view is overhanging rather than at the
+/// edge.
 fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: Viewport) -> Rect {
     let corner = |point: [f32; 2]| {
         let point = placement.image_point(point);
@@ -125,6 +127,22 @@ fn minimap_marker(rect: Rect, image: [f32; 2], placement: Placement, viewport: V
     let start = corner([viewport.x, viewport.y]);
     let end = corner([viewport.x + viewport.width, viewport.y + viewport.height]);
     Rect::new(start[0], start[1], end[0] - start[0], end[1] - start[1])
+}
+
+/// How far past the thumbnail's edge the marker has to run, in logical
+/// pixels, to be drawn as running past it: less is rounding, a view at the
+/// image's edge rather than past it.
+const OVERFLOW_SLACK: f32 = 0.5;
+
+/// Which of the marker's edges run past the thumbnail's, and are drawn
+/// dashed on the thumbnail's edge where they are cut off.
+fn overflowing(marker: Rect, rect: Rect) -> Sides {
+    Sides {
+        top: marker.y < rect.y - OVERFLOW_SLACK,
+        bottom: marker.bottom() > rect.bottom() + OVERFLOW_SLACK,
+        left: marker.x < rect.x - OVERFLOW_SLACK,
+        right: marker.right() > rect.right() + OVERFLOW_SLACK,
+    }
 }
 
 /// The part of `marker` over `rect`: what of the thumbnail is left bright.
@@ -139,9 +157,9 @@ fn within(marker: Rect, rect: Rect) -> Rect {
 /// Draws the minimap over the thumbnail the image layer has already put in
 /// the bottom-left of `content`: a border around the whole image, and the part
 /// of it the viewport is showing left bright while the rest is washed over.
-/// The marker around that part is the viewport's, so a view pulled past the
-/// image's edge has it hang off the thumbnail, over the picture — as far as
-/// the content area, where it is cut off rather than drawn over the chrome.
+/// The marker around that part is cut to the thumbnail, so a view pulled
+/// past the image's edge has it stop at the thumbnail's edge, drawn dashed
+/// there to say the view goes on past it.
 ///
 /// Nothing here is filled where the thumbnail shows through, and the
 /// interface is composited over the image layer, so the two halves of the
@@ -240,8 +258,14 @@ pub(super) fn show(pass: &mut Pass, ui: &mut egui::Ui) {
                 );
             }
         }
-        let painter = painter.with_clip_rect(content.into());
-        outline(&painter, grid, marker, 1.5, theme.accent.into());
+        outline_sides(
+            painter,
+            grid,
+            shown,
+            1.5,
+            theme.accent.into(),
+            overflowing(marker, rect),
+        );
     });
 }
 
@@ -359,6 +383,20 @@ mod tests {
             close(shown.x, rect.x) && close(shown.width, rect.width / 4.0),
             "{shown:?}"
         );
+        // Cut off at the top and the left, which are drawn dashed.
+        assert_eq!(
+            overflowing(marker, rect),
+            Sides {
+                top: true,
+                left: true,
+                ..Sides::default()
+            }
+        );
+
+        // At the edge rather than past it, nothing is cut off.
+        view.pan_to_edge([-1.0, -1.0], image, half);
+        let marker = minimap_marker(rect, image, view.placement(image, half), half);
+        assert_eq!(overflowing(marker, rect), Sides::default());
     }
 
     /// The wash around the marker is four quads meeting along its edges, and
