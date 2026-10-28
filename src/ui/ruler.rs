@@ -166,11 +166,7 @@ impl Ruler {
     /// `value` written to [`Ruler::places`], with no sign on a nought.
     pub fn write(&self, value: f64) -> String {
         let places = self.places();
-        let written = format!("{value:.places$}");
-        match written.strip_prefix('-') {
-            Some(rest) if rest.chars().all(|c| c == '0' || c == '.') => rest.to_string(),
-            _ => written,
-        }
+        unsigned_nought(format!("{value:.places$}"))
     }
 
     /// How wide a pixel is over how tall, in the measure's units: one for
@@ -213,6 +209,15 @@ impl Ruler {
             Unit::Ground(Some(unit)) if angle(unit) => unit.to_string(),
             Unit::Ground(Some(unit)) => format!(" {unit}"),
         }
+    }
+}
+
+/// `written` with the sign taken off where what is left is a nought, which
+/// a value a hair under it rounds to and which has no sign.
+pub(super) fn unsigned_nought(written: String) -> String {
+    match written.strip_prefix('-') {
+        Some(rest) if rest.chars().all(|c| c == '0' || c == '.') => rest.to_string(),
+        _ => written,
     }
 }
 

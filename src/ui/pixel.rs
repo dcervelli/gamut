@@ -277,17 +277,17 @@ pub fn menu_id() -> egui::Id {
     Pass::menu_id(Control::PixelFormat)
 }
 
-/// The pixel menu while the bottom bar is not on screen to hang it from,
-/// which only the key opens: hung above `anchor` instead, and drawn on
-/// every frame it is open, as a popup not drawn is a popup egui closes.
+/// The pixel menu while the bottom bar is not on screen to hang it from:
+/// hung above `anchor` instead — see [`Pass::loose_menu`].
 pub(super) fn loose_menu(pass: &mut Pass, ui: &egui::Ui, anchor: egui::PopupAnchor) {
-    egui::Popup::new(menu_id(), ui.ctx().clone(), anchor, ui.layer_id())
-        .open_memory(None)
-        .kind(egui::PopupKind::Menu)
-        .layout(egui::Layout::top_down_justified(egui::Align::Min))
-        .style(egui::containers::menu::menu_style)
-        .align(egui::RectAlign::TOP_START)
-        .show(|ui| super::menu::pixel_items(pass, ui));
+    pass.loose_menu(
+        ui,
+        Control::PixelFormat,
+        anchor,
+        egui::RectAlign::TOP_START,
+        0.0,
+        super::menu::pixel_items,
+    );
 }
 
 /// Draws the readout for the pixel the pointer is over, if it is over one, in

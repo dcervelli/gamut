@@ -1225,6 +1225,34 @@ impl Pass<'_> {
             .show(|ui| contents(self, ui));
     }
 
+    /// The menu `control` opens, while its button is not on screen to hang
+    /// it from, which only a key opens: hung `align` to `anchor`, `gap` from
+    /// it, under the id the button would open it under, and drawn on every
+    /// frame it is open, as a popup not drawn is a popup egui closes.
+    pub fn loose_menu(
+        &mut self,
+        ui: &Ui,
+        control: Control,
+        anchor: egui::PopupAnchor,
+        align: egui::RectAlign,
+        gap: f32,
+        contents: impl FnOnce(&mut Pass, &mut Ui),
+    ) {
+        egui::Popup::new(
+            Self::menu_id(control),
+            ui.ctx().clone(),
+            anchor,
+            ui.layer_id(),
+        )
+        .open_memory(None)
+        .kind(egui::PopupKind::Menu)
+        .layout(Layout::top_down_justified(Align::Min))
+        .style(egui::containers::menu::menu_style)
+        .align(align)
+        .gap(gap)
+        .show(|ui| contents(self, ui));
+    }
+
     /// Hangs words the frame itself holds off `response`, laid out as a
     /// tooltip is: `title` names the thing, and `hints` go under it. For
     /// what the application's namer cannot know — a row of the file list

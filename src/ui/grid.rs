@@ -21,7 +21,7 @@
 use crate::render::Placement;
 
 use super::Rect;
-use super::ruler::{Ruler, Unit};
+use super::ruler::{Ruler, Unit, unsigned_nought};
 use crate::theme::Theme;
 
 /// What the spacing aims at, in logical pixels. Laid out in logical rather
@@ -380,11 +380,17 @@ impl Along<'_> {
 pub(super) fn label(step: f64, ruler: &Ruler) -> String {
     match ruler.unit {
         Unit::Pixel => format!("{step:.0} px"),
-        Unit::Ground(Some("m")) if step >= 1000.0 => {
+        _ if in_kilometers(step, ruler) => {
             format!("{} km", written(step / 1000.0, step / 1000.0))
         }
         _ => format!("{}{}", written(step, step), ruler.suffix()),
     }
+}
+
+/// Whether lines `step` apart in what `ruler` measures are written in
+/// kilometers: meters on the ground, a thousand or more of them apart.
+fn in_kilometers(step: f64, ruler: &Ruler) -> bool {
+    ruler.unit == Unit::Ground(Some("m")) && step >= 1000.0
 }
 
 /// `value` with as many places as `every`, a round number, needs to be
@@ -393,11 +399,7 @@ fn written(value: f64, every: f64) -> String {
     // A hair under, so that a tenth worked out as a hair over one place
     // does not ask for two.
     let places = (-every.log10() - 1e-9).ceil().clamp(0.0, 9.0) as usize;
-    let text = format!("{value:.places$}");
-    match text.strip_prefix('-') {
-        Some(rest) if rest.chars().all(|c| c == '0' || c == '.') => rest.to_string(),
-        _ => text,
-    }
+    unsigned_nought(format!("{value:.places$}"))
 }
 
 /// What the line at `value` is labeled, where the lines labeled are
@@ -405,9 +407,9 @@ fn written(value: f64, every: f64) -> String {
 /// in — kilometers where it writes kilometers — the unit being said once
 /// there rather than at every line.
 fn reading(value: f64, every: f64, step: f64, ruler: &Ruler) -> String {
-    match ruler.unit {
-        Unit::Ground(Some("m")) if step >= 1000.0 => written(value / 1000.0, every / 1000.0),
-        _ => written(value, every),
+    match in_kilometers(step, ruler) {
+        true => written(value / 1000.0, every / 1000.0),
+        false => written(value, every),
     }
 }
 

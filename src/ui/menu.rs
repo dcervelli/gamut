@@ -398,19 +398,13 @@ fn fit_cell(pass: &mut Pass, ui: &mut Ui, fit: Fit, fills: Axis, active: bool) -
 pub(super) fn pixel_items(pass: &mut Pass, ui: &mut Ui) {
     let answers = Answers::of(pass.current);
     let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
-        // Dead by the reading the application refuses the press by.
+        // Dead by the reading the application's `Conditions` are made
+        // from, which is what refuses the press.
         let enabled = match control {
             Control::Coordinates(format) => format.offered(answers),
             _ => true,
         };
-        let mut button = Button::new(control.label()).selected(active);
-        if let Some(key) = pass.namer.shortcut(control) {
-            button = button.shortcut_text(key);
-        }
-        let response = ui.add_enabled(enabled, button);
-        let response = pass.tooltip(response, Tip::Control(control));
-        if response.clicked() {
-            pass.press(control);
+        if keyed_item(pass, ui, &control.label(), control, active, enabled).clicked() {
             ui.close();
         }
     };
@@ -502,14 +496,7 @@ pub(super) fn sort_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
     titled(pass, ui, &Control::Sorting.label(), |pass, ui| {
         // Each with the key that does the same while the menu is open.
         let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
-            let mut button = Button::new(control.label()).selected(active);
-            if let Some(key) = pass.namer.shortcut(control) {
-                button = button.shortcut_text(key);
-            }
-            let response = ui.add(button);
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
+            if keyed_item(pass, ui, &control.label(), control, active, true).clicked() {
                 ui.close();
             }
         };
@@ -542,15 +529,7 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
                 Copies::Image if pass.input.selection.region().is_some() => "Region",
                 _ => copies.label(),
             };
-            let mut button = Button::new(label);
-            if let Some(key) = pass.namer.shortcut(control) {
-                button = button.shortcut_text(key);
-            }
-            let response = ui.add(button);
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
-            }
+            keyed_item(pass, ui, label, control, false, true);
         }
     });
 }
@@ -626,17 +605,34 @@ pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
             ),
         ]);
         for (control, label) in items {
-            let mut button = Button::new(label);
-            if let Some(key) = pass.namer.shortcut(control) {
-                button = button.shortcut_text(key);
-            }
-            let response = ui.add(button);
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
-            }
+            keyed_item(pass, ui, &label, control, false, true);
         }
     });
+}
+
+/// One item of a menu: `label`, with the key that does the same beside
+/// it, lit where it is `active` and dead where it is not `enabled`, its
+/// tooltip `control`'s, and `control` pressed when it is clicked. Whether
+/// the click also closes the menu is the caller's: an item that sets
+/// something does, one that does something need not.
+fn keyed_item(
+    pass: &mut Pass,
+    ui: &mut Ui,
+    label: &str,
+    control: Control,
+    active: bool,
+    enabled: bool,
+) -> egui::Response {
+    let mut button = Button::new(label).selected(active);
+    if let Some(key) = pass.namer.shortcut(control) {
+        button = button.shortcut_text(key);
+    }
+    let response = ui.add_enabled(enabled, button);
+    let response = pass.tooltip(response, Tip::Control(control));
+    if response.clicked() {
+        pass.press(control);
+    }
+    response
 }
 
 /// The menu of other programs: one item for each application the desktop

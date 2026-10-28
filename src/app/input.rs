@@ -2333,19 +2333,38 @@ impl App {
         holding
     }
 
-    /// Whether the pixel readout's menu is up. Asked of egui, as the
-    /// sort menu's is.
+    /// Whether the pixel readout's menu is up.
     pub(super) fn pixel_menu_open(&self) -> bool {
-        self.shown
-            .as_ref()
-            .is_some_and(|shown| egui::Popup::is_id_open(&shown.gui.ctx, ui::pixel::menu_id()))
+        self.menu_open(ui::pixel::menu_id())
     }
 
-    /// Whether the menu of sorts is up. Asked of egui, whose popup it is.
+    /// Whether the menu of sorts is up.
     pub(super) fn sort_menu_open(&self) -> bool {
-        self.shown.as_ref().is_some_and(|shown| {
-            egui::Popup::is_id_open(&shown.gui.ctx, ui::filmstrip::sort_menu_id())
-        })
+        self.menu_open(ui::filmstrip::sort_menu_id())
+    }
+
+    /// Whether the menu open under `id` is up. Asked of egui, whose popup
+    /// it is.
+    fn menu_open(&self, id: egui::Id) -> bool {
+        self.shown
+            .as_ref()
+            .is_some_and(|shown| egui::Popup::is_id_open(&shown.gui.ctx, id))
+    }
+
+    /// The menu open under `id` closed where it is up, and otherwise every
+    /// other menu closed and this one opened — where it `may_open`: what a
+    /// key that opens a menu does, as a press on its button does.
+    fn toggle_menu(&self, id: egui::Id, may_open: bool) -> Effect {
+        let Some(shown) = &self.shown else {
+            return Effect::Nothing;
+        };
+        let ctx = &shown.gui.ctx;
+        let open = egui::Popup::is_id_open(ctx, id);
+        egui::Popup::close_all(ctx);
+        if !open && may_open {
+            egui::Popup::open_id(ctx, id);
+        }
+        Effect::Redraw
     }
 
     /// The fit key went down. Nothing moves, but the pointer over the
@@ -2504,10 +2523,7 @@ impl App {
             // The menu's own button, and its items, which close it as a
             // press on one does.
             OpenSortMenu => return self.press(Control::Sorting),
-            SortBy(sort) => {
-                self.close_menus();
-                return self.press(Control::SortBy(sort)).also(Effect::Redraw);
-            }
+            SortBy(sort) => return self.choose(Control::SortBy(sort)),
             ReverseSort => {
                 let direction = self.filmstrip.order().direction.reversed();
                 return self.press(Control::SortDirection(direction));
@@ -2887,12 +2903,6 @@ impl App {
         }
     }
 
-    /// Closes whatever menu is open. Returns whether there was one: the
-    /// press that closes a menu is spent doing exactly that.
-    ///
-    /// Asked of egui rather than of a flag of our own, the menus being its:
-    /// it closes one on Escape itself, and this is what keeps the key that
-    /// puts things away from quitting out from under one.
     /// An item of a menu chosen by its key: pressed as a click on it is,
     /// and the menu closed as the click closes it — unless the item is
     /// dead, which leaves the menu up and nothing done, as a click on it
@@ -2905,6 +2915,12 @@ impl App {
         self.press(control).also(Effect::Redraw)
     }
 
+    /// Closes whatever menu is open. Returns whether there was one: the
+    /// press that closes a menu is spent doing exactly that.
+    ///
+    /// Asked of egui rather than of a flag of our own, the menus being its:
+    /// it closes one on Escape itself, and this is what keeps the key that
+    /// puts things away from quitting out from under one.
     pub(super) fn close_menus(&mut self) -> bool {
         let Some(shown) = &self.shown else {
             return false;
@@ -2963,7 +2979,9 @@ impl App {
     /// help popup's dimming, the tooltips' refusals and [`App::refuses`].
     pub(super) fn conditions(&self) -> Conditions {
         let current = self.current.as_ref();
-        let georeference = current.and_then(|current| current.exif.georeference.as_ref());
+        // What the file can say of where a pixel is, read once, so that the
+        // pixel menu's items, drawn dead from the same `Answers`, cannot
+        // disagree with the press refused here.
         let answers = ui::pixel::Answers::of(current);
         Conditions {
             sort_menu: self.sort_menu_open(),
@@ -2990,7 +3008,7 @@ impl App {
                 .can_forward(|path| self.files.position(path).is_some()),
             coordinates: answers.beyond_pixel(),
             projected: CoordinateFormat::Projected.offered(answers),
-            geographic: georeference.is_some_and(|geo| geo.offers_geographic()),
+            geographic: CoordinateFormat::Geographic.offered(answers),
             direction: CoordinateFormat::Direction.offered(answers),
             orientation: current.is_some_and(|current| current.exif.attitude.is_some()),
             heading: current.is_some_and(|current| current.exif.heading.is_some()),
@@ -3023,7 +3041,7 @@ impl App {
             nothing_open: current.is_none(),
             arriving: self.arriving().is_some(),
             tags_in: self.tags.tags_in(),
-            density: current.is_some_and(|current| current.exif.density.is_some()),
+            density: CoordinateFormat::Print.offered(answers),
             monitor_size: self.surface_density().is_some(),
             screen: self.screen().is_some(),
         }
@@ -3719,35 +3737,15 @@ impl App {
             // read. Hung from the list's head, or with the list down from
             // elsewhere — see `ui::filmstrip::sort_menu_id`.
             Control::Sorting => {
-                let open = self.sort_menu_open();
-                if !open && self.folder_first(Then::Sorting) {
+                if !self.sort_menu_open() && self.folder_first(Then::Sorting) {
                     return Effect::Nothing;
                 }
-                let Some(shown) = &self.shown else {
-                    return Effect::Nothing;
-                };
-                let ctx = &shown.gui.ctx;
-                egui::Popup::close_all(ctx);
-                if !open && self.files.len() > 1 {
-                    egui::Popup::open_id(ctx, ui::filmstrip::sort_menu_id());
-                }
-                Effect::Redraw
+                self.toggle_menu(ui::filmstrip::sort_menu_id(), self.files.len() > 1)
             }
             // And the pixel readout's, which a key opens too, from the dot
             // where the bars are up and from the corner of the picture where
             // they are not — see `ui::pixel::menu_id`.
-            Control::PixelFormat => {
-                let open = self.pixel_menu_open();
-                let Some(shown) = &self.shown else {
-                    return Effect::Nothing;
-                };
-                let ctx = &shown.gui.ctx;
-                egui::Popup::close_all(ctx);
-                if !open {
-                    egui::Popup::open_id(ctx, ui::pixel::menu_id());
-                }
-                Effect::Redraw
-            }
+            Control::PixelFormat => self.toggle_menu(ui::pixel::menu_id(), true),
             // The file list: up or down, and scrolled to the file on
             // screen as it comes up.
             // With one file, the folder beside it, where there is one to
