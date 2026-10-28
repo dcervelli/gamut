@@ -278,15 +278,15 @@ pub(super) fn bring_forward() {
     }
 }
 
-/// The icon as an image AppKit can draw at any size, or `None` where this
-/// macOS cannot read SVG.
+/// The icon on Apple's grid, the bundle's own, as an image AppKit can draw at
+/// any size, or `None` where this macOS cannot read SVG.
 #[cfg(target_os = "macos")]
 fn icon() -> Option<objc2::rc::Retained<objc2_app_kit::NSImage>> {
     use objc2::AnyThread as _;
     use objc2_app_kit::NSImage;
     use objc2_foundation::NSData;
 
-    const SVG: &[u8] = include_bytes!("../../packaging/com.dcervelli.gamut.svg");
+    const SVG: &[u8] = include_bytes!("../../packaging/macos-icon.svg");
     NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(SVG))
 }
 

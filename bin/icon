@@ -12,7 +12,14 @@ and running this again.
 Positions in the scene are (u, v), 0 to 1 across and down the picture, which
 fills the tile.
 
-    bin/icon [out.svg]    default: packaging/com.dcervelli.gamut.svg
+The one scene is written twice. The desktop entry's icon fills its canvas, as
+a Linux theme's do. A Mac's is laid on Apple's grid instead: the tile 824 of
+1024, its corners the continuous curve of a Mac's icons rather than circular
+arcs, and a shadow under it in the margin, so that it stands as large as the
+icons beside it in the Dock.
+
+    bin/icon [DIRECTORY]    default: packaging/
+                            writes com.dcervelli.gamut.svg and macos-icon.svg
 
 Standard library only.
 """
@@ -46,6 +53,17 @@ SKY = [
 RIDGE = [(0, .60), (.09, .55), (.17, .59), (.27, .48), (.37, .57), (.45, .56),
          (.53, .63), (.61, .665), (.69, .60), (.79, .50), (.89, .57), (1, .54)]
 RIDGE_BODY = (0.05, 0.035, 0.09)
+
+# The tile, in the SVG's units: the picture fills it, and its corners are
+# this round.
+TILE, TILE_AT, CORNER = 116, 6, 26
+
+# Apple's grid: the tile is 824 of the canvas's 1024, its continuous corners
+# smoothed as Figma's 60% is, and a shadow 10 down and 10 soft falls into the
+# margin.
+MAC_TILE, MAC_CANVAS = 824, 1024
+MAC_SMOOTHING = 0.6
+MAC_SHADOW_DROP, MAC_SHADOW_BLUR, MAC_SHADOW_OPACITY = 10, 10, 0.3
 
 
 def add(a, b, k=1):
@@ -132,11 +150,40 @@ def num(x):
 
 
 def X(u):
-    return 6 + 116 * u
+    return TILE_AT + TILE * u
 
 
 def Y(v):
-    return 6 + 116 * v
+    return TILE_AT + TILE * v
+
+
+def squircle(at, side, radius, smoothing):
+    """A square's outline with continuous corners, as Figma smooths them: each
+    corner a circular arc narrowed to (1 - smoothing) of its quarter turn,
+    with a cubic on either side easing the straight edge into it, so that the
+    curvature never jumps. The corner reaches (1 + smoothing) radii along
+    each edge."""
+    p = (1 + smoothing) * radius
+    arc = 90 * (1 - smoothing)
+    chord = math.sin(math.radians(arc / 2)) * radius * math.sqrt(2)
+    alpha = (90 - arc) / 2
+    c = radius * math.tan(math.radians(alpha / 2)) * math.cos(math.radians(45 * smoothing))
+    d = c * math.tan(math.radians(45 * smoothing))
+    b = (p - chord - c - d) / 3
+    a = 2 * b
+    edge = side - 2 * p
+
+    def corner(dx, dy):
+        # One corner, turning from the heading (dx, dy) to the one a quarter
+        # turn clockwise from it, (-dy, dx).
+        def at_(along, across):
+            return num(along * dx - across * dy), num(along * dy + across * dx)
+        return (f'c{" ".join(at_(a, 0))} {" ".join(at_(a + b, 0))} {" ".join(at_(a + b + c, d))}'
+                f'a{num(radius)} {num(radius)} 0 0 1 {" ".join(at_(chord, chord))}'
+                f'c{" ".join(at_(d, c))} {" ".join(at_(d, b + c))} {" ".join(at_(d, a + b + c))}')
+    turns = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+    return f'M{num(at + p)} {num(at)}' + ''.join(
+        f'l{" ".join(num(edge * k) for k in h)}' + corner(*h) for h in turns) + 'Z'
 
 
 def over(base, target):
@@ -168,7 +215,7 @@ def stops(pairs):
                    for o, c, a in pairs)
 
 
-def draw():
+def draw(mac=False):
     sx, sy, sr = X(SUN_U), Y(SUN_V), SUN_R * 116
     top = Y(WATERLINE)
 
@@ -253,11 +300,34 @@ def draw():
                             f'height="1" opacity="{num(0.2 + 0.3 * s)}"/>' for v, w, s in glints)
     cell_rects = '\n'.join(cells)
     wy = Y(0.95)
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+
+    # The tile's outline, and its rim half a unit inside it. A Mac's canvas
+    # is widened around the same tile rather than the scene drawn smaller.
+    if mac:
+        canvas = TILE * MAC_CANVAS / MAC_TILE
+        origin = TILE_AT - (canvas - TILE) / 2
+        view_box = f'{num(origin)} {num(origin)} {num(canvas)} {num(canvas)}'
+        unit = canvas / MAC_CANVAS
+        tile = f'<path d="{squircle(TILE_AT, TILE, CORNER, MAC_SMOOTHING)}"/>'
+        rim_outline = (f'<path d="{squircle(TILE_AT + .5, TILE - 1, CORNER - .5, MAC_SMOOTHING)}" '
+                       'fill="none" stroke="#fff" stroke-opacity=".12"/>')
+        shadow_filter = (f'\n    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">'
+                         f'<feGaussianBlur stdDeviation="{num(MAC_SHADOW_BLUR / 2 * unit)}"/></filter>')
+        shadow = (f'\n  <!-- Apple\'s shadow, in the margin under the tile. -->\n'
+                  f'  <g transform="translate(0 {num(MAC_SHADOW_DROP * unit)})" filter="url(#shadow)">'
+                  f'{tile[:-2]} fill="#000" fill-opacity="{num(MAC_SHADOW_OPACITY)}"/></g>\n')
+    else:
+        view_box = '0 0 128 128'
+        tile = f'<rect x="{TILE_AT}" y="{TILE_AT}" width="{TILE}" height="{TILE}" rx="{CORNER}"/>'
+        rim_outline = (f'<rect x="{TILE_AT + .5}" y="{TILE_AT + .5}" width="{TILE - 1}" '
+                       f'height="{TILE - 1}" rx="{CORNER - .5}" fill="none" stroke="#fff" stroke-opacity=".12"/>')
+        shadow_filter = shadow = ''
+
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view_box}" width="128" height="128">
   <title>gamut</title>
   <!-- Generated by bin/icon; change the scene there and run it again. -->
   <defs>
-    <clipPath id="tile"><rect x="6" y="6" width="116" height="116" rx="26"/></clipPath>
+    <clipPath id="tile">{tile}</clipPath>{shadow_filter}
     <clipPath id="glass"><circle cx="{num(cx)}" cy="{num(cy)}" r="{r}"/></clipPath>
     <linearGradient id="sky" x1="0" y1="{num(Y(0))}" x2="0" y2="{num(top)}" gradientUnits="userSpaceOnUse">{stops(sky_stops)}</linearGradient>
     <radialGradient id="glow" cx="{num(sx)}" cy="{num(sy)}" r="{num(0.62 * 116)}" gradientUnits="userSpaceOnUse">{stops(sun_glow)}</radialGradient>
@@ -271,7 +341,7 @@ def draw():
     <radialGradient id="wglow" cx="{num(sx)}" cy="{num(wy)}" r="{num(0.5 * 116)}" gradientTransform="translate({num(sx)} {num(wy)}) scale(1 0.55) translate({num(-sx)} {num(-wy)})" gradientUnits="userSpaceOnUse">{stops(water_glow)}</radialGradient>
     <linearGradient id="glint" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffd9a0" stop-opacity="0"/><stop offset=".5" stop-color="#ffe6bf"/><stop offset="1" stop-color="#ffd9a0" stop-opacity="0"/></linearGradient>
   </defs>
-
+{shadow}
   <!-- The picture: a lake at sunset, filling the tile. -->
   <g clip-path="url(#tile)">
     <rect x="6" y="6" width="116" height="{num(top - 6)}" fill="url(#sky)"/>
@@ -293,7 +363,7 @@ def draw():
 {glint_rects}
     </g>
   </g>
-  <rect x="6.5" y="6.5" width="115" height="115" rx="25.5" fill="none" stroke="#fff" stroke-opacity=".12"/>
+  {rim_outline}
 
   <!-- The loupe: the sun's rim, magnified into its pixels. -->
   <circle cx="{num(cx)}" cy="{num(cy + 1.8)}" r="{num(r + 1.6)}" fill="#000" fill-opacity=".3"/>
@@ -308,5 +378,6 @@ def draw():
 
 if __name__ == '__main__':
     root = Path(__file__).resolve().parent.parent
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'packaging' / 'com.dcervelli.gamut.svg'
-    out.write_text(draw())
+    out = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'packaging'
+    (out / 'com.dcervelli.gamut.svg').write_text(draw())
+    (out / 'macos-icon.svg').write_text(draw(mac=True))

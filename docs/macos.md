@@ -140,8 +140,11 @@ delegate because the delegate is winit's.
 
 `bin/bundle` wraps a built binary in `Gamut.app`: `packaging/Info.plist`,
 stamped with the version the binary reports so the two cannot differ, the
-binary, and an icon set that `sips` draws from `packaging/`'s SVG at each
-size and `iconutil` packs. Everything it uses ships with macOS, so it runs in
+binary, and an icon set that `sips` draws at each size and `iconutil` packs.
+It is drawn from `packaging/macos-icon.svg`, the scene of the desktop entry's
+icon laid on Apple's grid — a smaller tile, with continuous corners and a
+shadow in the margin — which `bin/icon` writes beside it, since a Linux theme's
+icons fill their canvas and a Mac's do not. Everything it uses ships with macOS, so it runs in
 Homebrew's build as well as by hand. The bundle is signed ad hoc and keeps
 the binary linked against the libraries it was built with: it is for the Mac
 it was built on, which is how the Homebrew formula uses it, and handing one
@@ -240,7 +243,7 @@ Quit and Close Window are `Action::Quit`, so leaving from the menu reaches
 
 - A binary run outside the bundle, as `cargo run` does, has no bundle to
   take an icon from, so the Dock's icon is set by the running program too,
-  from `packaging/`'s SVG, which AppKit reads itself (`window::show_icon`).
+  from `packaging/macos-icon.svg`, which AppKit reads itself (`window::show_icon`).
 - A binary run outside the bundle has no bundle name, so the head of the
   application menu reads `gamut`, the process's name; its items say "Gamut",
   which `app/menubar.rs` capitalizes from `PROGRAM`.
