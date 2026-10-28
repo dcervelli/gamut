@@ -360,7 +360,8 @@ render/        the GPU
                  image.wgsl and reduce.wgsl both
 packaging/     what the packages are built from: the Arch PKGBUILD, the Homebrew
                formula (gamut.rb), the Mac bundle's Info.plist, the .desktop entry,
-               the icon, and hand-written shell completions
+               the icon — the desktop entry's, and macos-icon.svg, the same scene on
+               Apple's grid — and hand-written shell completions
 bin/           release, pkgbuild-sha which points the PKGBUILD and the formula at a
                published tag, bundle which wraps a built binary in Gamut.app, and
                icon, which draws packaging/'s icon from a model of its scene's light

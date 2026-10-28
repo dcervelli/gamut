@@ -10,7 +10,7 @@
 #   bin/bundle                      target/release/gamut into target/release/
 #   bin/bundle BINARY [DIRECTORY]   this binary, into this directory
 #
-# Everything used is part of macOS: sips draws the icon from the SVG,
+# Everything used is part of macOS: sips draws the icon from the Mac's SVG,
 # iconutil packs it, plutil stamps the version, codesign signs.
 
 set -eu
@@ -53,14 +53,15 @@ plutil -lint -s "$APP/Contents/Info.plist"
 cp "$BINARY" "$APP/Contents/MacOS/gamut"
 
 # Every size an icon set holds, each at one and two device pixels to the
-# point, drawn from the SVG rather than scaled from one picture of it.
+# point, drawn from the SVG rather than scaled from one picture of it: the
+# one on Apple's grid, which bin/icon writes beside the desktop entry's.
 SET="$TMP/gamut.iconset"
 mkdir "$SET"
 for size in 16 32 128 256 512; do
-    sips -s format png -z "$size" "$size" "$ROOT/packaging/com.dcervelli.gamut.svg" \
+    sips -s format png -z "$size" "$size" "$ROOT/packaging/macos-icon.svg" \
         --out "$SET/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
-    sips -s format png -z "$double" "$double" "$ROOT/packaging/com.dcervelli.gamut.svg" \
+    sips -s format png -z "$double" "$double" "$ROOT/packaging/macos-icon.svg" \
         --out "$SET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$SET" -o "$APP/Contents/Resources/gamut.icns"
