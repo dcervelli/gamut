@@ -31,7 +31,6 @@ settings are:
 | --- | --- | --- |
 | `show_ui` | `true` | The panels around the picture, which `` ` `` hides and shows |
 | `show_minimap` | `true` | The minimap, while the picture is larger than the window |
-| `show_filmstrip` | `true` | The file list, while there is more than one file |
 | `show_histogram` | `false` | The histogram, in the panel down the right; it wins over `show_info` when both are on |
 | `show_info` | `false` | The file information, in the panel down the right |
 | `browse_folder` | `true` | A single file opened by itself steps on through the other images in its folder |
@@ -197,8 +196,8 @@ them, and `browse_folder` and `max_files` wait for the next start.
 
 `~/.local/state/gamut/state` (under `$XDG_STATE_HOME` if you set it), or
 `~/Library/Application Support/gamut/state` on a Mac, is where
-`gamut` remembers settings you change by hand: how wide you dragged the file
-list, what the list is sorted by and which way, how far the loupe
+`gamut` remembers settings you change by hand: whether the file list was open,
+how wide you dragged it, what the list is sorted by and which way, how far the loupe
 magnifies, how large you made the interface, whether a raw opens as the camera's JPEG,
 whether the folder dialog's *Include subfolders* box was left ticked, and how the pixel
 under the pointer is read out: its value, and for a map its place and how a
