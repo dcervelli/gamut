@@ -46,7 +46,6 @@ use crate::{PROGRAM, shown_path, xdg};
 pub struct Config {
     pub show_ui: bool,
     pub show_minimap: bool,
-    pub show_filmstrip: bool,
     pub show_histogram: bool,
     pub show_info: bool,
     /// Whether a single file named on the command line steps on through
@@ -76,7 +75,6 @@ impl Default for Config {
         Self {
             show_ui: true,
             show_minimap: true,
-            show_filmstrip: true,
             show_histogram: false,
             show_info: false,
             browse_folder: true,
@@ -106,7 +104,7 @@ struct Setting {
 /// Every setting the configuration file takes, in the order the template
 /// lists them. [`Config::template`] writes each one's value, and
 /// [`Config::parse`] reads it back.
-const SETTINGS: [Setting; 10] = [
+const SETTINGS: [Setting; 9] = [
     Setting {
         name: "show_ui",
         words: "The panels around the picture.",
@@ -118,12 +116,6 @@ const SETTINGS: [Setting; 10] = [
         words: "The minimap, while the picture is larger than the window.",
         get: |config| config.show_minimap.to_string(),
         set: |config, value| flag(&mut config.show_minimap, value),
-    },
-    Setting {
-        name: "show_filmstrip",
-        words: "The file list down the left, while there is more than one file.",
-        get: |config| config.show_filmstrip.to_string(),
-        set: |config, value| flag(&mut config.show_filmstrip, value),
     },
     Setting {
         name: "show_histogram",
@@ -254,15 +246,16 @@ pub fn map_bounds_link(link: &str, corners: Corners) -> String {
 }
 
 /// Settings the configuration file once took: how the pointer's pixel and
-/// place are written, which the state file keeps now, chosen by hand from
-/// the readout's menu and remembered where they were left, like everything
-/// else set there; and the histogram's logarithmic counts, which its one
-/// scale down the column has taken the place of. A line naming one is
-/// passed over.
-const RETIRED: [&str; 4] = [
+/// place are written, and whether the file list is up, which the state file
+/// keeps now, set by hand and remembered where they were left, like
+/// everything else set there; and the histogram's logarithmic counts, which
+/// its one scale down the column has taken the place of. A line naming one
+/// is passed over.
+const RETIRED: [&str; 5] = [
     "pixel_format",
     "coordinate_format",
     "geographic_format",
+    "show_filmstrip",
     "log_counts",
 ];
 
@@ -443,6 +436,8 @@ impl Config {
 /// What the program keeps for itself from one run to the next.
 #[derive(Clone, PartialEq, Debug)]
 pub struct State {
+    /// Whether the file list is up, while there is more than one file.
+    pub show_filmstrip: bool,
     /// The width each of the file list's thumbnails is fitted into, in
     /// logical pixels, which the panel's own width is made from.
     pub filmstrip_width: f32,
@@ -478,6 +473,7 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            show_filmstrip: true,
             filmstrip_width: filmstrip::SLOT_DEFAULT,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             horizon_step: attitude::DEFAULT_STEP,
@@ -526,7 +522,14 @@ struct Kept {
 }
 
 /// Every line of the state file, in the order it is written.
-const KEPT: [Kept; 14] = [
+const KEPT: [Kept; 15] = [
+    Kept {
+        name: "show_filmstrip",
+        get: |state| state.show_filmstrip.to_string(),
+        set: |state, value| {
+            let _ = flag(&mut state.show_filmstrip, value);
+        },
+    },
     Kept {
         name: "filmstrip_width",
         get: |state| state.filmstrip_width.to_string(),
@@ -717,18 +720,8 @@ impl StateFile {
         Self { path, loaded }
     }
 
-    /// No file at all: every default, and nothing ever written. What the
-    /// tests start from, so that none of them reads or writes the user's.
-    #[cfg(test)]
-    pub fn none() -> Self {
-        Self {
-            path: None,
-            loaded: State::default(),
-        }
-    }
-
-    /// No file, and `state` as if one had been read: for a test that wants
-    /// the program to start from something other than the defaults.
+    /// No file, and `state` as if one had been read: what the tests start
+    /// from, so that none of them reads or writes the user's.
     #[cfg(test)]
     pub fn holding(state: State) -> Self {
         Self {
@@ -900,7 +893,7 @@ mod tests {
             "show_info = yes\n\
              show_ui = maybe\n\
              show_grid = true\n\
-             show_filmstrip\n\
+             show_minimap\n\
              show_histogram = true\n",
         );
         assert_eq!(
@@ -1053,7 +1046,6 @@ mod tests {
         let changed = Config {
             show_ui: !defaults.show_ui,
             show_minimap: !defaults.show_minimap,
-            show_filmstrip: !defaults.show_filmstrip,
             show_histogram: !defaults.show_histogram,
             show_info: !defaults.show_info,
             browse_folder: !defaults.browse_folder,
@@ -1141,6 +1133,7 @@ mod tests {
     #[test]
     fn the_state_reads_back_what_it_writes() {
         let state = State {
+            show_filmstrip: false,
             filmstrip_width: 212.0,
             loupe_magnification: 8.0,
             horizon_step: 15.0,
@@ -1184,8 +1177,8 @@ mod tests {
         );
     }
 
-    /// The readout's formats were settings of the configuration once, and
-    /// are the state's now: a line an older configuration has for one is
+    /// The readout's formats and the file list's toggle were settings of
+    /// the configuration once, and are the state's now: a line an older configuration has for one is
     /// passed over, not reported, whatever it says.
     #[test]
     fn a_retired_setting_is_passed_over() {
@@ -1193,6 +1186,7 @@ mod tests {
             "pixel_format = decimal\n\
              coordinate_format = geographic\n\
              geographic_format = nonsense\n\
+             show_filmstrip = false\n\
              show_info = true\n",
         );
         assert_eq!(problems, Vec::new());
@@ -1230,7 +1224,8 @@ mod tests {
     #[test]
     fn a_state_out_of_range_is_the_default() {
         let state = State::parse(
-            "filmstrip_width = 100000\n\
+            "show_filmstrip = sometimes\n\
+             filmstrip_width = 100000\n\
              loupe_magnification = 3\n\
              horizon_step = 7\n\
              ui_scale = 9\n\

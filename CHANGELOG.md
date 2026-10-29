@@ -86,6 +86,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A folder in a tree that changes is read again by itself, the open folder
   and the one named looked at four times a second and the rest in turn, so
   a large tree costs little to keep watched.
+- The file list opens as it was left when the window last closed, and
+  open the first time. The configuration file's `show_filmstrip` is
+  retired: a line naming it is passed over.
 
 ### Fixed
 
