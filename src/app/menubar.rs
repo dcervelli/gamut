@@ -20,6 +20,7 @@ use super::keymap::{Chord, KeyName, Keymap};
 use crate::PROGRAM;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{Reading, Rendering};
+use crate::image::density::Unit;
 use crate::image::display::{Colormap, EV_STEP, ToneMap};
 use crate::menubar::{
     Bar, Chosen, Deliver, Equivalent, Identity, Menu, Modifiers, Node, Role, Shown, Snapshot,
@@ -314,9 +315,16 @@ fn view(b: &mut Builder) -> Vec<Node> {
         .iter()
         .map(|format| b.control(format.label(), Control::Coordinates(*format), None))
         .collect();
+    let units = Unit::ALL
+        .iter()
+        .map(|unit| b.control(unit.label(), Control::PrintUnit(*unit), None))
+        .collect();
     let geographic = GeographicFormat::ALL
         .iter()
-        .map(|format| b.control(format.label(), Control::Geographic(*format), None))
+        .map(|format| {
+            let control = Control::Geographic(*format);
+            b.control(&control.label(), control, None)
+        })
         .collect();
     vec![
         b.preferring(
@@ -354,17 +362,18 @@ fn view(b: &mut Builder) -> Vec<Node> {
         b.action("Decrease Interface Scale", Action::ScaleDown),
         b.action("Reset Interface Scale", Action::ScaleReset),
         Node::Separator,
-        b.submenu("Pixel Readout", None, formats),
         b.submenu(
             "Coordinates",
             Some(Control::Coordinates(CoordinateFormat::ALL[0])),
             coordinates,
         ),
+        b.submenu("Print Unit", Some(Control::PrintUnit(Unit::ALL[0])), units),
         b.submenu(
             "Lat/Long",
             Some(Control::Geographic(GeographicFormat::ALL[0])),
             geographic,
         ),
+        b.submenu("Pixel Readout", None, formats),
         Node::Separator,
         // AppKit adds an item of its own to a menu called View unless one
         // already sends `toggleFullScreen:`; its icon would indent the group
@@ -683,12 +692,6 @@ impl App {
                 ui::tooltip::disabled(tip, *conditions).is_none()
                     && met
                     && !(conditions.nothing_open && about_picture(does))
-                    && match control {
-                        Control::Coordinates(format) => {
-                            format.offered(ui::pixel::Answers::of(self.current.as_ref()))
-                        }
-                        _ => true,
-                    }
             }
             Does::Action(_) => met && !(conditions.nothing_open && about_picture(does)),
             Does::Magnification(_) => true,
@@ -737,6 +740,7 @@ impl App {
                 Control::Profile => self.profile,
                 Control::Format(format) => panels.pixel_format == format,
                 Control::Coordinates(format) => panels.coordinate_format == format,
+                Control::PrintUnit(unit) => panels.print_unit == unit,
                 Control::Geographic(format) => panels.geographic_format == format,
                 // A filter is in force with no picture too; a zoom is of one.
                 Control::ZoomTo(choice) => {

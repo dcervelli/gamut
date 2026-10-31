@@ -29,20 +29,30 @@ const MOST: f64 = 100.0;
 
 impl Aspect {
     /// The width over the height a region is held to on a picture `image`
-    /// pixels across and down, as shown, or `None` for a free one.
-    pub fn ratio(self, image: [u32; 2]) -> Option<f64> {
+    /// pixels across and down, as shown, whose pixels are `shape` as wide
+    /// as they are tall, or `None` for a free one.
+    ///
+    /// In what the picture is measured in rather than in its pixels: a 3:2
+    /// typed while a print or a map is measured is 3:2 on the paper or the
+    /// ground, which on pixels that are not square is another shape in
+    /// them. The picture's own shape is its shape in the same units, and so
+    /// comes out its pixels' either way.
+    pub fn ratio(self, image: [u32; 2], shape: f64) -> Option<f64> {
         match self {
             Aspect::Free => None,
             Aspect::Original { turned } => {
                 let [width, height] = image.map(|side| f64::from(side.max(1)));
-                Some(if turned {
-                    height / width
-                } else {
-                    width / height
-                })
+                let ratio = width * shape / height;
+                Some(if turned { 1.0 / ratio } else { ratio })
             }
             Aspect::Ratio(across, down) => Some(across / down),
         }
+    }
+
+    /// The same ratio in the picture's pixels, which is what a region is
+    /// held to.
+    pub fn in_pixels(self, image: [u32; 2], shape: f64) -> Option<f64> {
+        self.ratio(image, shape).map(|ratio| ratio / shape)
     }
 
     /// The same shape the other way up. Free is free either way up.
@@ -65,9 +75,10 @@ impl Aspect {
     }
 
     /// Whether it is taller than it is wide on a picture `image` pixels
-    /// across and down: which way up the menu offers its ratios.
-    pub fn portrait(self, image: [u32; 2]) -> bool {
-        self.ratio(image).is_some_and(|ratio| ratio < 1.0)
+    /// across and down whose pixels are `shape`: which way up the menu
+    /// offers its ratios.
+    pub fn portrait(self, image: [u32; 2], shape: f64) -> bool {
+        self.ratio(image, shape).is_some_and(|ratio| ratio < 1.0)
     }
 
     /// The ratios the menu offers, the way up `portrait` asks for.
@@ -167,14 +178,33 @@ mod tests {
     #[test]
     fn the_pictures_own_follows_the_picture_and_turns() {
         let original = Aspect::Original { turned: false };
-        assert_eq!(original.ratio([600, 400]), Some(1.5));
-        assert_eq!(original.ratio([400, 600]), Some(400.0 / 600.0));
-        assert_eq!(original.swapped().ratio([600, 400]), Some(400.0 / 600.0));
-        assert!(original.swapped().portrait([600, 400]));
+        assert_eq!(original.ratio([600, 400], 1.0), Some(1.5));
+        assert_eq!(original.ratio([400, 600], 1.0), Some(400.0 / 600.0));
+        assert_eq!(
+            original.swapped().ratio([600, 400], 1.0),
+            Some(400.0 / 600.0)
+        );
+        assert!(original.swapped().portrait([600, 400], 1.0));
         // The picture turned has turned it already.
         assert_eq!(original.quarter_turned(), original);
-        assert_eq!(Aspect::Free.ratio([600, 400]), None);
+        assert_eq!(Aspect::Free.ratio([600, 400], 1.0), None);
         assert_eq!(Aspect::Free.swapped(), Aspect::Free);
+    }
+
+    /// On pixels twice as wide as they are tall — a raster 20 m across a
+    /// pixel and 10 m down — a square on the ground is twice as many pixels
+    /// down as across; the picture's own shape is its pixels' either way.
+    #[test]
+    fn a_ratio_is_in_the_units_and_not_the_pixels() {
+        let square = Aspect::Ratio(1.0, 1.0);
+        assert_eq!(square.ratio([600, 400], 2.0), Some(1.0));
+        assert_eq!(square.in_pixels([600, 400], 2.0), Some(0.5));
+        let original = Aspect::Original { turned: false };
+        assert_eq!(original.ratio([600, 400], 2.0), Some(3.0));
+        assert_eq!(original.in_pixels([600, 400], 2.0), Some(1.5));
+        // 600 by 400 pixels is 12000 by 4000 meters: wide, whichever way the
+        // pixels alone would say.
+        assert!(!original.portrait([300, 400], 2.0));
     }
 
     #[test]
@@ -183,8 +213,8 @@ mod tests {
         assert_eq!(ratio.swapped(), Aspect::Ratio(2.0, 3.0));
         assert_eq!(ratio.quarter_turned(), Aspect::Ratio(2.0, 3.0));
         assert_eq!(ratio.swapped().swapped(), ratio);
-        assert!(!ratio.portrait([1, 1]));
-        assert!(ratio.swapped().portrait([1, 1]));
+        assert!(!ratio.portrait([1, 1], 1.0));
+        assert!(ratio.swapped().portrait([1, 1], 1.0));
         let portrait: Vec<_> = Aspect::presets(true).collect();
         assert!(portrait.contains(&Aspect::Ratio(2.0, 3.0)));
         assert!(portrait.contains(&Aspect::Ratio(1.0, 1.0)));

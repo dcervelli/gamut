@@ -535,13 +535,14 @@ itself; see below.
 
 `Ctrl+.` copies the value the bottom left corner is reading out, exactly as it
 is written there — so with the readout in hex, as it starts, `Ctrl+.` puts
-`E78040` on the clipboard, and after switching it to decimal with `.` it puts
-`231 128 64` there instead. `Ctrl+Shift+.` copies the pixel's coordinate
+`E78040` on the clipboard, and after switching it to decimal with `.` and
+`d` it puts `231 128 64` there instead. `Ctrl+Shift+.` copies the pixel's coordinate
 rather than its value, as `x,y` with nothing around it: `1919,1079`, ready to
 paste into a command line or a spreadsheet. In a georeferenced file whose
 readout is showing where the pixel is on the ground, it copies that instead,
 in the same form: `2600000,1200000`, or `46.951083,7.438632` for a latitude and
-longitude, which a map's search box takes as it is. Both work on the pixel the pointer
+longitude, which a map's search box takes as it is. A print's is the same
+pair in inches or millimeters: `0.998,0.002`. Both work on the pixel the pointer
 is over at the moment you press them, and say so on the terminal when the
 pointer is not over one.
 
@@ -903,9 +904,12 @@ where all of it is set.
 | `Ctrl+-`, `Ctrl+_` | Decrease interface scale; the picture is not affected | `interface.scale.down` |
 | `Ctrl+0` | Reset interface scale to the monitor's own | `interface.scale.reset` |
 | `x` | Select a region of the image; again, or `Esc`, removes it | `region.select` |
-| `.` | Cycle how the pixel under the pointer is read out: hex → decimal → mapped → depth | `interface.pixel-format` |
-| `,` | Cycle where the pixel is read out as, among what the file can say: pixel → projected → geographic → direction | `interface.coordinate-format` |
-| `<` (`Shift+,`) | Switch a latitude and longitude between decimal degrees and degrees, minutes and seconds | `interface.geographic-format` |
+| `.` | Open the pixel readout's menu, or close it | `interface.readout` |
+| `x`, `p`, `e`, `g`, `a`, while the pixel menu is open | Read where the pixel is out as pixel, print, projected, geographic or direction, where the file can say | `interface.readout.pixel`, `interface.readout.print`, `interface.readout.projected`, `interface.readout.geographic`, `interface.readout.direction` |
+| `u`, while the pixel menu is open | Switch a print between inches and millimeters | `interface.readout.print-unit` |
+| `s`, while the pixel menu is open | Switch a latitude and longitude between decimal degrees and degrees, minutes and seconds | `interface.readout.lat-long` |
+| `h`, `d`, `m`, `z`, while the pixel menu is open | Read the pixel's value out as hex, decimal, mapped or depth | `interface.readout.hex`, `interface.readout.decimal`, `interface.readout.mapped`, `interface.readout.depth` |
+| `,` | Cycle where the pixel is read out as, among what the file can say: pixel → print → projected → geographic → direction | `interface.coordinate-format` |
 | `` ` `` | Show or hide the panels around the image | `interface.toggle` |
 | `~` | The same, and closes the histogram, information, minimap and file list | `interface.toggle-panels` |
 | `?`, `/` | Show the keys: every one of them, what it does and when. Again, `Esc` or a click outside closes it. The button at the foot of the right strip does the same | `interface.help` |
@@ -978,11 +982,31 @@ down to move down the column, and a short drag carries a long column a long
 way — as far as putting the handle there would. The pointer belongs to the
 panel while it is over it, so neither gesture reaches the image behind.
 
-The grid divides the image into squares of a round number of image pixels —
-1, 2, 5, 10, 20, 50 and so on — chosen so that the lines land about fifty
-screen pixels apart at whatever zoom the view is at. The button at the head of
-the bottom bar says which spacing is in force, in the reading beside its mark,
-so a distance on screen can be counted off in the image's own pixels.
+The grid divides the image into squares of a round distance — 1, 2, 5, 10,
+20, 50 and so on, or 0.1, 0.2, 0.5 — chosen so that the lines land about
+fifty screen pixels apart at whatever zoom the view is at. The distance is
+in whatever the pixel readout is showing where the pixel is in: image pixels
+for **Pixel**, inches or millimeters for **Print**, and the file's own units —
+usually meters, written as kilometers from 1000 up — for **Projected**. With
+the readout on **Geographic**, the grid is drawn in the file's own
+coordinates too, since lines of latitude and longitude curve across a
+projected map; a map stored in latitude and longitude is ruled in degrees.
+A print's lines are measured from the picture's top left corner; a map's fall
+on round coordinates, the way a printed map's grid does, so two maps of
+neighboring ground are ruled alike. Wherever the readout cannot be followed —
+the direction, or a map turned on the ground — the grid is in image pixels.
+The button at the head of the bottom bar says which spacing is in force, in
+the reading beside its mark, so a distance on screen can be counted off.
+
+The lines are numbered at the edges of what you can see: the lines down the
+picture across the top, the lines across it down the left. Where there is
+empty space beside the picture — zoomed out, or panned past its edge — the
+numbers sit in it, just outside the picture, and move to the bottom or the
+right when that is where the space is; otherwise they sit over the picture,
+just inside the window. The numbers are bare, in the unit the button names —
+kilometers on a map whose button says `1 km` — and as many lines are numbered
+as there is room for, skipping to every second, fifth or tenth line so that
+the numbered ones are still round.
 
 The horizon grid, `b` or the compass button after the grid's, is for a
 picture whose camera recorded which way it faced — see the *Orientation*
@@ -1083,6 +1107,9 @@ right minus the left is the width beside them. They stay for as long as the
 pointer is on the region — including while you are dragging it — and go when
 you point somewhere else, leaving the outline. A region too small to hold
 all of it writes what fits, dropping the edges before the size.
+The words are in whatever the grid measures in: with the readout on
+**Print**, the size is `2.13 × 1.60 in` and the edges are inches from the
+top left; on a map, meters and the map's own coordinates.
 
 `Space` fits the region before the image: the whole of it in the window,
 then the window filled with it, then the image's own two fits and its actual
@@ -1112,6 +1139,9 @@ image's own shape; or one of 1:1, 5:4, 4:3, 3:2 and 16:9. Or type a ratio
 into the box: `16:10`, `16/10` and `16x10` all work, as does one number such
 as `2.39`, which means 2.39 to 1. Choosing a shape while a region is on
 screen reshapes it about its center, keeping about the same number of pixels.
+A ratio is in what the picture is measured in — see below — so 1:1 on a map
+whose pixels cover more ground across than down is square on the ground, and
+taller than it is wide in pixels.
 
 While an aspect is chosen, everything that changes the region keeps it to
 that shape. A new drag reaches from where it started as far as the pointer
@@ -1133,8 +1163,15 @@ The aspect stays chosen when the region is taken off and when you step to
 another file, until you choose another or quit.
 
 **X** and **Y** are where the region's top left corner is in the image, and
-**W** and **H** its width and height, all in the image's own pixels. Type a
-number into one and press `Enter` or `Tab`, or click elsewhere, to apply it.
+**W** and **H** its width and height, in whatever the grid and the region's
+own labels are in: the image's pixels; inches or millimeters, with the pixel
+readout on **Print**; or, on a map, its own coordinates, with the readout on
+**Projected** or **Geographic**. The unit follows the number in each box. On
+a map, **Y** is the northing of the top edge. Type a number into one — with
+its unit after it or not — and press `Enter` or `Tab`, or click elsewhere,
+to apply it. A region covers whole pixels, so what you type goes to the
+nearest pixel edge, and the box then says where that is: at 300 dots to
+the inch, `20` millimeters becomes `19.98`. A width less than a pixel is a pixel.
 `Esc` puts the box back as it was. A new position moves the region without
 resizing it. A new width or height keeps the top left corner where it is,
 and with an aspect chosen the other side follows. A region does not reach
@@ -1175,7 +1212,7 @@ at that edge.
 | Wheel over the file information | Scroll it | |
 | Drag the file information | Scroll it, as if dragging the scrollbar's handle | |
 | Click the zoom percentage | Open the zoom menu: scale, print size, fit and the magnification filter | |
-| Click the dot beside the grid button | Choose how a pixel's value is read out | |
+| Click the dot beside the grid button | Choose how a pixel's value and its place are read out | |
 | Click a turn button, near the bottom right | Turn the picture a quarter counterclockwise or clockwise, as `;` and `'` do | |
 | Click the camera button reading **RAW** or **JPEG**, near the bottom right | Show a raw as the camera's JPEG of it, or as the developed picture, as `v` does | |
 | Click the axes button, near `HDR` at the bottom right | Show a picture's depth map in its place, or the picture again, as `D` does | |
@@ -1251,25 +1288,40 @@ otherwise the number the map holds there, which only says what is nearer
 and what is farther. A picture with no depth map reads
 `(no depth)`.
 
-`.` steps through the four, and the dot at the head of the readout opens a
-menu of them; whichever is in force is lit. It applies to whichever image is
-on screen and stays as you set it, into the next run too.
+The dot at the head of the readout opens a menu of them, and so does `.`;
+whichever is in force is lit, and while the menu is open the letter beside
+each item chooses it. It applies to whichever image is on screen and stays as
+you set it, into the next run too.
+
+The menu's **Coordinate** section, at its head above **Pixel value** as the
+readout writes the place before the value, chooses how the pixel's place is
+written.
+**Pixel** is the column and row, which every image has. **Print** is how far
+the middle of the pixel is from the top left corner of the picture printed at
+the resolution the file records, `(0.998, 0.002) in`, for a file that records
+one — a scan, or a photograph a camera or an editor set the dots per inch
+of. **Print unit**, under it, switches between **Inches** and
+**Millimeters**, which the file information's *Print size* follows too. It
+follows the unit your region's settings measure in until you choose the other,
+and choosing your region's unit again has it follow your region once more. The others are below.
+Each item a file cannot answer is dimmed rather than left out, so its letter
+stays where it was.
 
 A georeferenced raster — a scanned map, an elevation model, a satellite scene —
-can say where the pixel is on the ground as well as where it is in the image,
-and for one of those the same menu has two more rows. **Coordinate** chooses
-between **Pixel**, the column and row as for any image; **Projected**, the
+can say where the pixel is on the ground as well as where it is in the image.
+**Coordinate** then offers **Projected**, the
 file's own coordinates — an easting and northing in its coordinate system and
 its units, `(2600000, 1200000) m`; and **Geographic**, latitude then longitude
-on WGS 84, the system a GPS and a web map use. **Latitude and longitude**
-chooses how those are written: **Decimal**, signed degrees,
+on WGS 84, the system a GPS and a web map use. **Latitude and longitude**,
+a section of its own for such a file, chooses how those are written:
+**Decimal degrees**, signed degrees,
 `46.951083, 7.438632`, or **DMS**, degrees, minutes and seconds with the
 hemisphere, `46°57'03.90"N 7°26'19.08"E`. Decimal degrees always have six
 places and seconds always two, and either is the middle of the pixel under the
 pointer. Projected coordinates are written to about as many places as one
 pixel is worth.
-`,` steps through the coordinates and `<` switches between the two ways of
-writing a latitude.
+`,` steps through the coordinates without the menu, and `s` in the menu
+switches between the two ways of writing a latitude.
 
 A file offers only what it can answer. One in latitude and longitude already
 has no projected coordinates to give; one whose coordinate system is spelled
@@ -1277,8 +1329,7 @@ out in parameters rather than named, or is named by a code `gamut` does not
 know, keeps its own coordinates and offers no latitude. The conversion to
 latitude and longitude is good to a meter or two, not to survey accuracy: it
 shifts between datums by a fixed offset rather than by the grids a surveyor's
-software uses. For every other image the rows are not in the menu at all, and
-wherever a file cannot answer what you chose, the readout shows the pixel —
+software uses. Wherever a file cannot answer what you chose, the readout shows the pixel —
 the choice stays, and applies again to the next map you open, in the next
 run as well.
 

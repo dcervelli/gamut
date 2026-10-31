@@ -113,6 +113,7 @@ pub(super) fn panels() -> Panels {
         loupe_magnification: super::loupe::DEFAULT_MAGNIFICATION,
         pixel_format: PixelFormat::default(),
         coordinate_format: CoordinateFormat::default(),
+        print_unit: crate::image::density::Unit::Inches,
         geographic_format: GeographicFormat::default(),
         info_tab: super::tags::Tab::Facts,
     }
@@ -2244,7 +2245,7 @@ fn the_minimap_asks_to_center_on_what_is_pressed() {
 }
 
 /// The dot at the head of the pixel readout opens the menu of formats, and
-/// a cell of it chooses that format.
+/// an item of it chooses that format.
 #[test]
 fn the_pixel_menu_offers_every_format() {
     let mut harness = open(WINDOW, 1, panels());
@@ -2255,15 +2256,45 @@ fn the_pixel_menu_offers_every_format() {
     );
 }
 
-/// Only a georeferenced file brings the rows of coordinates to that menu,
-/// and only the coordinates it can give: a raster in a system the table
-/// holds offers all three and the two ways of writing a latitude.
+/// Every way of writing where a pixel is is on that menu, and those the
+/// file cannot give are dead: a raster in a system the table holds can
+/// give the ground's two and brings the two ways of writing a latitude,
+/// and a file that says its density can give the print's and brings its
+/// two units.
 #[test]
-fn the_pixel_menu_offers_coordinates_only_for_a_map() {
+fn the_pixel_menu_offers_the_coordinates_a_file_can_give() {
     let mut harness = open(WINDOW, 1, panels());
     assert_eq!(click(&mut harness, "Pixel format"), []);
-    assert!(harness.query_by_label("Projected").is_none());
+    for dead in ["Print", "Projected", "Geographic", "Azimuth/Elevation"] {
+        let node = harness.get_by_role_and_label(egui::accesskit::Role::Button, dead);
+        assert!(node.accesskit_node().is_disabled(), "{dead}");
+    }
     assert!(harness.query_by_label("DMS").is_none());
+    assert!(harness.query_by_label("Millimeters").is_none());
+
+    let mut harness = build(WINDOW, 1, panels());
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture")
+        .exif
+        .density = crate::image::density::Density::new([300.0, 300.0], 25.4);
+    harness.run();
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "Print"),
+        [Command::Press(Control::Coordinates(
+            CoordinateFormat::Print
+        ))]
+    );
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "Millimeters"),
+        [Command::Press(Control::PrintUnit(
+            crate::image::density::Unit::Millimeters
+        ))]
+    );
 
     let mut harness = build(WINDOW, 1, panels());
     let placed = crate::image::geo::Tags {
@@ -3570,6 +3601,7 @@ fn the_readout_says_which_way_a_pixel_looks() {
             [2, 1],
             CoordinateFormat::Direction,
             GeographicFormat::Decimal,
+            crate::image::density::Unit::Inches,
             padded,
         )
     };
@@ -3668,6 +3700,71 @@ fn the_region_panel_hands_over_what_is_typed_when_it_is_let_go() {
         asked(&harness),
         [Command::Press(Control::Aspect(Aspect::Ratio(16.0, 9.0)))]
     );
+}
+
+/// Measured as a print, the region's boxes are in inches with the unit
+/// after them: what is typed is handed over as the nearest pixel edge or
+/// the nearest whole number of pixels, the unit's own word after it or
+/// not; a box let go of unchanged hands nothing over.
+#[test]
+fn the_region_boxes_are_in_what_the_picture_is_measured_in() {
+    use egui::accesskit::Role;
+    let mut printed = panels();
+    printed.coordinate_format = CoordinateFormat::Print;
+    let mut harness = build(WINDOW, 1, printed);
+    // Two pixels to the inch: half an inch a pixel.
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture")
+        .exif
+        .density = crate::image::density::Density::new([2.0, 2.0], 25.4);
+    harness.state_mut().input.selection = Selection::Shown(Region {
+        x: 1,
+        y: 1,
+        width: 2,
+        height: 1,
+    });
+    harness.run();
+    let boxes: Vec<String> = harness
+        .get_all_by_role(Role::TextInput)
+        .filter_map(|node| node.value())
+        .collect();
+    assert_eq!(boxes, ["Free", "0.5", "0.5", "1.0", "0.5"]);
+
+    let typed = |harness: &mut Harness<'static, State>, holds: &str, text: &str| {
+        harness
+            .get_all_by_role(Role::TextInput)
+            .find(|node| node.value().as_deref() == Some(holds))
+            .expect("the box")
+            .focus();
+        harness.run();
+        harness.state_mut().commands.clear();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.event(egui::Event::Text(text.to_string()));
+        harness.step();
+        harness.key_press(egui::Key::Enter);
+        harness.step();
+        harness.step();
+        asked(harness)
+    };
+    // 1.4 inches is 2.8 pixels: the edge at 3.
+    assert_eq!(
+        typed(&mut harness, "1.0", "1.4"),
+        [Command::RegionField(Field::Width, 3)]
+    );
+    assert_eq!(
+        typed(&mut harness, "1.0", "2 in"),
+        [Command::RegionField(Field::Width, 4)]
+    );
+    // Less than a pixel is a pixel; nothing at all is refused.
+    assert_eq!(
+        typed(&mut harness, "1.0", "0.1"),
+        [Command::RegionField(Field::Width, 1)]
+    );
+    assert_eq!(typed(&mut harness, "1.0", "0"), []);
+    assert_eq!(typed(&mut harness, "1.0", "1.0"), []);
 }
 
 /// Beside the zoom menu's print size, a button puts up its calibration.

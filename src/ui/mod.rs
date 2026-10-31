@@ -38,6 +38,7 @@ pub mod pixel;
 mod rect;
 pub mod region;
 pub mod region_panel;
+pub mod ruler;
 mod status;
 pub mod style;
 
@@ -544,9 +545,10 @@ pub struct Panels {
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].
     pub show_minimap: bool,
-    /// Whether the grid is laid over the image. How far apart its lines are
-    /// is not held: it follows the zoom, and is worked out afresh each frame
-    /// by [`grid::step`].
+    /// Whether the grid is laid over the image. What it is measured in
+    /// follows the coordinate the readout writes — see [`ruler::Ruler::of`]
+    /// — and how far apart its lines are is not held: it follows the zoom,
+    /// and is worked out afresh each frame by [`grid::step`].
     pub show_grid: bool,
     /// Whether the horizon grid is drawn over the picture — the horizon,
     /// the uprights round the camera and the two lines through the pointer
@@ -570,10 +572,15 @@ pub struct Panels {
     /// is about the reading and not about the rendering: nothing on screen
     /// changes with it but the words in the bar.
     pub pixel_format: PixelFormat,
-    /// How it writes out where that pixel is, for a file that says where its
-    /// pixels are on the ground; every other file's is the pixel's, whatever
-    /// this says — see [`CoordinateFormat::shown`].
+    /// How it writes out where that pixel is, for a file that can say more
+    /// of it than its column and row; every other file's is the pixel's,
+    /// whatever this says — see [`CoordinateFormat::shown`]. What the grid
+    /// and the region's labels measure in follows it.
     pub coordinate_format: CoordinateFormat,
+    /// What a print is measured in: the print coordinate, the grid and the
+    /// region's labels while they measure one, and the info panel's print
+    /// size.
+    pub print_unit: crate::image::density::Unit,
     /// And how a latitude and a longitude are written, where they are.
     pub geographic_format: GeographicFormat,
     /// Which tab the information panel is on. Not a flag, and not kept
@@ -868,6 +875,9 @@ pub fn show(
     if !panels.show_ui {
         let corner = egui::pos2(pass.content.x + PADDING, pass.content.y + PADDING);
         filmstrip::loose_sort_menu(&mut pass, ui, corner.into(), 0.0);
+        // And the pixel menu, at the corner the dot would be above.
+        let corner = egui::pos2(pass.content.x + PADDING, pass.content.bottom() - PADDING);
+        pixel::loose_menu(&mut pass, ui, corner.into());
     }
     // And the keys, which are the same whatever is on screen.
     help::show(&mut pass, ui);
@@ -1172,6 +1182,7 @@ impl Pass<'_> {
         // a stand-in for another file is not.
         let picture = self.input.standin.is_none();
         if self.panels.show_grid && picture {
+            let ruler = self.ruler(current);
             let thumbnail = self
                 .input
                 .minimap_on_screen
@@ -1192,8 +1203,10 @@ impl Pass<'_> {
                     minimap: thumbnail,
                     glass,
                 },
-                grid::step(zoom, self.input.scale),
+                &ruler,
+                grid::step(&ruler, zoom, self.input.scale),
                 self.theme,
+                &egui::TextStyle::Small.resolve(ui.style()),
             );
         }
         // The horizon grid, over the pixel grid and under the region, and
@@ -1244,10 +1257,16 @@ impl Pass<'_> {
 }
 
 /// What the grid toggle reads out while the grid is on: how far apart its
-/// lines are at `zoom`, on a display of `scale` physical pixels to the
-/// logical one. `None` while it is off, there being no spacing in force then.
-pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
-    show_grid.then(|| grid::label(grid::step(zoom, scale)))
+/// lines are in what `ruler` measures at `zoom`, on a display of `scale`
+/// physical pixels to the logical one. `None` while it is off, there being
+/// no spacing in force then.
+pub fn grid_spacing(
+    show_grid: bool,
+    ruler: &ruler::Ruler,
+    zoom: f32,
+    scale: f32,
+) -> Option<String> {
+    show_grid.then(|| grid::label(grid::step(ruler, zoom, scale), ruler))
 }
 
 /// The room the side panel needs for both of what it holds, across between

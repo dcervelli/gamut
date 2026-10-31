@@ -769,18 +769,16 @@ fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
     let tooltip = namer
         .tooltip(Tip::Control(Control::PixelFormat))
         .expect("named");
-    assert_eq!(tooltip.title, ["Pixel options"]);
+    assert_eq!(tooltip.title, ["Pixel options (.)"]);
     assert_eq!(
         tooltip.hints,
         [
-            spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
             spelled_here("Copy pixel value under pointer (Ctrl+.)"),
             spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
         ]
     );
 
-    // A map brings the coordinate's key, and one that can be a latitude
-    // the key that writes it, each after the format's own.
+    // A map brings the coordinate's key, ahead of the copies.
     let map = Namer {
         conditions: Conditions {
             coordinates: true,
@@ -795,9 +793,7 @@ fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
     assert_eq!(
         tooltip.hints,
         [
-            spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
-            spelled_here("Cycle coordinate: pixel, projected, geographic, direction (,)"),
-            spelled_here("Switch latitude and longitude: decimal, DMS (<)"),
+            spelled_here("Cycle coordinate: pixel, print, projected, geographic, direction (,)"),
             spelled_here("Copy pixel value under pointer (Ctrl+.)"),
             spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
         ]
@@ -873,21 +869,37 @@ fn every_copy_on_the_menu_is_bound_to_a_key() {
     }
 }
 
-/// A cell of the pixel menu is named by what it answers rather than by
-/// what it is called — the cell is already wearing the name — with the key
-/// that steps through them after it.
+/// An item of the pixel menu is named by what it answers rather than by
+/// what it is called — the item is already wearing the name — with the
+/// key that chooses it while the menu is open after it; the two items of a
+/// pair that switches share the one key.
 #[test]
-fn a_pixel_format_cell_says_which_question_it_answers() {
-    for format in ui::PixelFormat::ALL {
+fn a_pixel_menu_item_says_which_question_it_answers() {
+    let keys = ["(h)", "(d)", "(m)", "(z)"];
+    for (format, key) in ui::PixelFormat::ALL.into_iter().zip(keys) {
         let words = names(Tip::Control(Control::Format(format)))
             .unwrap_or_else(|| panic!("{format:?} is named"));
-        assert!(words.ends_with("(.)"), "{words}");
+        assert!(words.ends_with(key), "{words}");
+    }
+    let keys = ["(x)", "(p)", "(e)", "(g)", "(a)"];
+    for (format, key) in ui::CoordinateFormat::ALL.into_iter().zip(keys) {
+        let words = names(Tip::Control(Control::Coordinates(format)))
+            .unwrap_or_else(|| panic!("{format:?} is named"));
+        assert!(words.ends_with(key), "{words}");
+    }
+    for unit in crate::image::density::Unit::ALL {
+        let words = names(Tip::Control(Control::PrintUnit(unit))).expect("named");
+        assert!(words.ends_with("(u)"), "{words}");
+    }
+    for format in ui::GeographicFormat::ALL {
+        let words = names(Tip::Control(Control::Geographic(format))).expect("named");
+        assert!(words.ends_with("(s)"), "{words}");
     }
 }
 
 /// The full stop is three bindings, told apart by what is held with it:
-/// alone it steps the readout on, and with Ctrl the two of them copy what
-/// it is showing. Shift is part of the character, so the shifted copy
+/// alone it opens the readout's menu, and with Ctrl the two of them copy
+/// what it is showing. Shift is part of the character, so the shifted copy
 /// arrives as `>` with it held.
 #[test]
 fn the_full_stop_reads_out_a_pixel_three_ways() {
@@ -895,7 +907,7 @@ fn the_full_stop_reads_out_a_pixel_three_ways() {
     let stop = Key::Character(SmolStr::new("."));
     let greater = Key::Character(SmolStr::new(">"));
 
-    assert_eq!(action_for(&stop, ELSEWHERE, PLAIN), Some(CyclePixelFormat));
+    assert_eq!(action_for(&stop, ELSEWHERE, PLAIN), Some(OpenPixelMenu));
     assert_eq!(action_for(&stop, ELSEWHERE, CTRL), Some(CopyPixelValue));
     assert_eq!(
         action_for(&greater, ELSEWHERE, CTRL | SHIFT),
@@ -1201,6 +1213,45 @@ fn the_sort_menu_takes_its_letters_while_it_is_open() {
         open(&Key::Named(NamedKey::Escape), PLAIN, &menu),
         Some(Dismiss)
     );
+}
+
+/// While the pixel menu is open a letter is one of its items, as the sort
+/// menu's are; closed, the letters are their own, the full stop opens it
+/// either way, and the comma steps the coordinate on outside it.
+#[test]
+fn the_pixel_menu_takes_its_letters_while_it_is_open() {
+    use ui::{CoordinateFormat, PixelFormat};
+    use winit::keyboard::SmolStr;
+    let letter = |text: &str| Key::Character(SmolStr::new(text));
+    let open =
+        |key: &Key, holding: &[Context]| Keymap::table().action_for(key, ELSEWHERE, PLAIN, holding);
+    let menu = [Context::PixelMenu];
+    let items = [
+        ("h", ShowValue(PixelFormat::Hex)),
+        ("d", ShowValue(PixelFormat::Decimal)),
+        ("m", ShowValue(PixelFormat::Mapped)),
+        ("z", ShowValue(PixelFormat::Depth)),
+        ("x", ShowCoordinates(CoordinateFormat::Pixel)),
+        ("p", ShowCoordinates(CoordinateFormat::Print)),
+        ("e", ShowCoordinates(CoordinateFormat::Projected)),
+        ("g", ShowCoordinates(CoordinateFormat::Geographic)),
+        ("a", ShowCoordinates(CoordinateFormat::Direction)),
+        ("u", TogglePrintUnit),
+        ("s", CycleGeographicFormat),
+    ];
+    for (text, action) in items {
+        assert_eq!(open(&letter(text), &menu), Some(action), "{text}");
+        assert_ne!(open(&letter(text), &[]), Some(action), "{text}");
+    }
+    // A region selected takes none of them.
+    assert_eq!(
+        open(&letter("x"), &[Context::Region, Context::PixelMenu]),
+        Some(ShowCoordinates(CoordinateFormat::Pixel))
+    );
+    for holding in [&menu[..], &[]] {
+        assert_eq!(open(&letter("."), holding), Some(OpenPixelMenu));
+        assert_eq!(open(&letter(","), holding), Some(CycleCoordinates));
+    }
 }
 
 /// The number row answers to where it is rather than to what it types, so

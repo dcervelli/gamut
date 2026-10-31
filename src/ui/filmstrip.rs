@@ -519,18 +519,17 @@ pub fn sort_menu_id() -> egui::Id {
 }
 
 /// The menu of sorts while the list's head is not on screen to hang it
-/// from, which only the key opens: hung below `anchor` instead, and drawn
-/// on every frame it is open, as a popup not drawn is a popup egui closes.
+/// from: hung below `anchor` instead — see [`Pass::loose_menu`].
 pub(super) fn loose_sort_menu(pass: &mut Pass, ui: &egui::Ui, anchor: egui::PopupAnchor, gap: f32) {
     let order = pass.input.order;
-    egui::Popup::new(sort_menu_id(), ui.ctx().clone(), anchor, ui.layer_id())
-        .open_memory(None)
-        .kind(egui::PopupKind::Menu)
-        .layout(Layout::top_down_justified(Align::Min))
-        .style(egui::containers::menu::menu_style)
-        .align(RectAlign::BOTTOM_START)
-        .gap(gap)
-        .show(|ui| menu::sort_cells(pass, ui, order));
+    pass.loose_menu(
+        ui,
+        Control::Sorting,
+        anchor,
+        RectAlign::BOTTOM_START,
+        gap,
+        |pass, ui| menu::sort_cells(pass, ui, order),
+    );
 }
 
 /// The head: the menu of sorts, and the pair that go back and forward

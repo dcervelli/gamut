@@ -529,6 +529,14 @@ impl Georeference {
             .then_some([latitude, longitude])
     }
 
+    /// Whether the raster's rows run along the model's first axis and its
+    /// columns along the second, so that a line of one coordinate is a
+    /// column or a row of pixels rather than a slant across them.
+    pub fn aligned(&self) -> bool {
+        let [_, b, _, d, _, _] = self.affine;
+        b == 0.0 && d == 0.0
+    }
+
     /// How far one pixel reaches along the shorter of its two sides, in the
     /// file's own units: what decides how many places a coordinate in them
     /// is worth.

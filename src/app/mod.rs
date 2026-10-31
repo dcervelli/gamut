@@ -810,6 +810,9 @@ impl App {
                 loupe_magnification: kept_state.loupe_magnification,
                 pixel_format: kept_state.pixel_format,
                 coordinate_format: kept_state.coordinate_format,
+                print_unit: kept_state
+                    .print_unit
+                    .unwrap_or_else(crate::measurement::unit),
                 geographic_format: kept_state.geographic_format,
                 info_tab: ui::tags::Tab::Facts,
             },
@@ -1812,6 +1815,8 @@ impl App {
             profile: self.profile,
             pixel_format: self.panels.pixel_format,
             coordinate_format: self.panels.coordinate_format,
+            print_unit: Some(self.panels.print_unit)
+                .filter(|&unit| unit != crate::measurement::unit()),
             geographic_format: self.panels.geographic_format,
             include_subfolders: self.trees.include_subfolders,
             displays: self.displays.clone(),

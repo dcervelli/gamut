@@ -290,11 +290,13 @@ pub enum Context {
     Region,
     /// The menu of sorts is open.
     SortMenu,
+    /// The pixel readout's menu is open.
+    PixelMenu,
 }
 
 /// The contexts, in the order they are tried; the plain names come after
 /// all of them.
-pub const ORDER: &[Context] = &[Context::Region, Context::SortMenu];
+pub const ORDER: &[Context] = &[Context::Region, Context::SortMenu, Context::PixelMenu];
 
 /// One line of `--help`, of the help popup and of the template.
 #[derive(PartialEq, Debug)]
@@ -615,7 +617,7 @@ impl Keymap {
              # a comment, so the key that types it is written by its place: shift+3.\n\
              # A chord set here is taken from whichever other name held it. With a\n\
              # region selected the region's names are tried first, and with the sort\n\
-             # menu open the menu's, then the rest.\n",
+             # menu or the pixel menu open the menu's, then the rest.\n",
         );
         for section in Section::ALL {
             let _ = writeln!(text, "\n# {}", section.title());
@@ -630,6 +632,9 @@ impl Keymap {
                     }
                     Some(Context::SortMenu) => {
                         let _ = writeln!(text, "# Tried first while the sort menu is open.");
+                    }
+                    Some(Context::PixelMenu) => {
+                        let _ = writeln!(text, "# Tried first while the pixel menu is open.");
                     }
                     None => {}
                 }
@@ -1095,7 +1100,7 @@ mod tests {
             };
             assert!(words.contains(&first), "{name} under {:?}", row.section);
         }
-        assert_eq!(names.len(), 120);
+        assert_eq!(names.len(), 130);
         for row in keymap.rows() {
             if let Keys::Also(name) | Keys::Gesture(name) = row.keys {
                 assert!(names.contains(&name), "{name} is described but not bound");

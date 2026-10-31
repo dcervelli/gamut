@@ -1694,10 +1694,64 @@ user-defined, or named by a code the table lacks, or whose code has an inverse
 the crate does not implement, has no lift and offers only its own
 coordinates; one in latitude and longitude already offers only those, read
 straight or lifted from its own datum. `CoordinateFormat::offered` is the one
-reading of that — the menu's rows, the key's step and the `When::Georeferenced`
-and `When::Geographic` conditions all ask it — and `CoordinateFormat::shown`
-is what makes the pixel the fallback without forgetting the choice, which is
-held in `Panels` like the pixel format beside it.
+reading of that — the menu's dead items, the key's step, the `Conditions`
+that refuse a press and the `When` conditions all ask it, through
+`pixel::Answers` — and `CoordinateFormat::shown` is what makes the pixel the
+fallback without forgetting the choice, which is held in `Panels` like the
+pixel format beside it. The print's coordinate is offered the same way, for
+a file with a density: `ruler::density` lays the file's pixels to the inch
+along the picture as shown — the orientation tag, the turn, and the size of
+whichever of the file's images is on screen — as `App::print_zoom` does.
+
+What the grid is ruled in and what a region's labels are written in follow
+the coordinate, through `ui/ruler.rs`. A `Ruler` is the picture as shown
+measured along each axis by one straight function — where it reads at the
+near edge and how far it goes per pixel — which is all a grid of straight
+lines can draw and all a region's edges need. The pixel's and the print's are
+that by construction; the ground's is too for a raster whose matrix has no
+rotation (`Georeference::aligned`), worked out through `Turn::stored_point`
+so that a turned map rules its northings across. A latitude is not — on a
+projected raster its lines curve, which is why the user asks for the ground
+when they ask for a latitude — and a slanted raster's coordinates are not
+either, so both fall back: a latitude to the file's own coordinates, a slant
+to the pixel. The grid's lines go where the measure reads a whole number of
+spacings rather than a whole number of spacings in from the edge, so a map's
+fall on round eastings and two maps on one system share them, which is what
+lining them up on the ground (`app/ground.rs::aligned`) is for; `grid::ON_EDGE` keeps a raster cut on
+a round coordinate from drawing a line along its own edge after the large
+numbers come back from the arithmetic a hair off it. The spacing is chosen
+along the axis the lines fall closer together on, so a print or a raster
+whose pixels are not square keeps squares of its own unit.
+
+The region panel's boxes read the same `Ruler` (`region_panel::Field::of`
+and `read`). A region stays whole pixels, so a typed reading goes to the
+nearest pixel edge and the box then says where that is. The box hands what
+was typed over only where it differs from what it said: a reading written
+to the places a pixel is worth goes back to its pixel, except on a tie — a
+pixel exactly a power of ten across, on a raster whose corners fall half a
+unit off a round coordinate — where a box let go of unchanged would have
+moved the region by one. A box is kept in egui's memory under its measure
+as well as its name, so text half typed when the measure changes is thrown
+away rather than read in another unit. A held ratio is in the measure's
+units too, which on pixels that are not square is another shape in them:
+`Aspect::ratio` takes the pixels' `Ruler::shape`, and `Aspect::in_pixels`
+is what `Marking` holds a region to.
+
+The lines are numbered by `grid::labels`, which is geometry only and is
+tested with a stand-in for the font. A label goes beside the picture where
+the content area has room past the picture's edge — the near side first,
+then the far — since that covers nothing and is where a printed map numbers
+its graticule; with no room it goes over the picture just inside the
+content area, on the menus' ground so it reads against anything. How many
+lines are numbered is `labeled_every`: the widest label any line would wear
+sets the room one needs, and the interval is the first of the ruler's own
+1-2-5 marks that is a whole number of spacings and gives that room, so the
+numbered lines stay round where a bare multiple of the spacing would number
+a grid in fives by twenty-fives. The words are the bare reading in the
+toggle's unit — kilometers where it says kilometers — to as many places as
+the interval needs. The left edge is laid out before the top, its labels
+being short and each one wanted, and a top label that would touch one, or
+the minimap, or the loupe's glass, is the one left out.
 
 Two kinds of raster need one more step to be read at all, and both take the
 same one. A BigTIFF — the same tags and types with eight-byte offsets, which
@@ -1792,6 +1846,20 @@ step, since a choice in no section could never be pressed. The menu of copies
 is a list rather than a grid, each item with its key printed beside it: the
 items are things done rather than states to be in, and what a reader wants
 from one is the key that would have done it without the menu.
+
+The pixel menu is a list too, sectioned — the coordinate, where the file
+can give them the print's unit and a latitude's degrees, and then the value,
+the order the readout writes them in —
+because each of its items has a letter while it is open, as the sort menu's
+have: `When::PixelMenuOpen` is a context (`keymap::Context::PixelMenu`), so
+the letters are tried ahead of the plain names only while
+`App::pixel_menu_open` says egui has the popup up, and `Naming::shortcut`
+prints each beside its item. That is why the coordinates a file cannot give
+are drawn dead rather than left out: a letter that moved from file to file
+would have to be read off the menu every time. A dead item's letter does
+nothing and leaves the menu up (`App::choose`), as a click on it does. With
+the bars hidden, `.` hangs it from the corner of the picture the dot would
+be above, through `pixel::loose_menu`, under the same `pixel::menu_id`.
 
 The menu of other applications is the one whose contents this program does not
 know: what is on it is whatever the desktop has installed, so an item is asked

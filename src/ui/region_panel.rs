@@ -3,7 +3,9 @@
 //! takes the region off, its copy and the window fitted to it at its head;
 //! under that the aspect it is held to, typed or chosen from a menu, and
 //! the swap of its width and height; and under that its place and size in
-//! the picture's pixels, each a box that can be typed in.
+//! what the picture is measured in — its pixels, a print's inches or
+//! millimeters, or the ground's coordinates, as the grid is ruled — each a
+//! box that can be typed in.
 //!
 //! Up as soon as a region is asked for, so that its shape can be chosen
 //! before it is drawn; what needs a region is dead until there is one.
@@ -24,6 +26,8 @@ use super::style::MENU_PADDING;
 use super::{Current, RULE_WIDTH, Rect, TEXT_SIZE, fonts, help, icon, menu, panel};
 use crate::image::aspect::Aspect;
 use crate::image::region::Region;
+
+use super::ruler::Ruler;
 
 /// How wide the panel is inside its padding.
 const INSIDE: f32 = 204.0;
@@ -87,21 +91,38 @@ impl Field {
         matches!(self, Field::Width | Field::Height)
     }
 
-    /// What it says of `region`.
-    fn of(self, region: Region) -> u32 {
-        match self {
-            Field::X => region.x,
-            Field::Y => region.y,
-            Field::Width => region.width,
-            Field::Height => region.height,
+    /// What it says of `region` measured by `ruler`: the place of its top
+    /// or left edge, or its width or height, as the region's own labels
+    /// write them.
+    fn of(self, region: Region, ruler: &Ruler) -> String {
+        let axis = self.axis();
+        let [place, size] = match axis {
+            0 => [region.x, region.width],
+            _ => [region.y, region.height],
+        }
+        .map(f64::from);
+        match self.is_size() {
+            false => ruler.write(ruler.at(axis, place)),
+            true => ruler.write(ruler.length(axis, size)),
         }
     }
 
-    /// The number typed, where it is one this box can hold: a place from
-    /// nought, a size from one.
-    fn read(self, typed: &str) -> Option<u32> {
-        let number: u32 = typed.trim().parse().ok()?;
-        (!self.is_size() || number > 0).then_some(number)
+    /// What is typed, measured by `ruler`, in the picture's pixels: a place
+    /// is the nearest pixel edge to it, and before the first edge is the
+    /// first; a size is the nearest whole number of pixels to it, and one
+    /// at least. `None` for what is not a number, or a size that is not
+    /// more than nothing.
+    fn read(self, typed: &str, ruler: &Ruler) -> Option<u32> {
+        let value = ruler.read(typed)?;
+        let axis = self.axis();
+        let pixels = match self.is_size() {
+            false => ruler.pixels(axis, value).round().max(0.0),
+            true if value > 0.0 => (value / ruler.per_pixel(axis)).round().max(1.0),
+            true => return None,
+        };
+        pixels
+            .is_finite()
+            .then(|| pixels.min(f64::from(u32::MAX)) as u32)
     }
 }
 
@@ -130,6 +151,7 @@ pub(super) fn show(pass: &mut Pass, ui: &mut Ui, current: &Current) {
     };
     let region = pass.input.selection.region();
     let image = current.pixels();
+    let ruler = pass.ruler(current);
     panel::area("region panel", rect, egui::Order::Middle).show(ui.ctx(), |ui| {
         dialog_frame(pass).show(ui, |ui| {
             ui.set_width(INSIDE);
@@ -150,9 +172,9 @@ pub(super) fn show(pass: &mut Pass, ui: &mut Ui, current: &Current) {
                 0.0,
                 pass.theme.border,
             );
-            aspect_row(pass, ui, region, image);
+            aspect_row(pass, ui, region, image, &ruler);
             for row in Field::ROWS {
-                field_row(pass, ui, row, region);
+                field_row(pass, ui, row, region, &ruler);
             }
         });
     });
@@ -199,13 +221,21 @@ fn head(pass: &mut Pass, ui: &mut Ui, drawn: bool) -> egui::Rect {
 
 /// The aspect: its word, the box it can be typed in, the menu of them at
 /// the end of the box, and the swap.
-fn aspect_row(pass: &mut Pass, ui: &mut Ui, region: Option<Region>, image: [u32; 2]) {
+fn aspect_row(
+    pass: &mut Pass,
+    ui: &mut Ui,
+    region: Option<Region>,
+    image: [u32; 2],
+    ruler: &Ruler,
+) {
     let aspect = pass.input.aspect;
     // The menu offers its ratios the way up the region is, or the aspect
-    // where it holds one.
+    // where it holds one, both in what the picture is measured in.
     let portrait = match aspect {
-        Aspect::Free => region.is_some_and(|region| region.height > region.width),
-        _ => aspect.portrait(image),
+        Aspect::Free => region.is_some_and(|region| {
+            ruler.length(1, f64::from(region.height)) > ruler.length(0, f64::from(region.width))
+        }),
+        _ => aspect.portrait(image, ruler.shape()),
     };
     ui.horizontal(|ui| {
         ui.set_min_height(ROW);
@@ -218,6 +248,7 @@ fn aspect_row(pass: &mut Pass, ui: &mut Ui, region: Option<Region>, image: [u32;
             id().with("aspect"),
             &aspect.label(),
             vec2(width, ROW),
+            None,
             |typed| Aspect::parse(typed).is_some(),
         );
         if let Some(chosen) = typed.as_deref().and_then(Aspect::parse) {
@@ -244,9 +275,16 @@ fn aspect_row(pass: &mut Pass, ui: &mut Ui, region: Option<Region>, image: [u32;
     });
 }
 
-/// Two of the region's numbers abreast, each a letter and a box; dead, and
-/// empty, until there is a region for them to be of.
-fn field_row(pass: &mut Pass, ui: &mut Ui, row: [Field; 2], region: Option<Region>) {
+/// Two of the region's numbers abreast, each a letter and a box wearing
+/// the unit `ruler` measures in; dead, and empty, until there is a region
+/// for them to be of.
+///
+/// A box is kept under its measure as well as its name, so that what was
+/// being typed when the measure changed is thrown away rather than read in
+/// a unit it was not typed in; and what is typed is handed over only where
+/// it is not what the box said, so that a box let go of unchanged cannot
+/// move the region by the rounding of its own words.
+fn field_row(pass: &mut Pass, ui: &mut Ui, row: [Field; 2], region: Option<Region>, ruler: &Ruler) {
     ui.add_enabled_ui(region.is_some(), |ui| {
         ui.horizontal(|ui| {
             ui.set_min_height(ROW);
@@ -257,16 +295,21 @@ fn field_row(pass: &mut Pass, ui: &mut Ui, row: [Field; 2], region: Option<Regio
                     ui.add_space(APART - GAP);
                 }
                 word(ui, field.letter(), LETTER);
-                let shown = region.map_or(String::new(), |region| field.of(region).to_string());
+                let shown = region.map_or(String::new(), |region| field.of(region, ruler));
                 let typed = held_field(
                     pass,
                     ui,
-                    id().with(field.name()),
+                    id().with((field.name(), format!("{:?}", ruler.unit))),
                     &shown,
                     vec2(width, ROW),
-                    |typed| field.read(typed).is_some(),
+                    ruler.unit_word(),
+                    |typed| field.read(typed, ruler).is_some(),
                 );
-                if let Some(number) = typed.as_deref().and_then(|typed| field.read(typed)) {
+                if let Some(number) = typed
+                    .as_deref()
+                    .filter(|typed| typed.trim() != shown)
+                    .and_then(|typed| field.read(typed, ruler))
+                {
                     pass.commands.push(Command::RegionField(field, number));
                 }
             }
@@ -284,8 +327,8 @@ fn word(ui: &mut Ui, words: &str, width: f32) {
 }
 
 /// A box that says `shown` until it is typed in, then what is typed for as
-/// long as it has the keyboard, outlined while that is not what `valid`
-/// takes. Hands back what was typed on the pass it lets go of the keyboard
+/// long as it has the keyboard, with `suffix` after it, outlined while that
+/// is not what `valid` takes. Hands back what was typed on the pass it lets go of the keyboard
 /// — by `Enter`, which it takes, or by `Tab` or a click elsewhere — and
 /// nothing where it was `Esc` that took it, or where nothing was typed.
 fn held_field(
@@ -294,6 +337,7 @@ fn held_field(
     id: egui::Id,
     shown: &str,
     size: egui::Vec2,
+    suffix: Option<&'static str>,
     valid: impl Fn(&str) -> bool,
 ) -> Option<String> {
     let ctx = ui.ctx().clone();
@@ -308,7 +352,7 @@ fn held_field(
             text: &text,
             refused,
             size,
-            suffix: None,
+            suffix,
         },
     );
     if let Some(changed) = changed {
@@ -323,4 +367,49 @@ fn held_field(
     let typed: Option<String> = ctx.data_mut(|data| data.remove_temp(id));
     let escaped = ui.input(|keys| keys.key_pressed(Key::Escape));
     typed.filter(|_| !escaped)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::ruler::Unit;
+
+    /// A box says what the region's labels say, and what it says reads
+    /// back as the same pixels: on the ground, from the raster's corner,
+    /// the northing of the top edge being the greater, and the height a
+    /// length all the same.
+    #[test]
+    fn a_box_reads_back_what_it_says() {
+        let ground = Ruler::test(
+            [564_973.0, 5_219_037.0],
+            [12.5, -12.5],
+            Unit::Ground(Some("m")),
+        );
+        let region = Region {
+            x: 8,
+            y: 4,
+            width: 100,
+            height: 30,
+        };
+        let shown: Vec<String> = Field::ROWS
+            .concat()
+            .into_iter()
+            .map(|field| field.of(region, &ground))
+            .collect();
+        assert_eq!(shown, ["565073", "5218987", "1250", "375"]);
+        for (field, shown) in Field::ROWS.concat().into_iter().zip(&shown) {
+            let back = field.read(shown, &ground);
+            let [place, size] = match field.axis() {
+                0 => [region.x, region.width],
+                _ => [region.y, region.height],
+            };
+            let want = if field.is_size() { size } else { place };
+            assert_eq!(back, Some(want), "{field:?}");
+        }
+        // A place before the picture's first edge is that edge.
+        assert_eq!(Field::X.read("500000", &ground), Some(0));
+        assert_eq!(Field::Y.read("5300000 m", &ground), Some(0));
+        assert_eq!(Field::Height.read("-5", &ground), None);
+        assert_eq!(Field::X.read("east", &ground), None);
+    }
 }
