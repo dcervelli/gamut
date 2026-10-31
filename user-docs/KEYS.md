@@ -1301,8 +1301,9 @@ the middle of the pixel is from the top left corner of the picture printed at
 the resolution the file records, `(0.998, 0.002) in`, for a file that records
 one — a scan, or a photograph a camera or an editor set the dots per inch
 of. **Print unit**, under it, switches between **Inches** and
-**Millimeters**, which the file information's *Print size* follows too; it
-starts in the unit your region's settings measure in. The others are below.
+**Millimeters**, which the file information's *Print size* follows too. It
+follows the unit your region's settings measure in until you choose the other,
+and choosing your region's unit again has it follow your region once more. The others are below.
 Each item a file cannot answer is dimmed rather than left out, so its letter
 stays where it was.
 

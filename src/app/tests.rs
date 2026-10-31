@@ -3216,6 +3216,39 @@ fn the_file_list_s_toggle_comes_back_from_the_state_file() {
     assert!(app.kept_state().show_filmstrip);
 }
 
+/// The print unit is the locale's until one is chosen against it, and
+/// choosing the locale's own again lets it follow the locale once more:
+/// the state file keeps a unit only while it differs from the locale's.
+/// The choosing itself is `the_print_coordinate_needs_the_files_density`'s.
+#[test]
+fn the_print_unit_is_kept_only_against_the_locale() {
+    let locale = crate::measurement::unit();
+    let opened = |state| {
+        App::new(
+            Vec::new(),
+            Vec::new(),
+            None,
+            options(),
+            StateFile::holding(state),
+            threads(),
+        )
+    };
+    let mut app = opened(kept());
+    assert_eq!(app.panels.print_unit, locale);
+    assert_eq!(app.kept_state().print_unit, None);
+
+    app.panels.print_unit = locale.other();
+    assert_eq!(app.kept_state().print_unit, Some(locale.other()));
+    app.panels.print_unit = locale;
+    assert_eq!(app.kept_state().print_unit, None);
+
+    let app = opened(State {
+        print_unit: Some(locale.other()),
+        ..kept()
+    });
+    assert_eq!(app.panels.print_unit, locale.other());
+}
+
 /// A fixture from `test_images/`, opened on its own.
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -5502,7 +5535,6 @@ fn the_print_coordinate_needs_the_files_density() {
     app.panels.print_unit = Unit::Inches;
     assert_eq!(app.perform(Action::TogglePrintUnit), Effect::Redraw);
     assert_eq!(app.panels.print_unit, Unit::Millimeters);
-    assert_eq!(app.kept_state().print_unit, Unit::Millimeters);
 }
 
 /// The horizon grid is refused for a picture that does not say which way

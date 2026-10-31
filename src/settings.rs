@@ -468,9 +468,10 @@ pub struct State {
     /// How its place was last written, in a file that can say more than its
     /// column and row.
     pub coordinate_format: CoordinateFormat,
-    /// What a print was last measured in: the locale's unit until one is
-    /// chosen.
-    pub print_unit: density::Unit,
+    /// What a print was last measured in, where it was chosen against the
+    /// locale: nothing while it is the locale's own unit, which then
+    /// follows the locale.
+    pub print_unit: Option<density::Unit>,
     /// And a latitude and longitude, where it was one.
     pub geographic_format: GeographicFormat,
     /// Whether the folder dialog's box for subfolders was last left ticked.
@@ -495,7 +496,7 @@ impl Default for State {
             include_subfolders: false,
             pixel_format: PixelFormat::default(),
             coordinate_format: CoordinateFormat::default(),
-            print_unit: crate::measurement::unit(),
+            print_unit: None,
             geographic_format: GeographicFormat::default(),
             displays: BTreeMap::new(),
         }
@@ -526,8 +527,9 @@ fn display_size(value: &str) -> Option<[f64; 2]> {
 /// the file has it and read back from it.
 struct Kept {
     name: &'static str,
-    /// The value as the file writes it.
-    get: fn(&State) -> String,
+    /// The value as the file writes it, or nothing where the field has no
+    /// value of its own and the line is left out.
+    get: fn(&State) -> Option<String>,
     /// Sets the field from the file's value, where the value is one it can
     /// be; a value that is not is left alone, the field keeping its default.
     set: fn(&mut State, &str),
@@ -537,14 +539,14 @@ struct Kept {
 const KEPT: [Kept; 16] = [
     Kept {
         name: "show_filmstrip",
-        get: |state| state.show_filmstrip.to_string(),
+        get: |state| Some(state.show_filmstrip.to_string()),
         set: |state, value| {
             let _ = flag(&mut state.show_filmstrip, value);
         },
     },
     Kept {
         name: "filmstrip_width",
-        get: |state| state.filmstrip_width.to_string(),
+        get: |state| Some(state.filmstrip_width.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && (filmstrip::SLOT_MIN..=filmstrip::SLOT_MAX).contains(&number)
@@ -555,7 +557,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "loupe_magnification",
-        get: |state| state.loupe_magnification.to_string(),
+        get: |state| Some(state.loupe_magnification.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && loupe::MAGNIFICATIONS.contains(&number)
@@ -566,7 +568,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "horizon_step",
-        get: |state| state.horizon_step.to_string(),
+        get: |state| Some(state.horizon_step.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && attitude::STEPS.contains(&number)
@@ -577,7 +579,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "ui_scale",
-        get: |state| state.ui_scale.to_string(),
+        get: |state| Some(state.ui_scale.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && number.is_finite()
@@ -589,7 +591,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "sort",
-        get: |state| state.order.sort.word().to_string(),
+        get: |state| Some(state.order.sort.word().to_string()),
         set: |state, value| {
             if let Some(sort) = filmstrip::Sort::read(value) {
                 state.order.sort = sort;
@@ -598,7 +600,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "sort_direction",
-        get: |state| state.order.direction.word().to_string(),
+        get: |state| Some(state.order.direction.word().to_string()),
         set: |state, value| {
             if let Some(direction) = filmstrip::Direction::read(value) {
                 state.order.direction = direction;
@@ -607,7 +609,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "sort_then",
-        get: |state| state.order.then.sort.word().to_string(),
+        get: |state| Some(state.order.then.sort.word().to_string()),
         set: |state, value| {
             if let Some(sort) = filmstrip::Sort::read(value) {
                 state.order.then.sort = sort;
@@ -616,7 +618,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "sort_then_direction",
-        get: |state| state.order.then.direction.word().to_string(),
+        get: |state| Some(state.order.then.direction.word().to_string()),
         set: |state, value| {
             if let Some(direction) = filmstrip::Direction::read(value) {
                 state.order.then.direction = direction;
@@ -625,28 +627,28 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "camera_jpeg",
-        get: |state| state.camera_jpeg.to_string(),
+        get: |state| Some(state.camera_jpeg.to_string()),
         set: |state, value| {
             let _ = flag(&mut state.camera_jpeg, value);
         },
     },
     Kept {
         name: "include_subfolders",
-        get: |state| state.include_subfolders.to_string(),
+        get: |state| Some(state.include_subfolders.to_string()),
         set: |state, value| {
             let _ = flag(&mut state.include_subfolders, value);
         },
     },
     Kept {
         name: "profile",
-        get: |state| state.profile.to_string(),
+        get: |state| Some(state.profile.to_string()),
         set: |state, value| {
             let _ = flag(&mut state.profile, value);
         },
     },
     Kept {
         name: "pixel_format",
-        get: |state| state.pixel_format.label().to_ascii_lowercase(),
+        get: |state| Some(state.pixel_format.label().to_ascii_lowercase()),
         set: |state, value| {
             if let Some(format) = PixelFormat::parse(value) {
                 state.pixel_format = format;
@@ -655,7 +657,7 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "coordinate_format",
-        get: |state| state.coordinate_format.word().to_string(),
+        get: |state| Some(state.coordinate_format.word().to_string()),
         set: |state, value| {
             if let Some(format) = CoordinateFormat::parse(value) {
                 state.coordinate_format = format;
@@ -664,16 +666,16 @@ const KEPT: [Kept; 16] = [
     },
     Kept {
         name: "print_unit",
-        get: |state| state.print_unit.word().to_string(),
+        get: |state| state.print_unit.map(|unit| unit.word().to_string()),
         set: |state, value| {
             if let Some(unit) = density::Unit::parse(value) {
-                state.print_unit = unit;
+                state.print_unit = Some(unit);
             }
         },
     },
     Kept {
         name: "geographic_format",
-        get: |state| state.geographic_format.label().to_ascii_lowercase(),
+        get: |state| Some(state.geographic_format.label().to_ascii_lowercase()),
         set: |state, value| {
             if let Some(format) = GeographicFormat::parse(value) {
                 state.geographic_format = format;
@@ -711,7 +713,9 @@ impl State {
              # Deleting this file starts it afresh.\n"
         );
         for kept in &KEPT {
-            text.push_str(&format!("{} = {}\n", kept.name, (kept.get)(self)));
+            if let Some(value) = (kept.get)(self) {
+                text.push_str(&format!("{} = {value}\n", kept.name));
+            }
         }
         for (model, [across, down]) in &self.displays {
             text.push_str(&format!("{DISPLAY}{model} = {across:.2}x{down:.2}\n"));
@@ -1174,7 +1178,7 @@ mod tests {
             include_subfolders: true,
             pixel_format: PixelFormat::Depth,
             coordinate_format: CoordinateFormat::Geographic,
-            print_unit: density::Unit::Millimeters,
+            print_unit: Some(density::Unit::Millimeters),
             geographic_format: GeographicFormat::Dms,
             displays: BTreeMap::from([
                 ("Dell-Inc.-DELL-U2720Q".to_string(), [596.74, 335.66]),
@@ -1182,6 +1186,15 @@ mod tests {
             ]),
         };
         assert_eq!(State::parse(&state.render()), state);
+    }
+
+    /// A print unit that was never chosen against the locale has no line,
+    /// and a file without one reads back as none.
+    #[test]
+    fn an_unchosen_print_unit_is_left_out() {
+        let text = State::default().render();
+        assert!(!text.contains("print_unit"), "{text}");
+        assert_eq!(State::parse(&text).print_unit, None);
     }
 
     /// A monitor's line that is not a size, or names no model, is passed
