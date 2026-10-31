@@ -116,7 +116,7 @@ fn open(paths: Vec<PathBuf>, named: Vec<PathBuf>) -> App {
             size: size.map(|(w, h)| [w as f32, h as f32]),
         }),
         options(),
-        StateFile::none(),
+        StateFile::holding(kept()),
         threads(),
     )
 }
@@ -208,9 +208,18 @@ fn opened_on_nothing() -> App {
         Vec::new(),
         None,
         options(),
-        StateFile::none(),
+        StateFile::holding(kept()),
         threads(),
     )
+}
+
+/// The state the tests were written against: the file list down, rather
+/// than up as a first run has it.
+fn kept() -> State {
+    State {
+        show_filmstrip: false,
+        ..State::default()
+    }
 }
 
 fn options() -> Options {
@@ -223,7 +232,6 @@ fn options() -> Options {
         config: Config {
             show_ui: true,
             show_minimap: false,
-            show_filmstrip: false,
             show_histogram: false,
             show_info: false,
             browse_folder: true,
@@ -546,10 +554,7 @@ fn a_directory_opens_in_the_order_last_left() {
             size: size.map(|(w, h)| [w as f32, h as f32]),
         }),
         options(),
-        StateFile::holding(State {
-            order,
-            ..State::default()
-        }),
+        StateFile::holding(State { order, ..kept() }),
         threads(),
     );
     assert!(
@@ -2153,7 +2158,7 @@ fn open_directories(named: Vec<PathBuf>, recursive: bool, cap: usize) -> App {
             recursive,
             ..options()
         },
-        StateFile::none(),
+        StateFile::holding(kept()),
         threads,
     )
 }
@@ -3158,7 +3163,7 @@ fn the_rendering_comes_back_from_the_state_file() {
         options(),
         StateFile::holding(State {
             camera_jpeg: true,
-            ..State::default()
+            ..kept()
         }),
         threads(),
     );
@@ -3178,7 +3183,7 @@ fn the_readout_s_formats_come_back_from_the_state_file() {
             pixel_format: ui::PixelFormat::Depth,
             coordinate_format: ui::CoordinateFormat::Projected,
             geographic_format: ui::GeographicFormat::Dms,
-            ..State::default()
+            ..kept()
         }),
         threads(),
     );
@@ -3188,6 +3193,27 @@ fn the_readout_s_formats_come_back_from_the_state_file() {
         ui::CoordinateFormat::Projected
     );
     assert_eq!(app.panels.geographic_format, ui::GeographicFormat::Dms);
+}
+
+/// The file list comes back up or down as it was left, and is up where
+/// the state file says nothing.
+#[test]
+fn the_file_list_s_toggle_comes_back_from_the_state_file() {
+    let opened = |state| {
+        App::new(
+            Vec::new(),
+            Vec::new(),
+            None,
+            options(),
+            StateFile::holding(state),
+            threads(),
+        )
+    };
+    assert!(opened(State::default()).panels.show_filmstrip);
+    let mut app = opened(kept());
+    assert!(!app.panels.show_filmstrip);
+    assert_eq!(app.press(ui::Control::Filmstrip), Effect::Redraw);
+    assert!(app.kept_state().show_filmstrip);
 }
 
 /// A fixture from `test_images/`, opened on its own.

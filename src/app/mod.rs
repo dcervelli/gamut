@@ -791,7 +791,7 @@ impl App {
             measuring: Measuring::new(measured),
             panels: Panels {
                 show_ui: config.show_ui,
-                show_filmstrip: config.show_filmstrip,
+                show_filmstrip: kept_state.show_filmstrip,
                 // The histogram where both are asked for: it is the first
                 // of the two buttons.
                 side: if config.show_histogram {
@@ -1803,6 +1803,7 @@ impl App {
     /// as the loop ends.
     pub(super) fn kept_state(&self) -> State {
         State {
+            show_filmstrip: self.panels.show_filmstrip,
             filmstrip_width: self.filmstrip.slot(),
             loupe_magnification: self.panels.loupe_magnification,
             horizon_step: self.panels.horizon_step,

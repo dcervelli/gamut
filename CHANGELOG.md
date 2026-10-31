@@ -101,9 +101,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - The picture can be dragged past its edge, until the edge reaches the
   middle of the window, so an edge can be pulled out from under whatever is
   covering it. A fitted or small picture can be dragged that far too. The
-  minimap's marker hangs off the side of the map by as much, and the minimap
-  comes up whenever any of the picture is off screen, a fitted picture
-  dragged aside included.
+  minimap's marker stops at the edge of the map, that side of it dashed,
+  and the minimap comes up whenever any of the picture is off screen, a
+  fitted picture dragged aside included.
 - `Space` on a view dragged past the picture's edge puts the whole image
   back first, centered, before going on to the window filled and actual
   size. A filled window scrolled along the picture still goes on to actual
@@ -114,6 +114,9 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A folder in a tree that changes is read again by itself, the open folder
   and the one named looked at four times a second and the rest in turn, so
   a large tree costs little to keep watched.
+- The file list opens as it was left when the window last closed, and
+  open the first time. The configuration file's `show_filmstrip` is
+  retired: a line naming it is passed over.
 
 ### Fixed
 
