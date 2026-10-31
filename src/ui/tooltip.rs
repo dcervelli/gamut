@@ -213,11 +213,10 @@ pub const NO_PROFILE: &str = "This file carries no camera profile.";
 /// What the zoom menu's print size says while it is dead: the file does not
 /// say how many of its pixels go to an inch, or the monitor how large it is.
 const NO_DENSITY: &str = "This file doesn't provide DPI";
-/// What the pixel menu's projected coordinate says while it is dead: the
-/// file is not placed on a projection, or not placed at all; and its
-/// latitude and longitude, while the file cannot be placed on the globe.
-const NOT_PROJECTED: &str = "This image isn't on a map projection";
-const NOT_GEOREFERENCED: &str = "This image can't be placed in latitude and longitude";
+/// What the pixel menu's projected coordinate and its latitude and
+/// longitude say while they are dead: the file is not placed on the ground
+/// in a way that can answer them.
+const NOT_GEOREFERENCED: &str = "This image isn't georeferenced";
 const NO_MONITOR_SIZE: &str = "This display didn't report its physical size";
 /// What the calibration's button says while it is dead: the window's
 /// monitor cannot be told apart from another, so nothing measured could be
@@ -601,7 +600,7 @@ pub fn disabled(tip: Tip, conditions: Conditions) -> Option<Refused> {
         let refused = match format {
             CoordinateFormat::Pixel => None,
             CoordinateFormat::Print => (!density).then_some(NO_DENSITY),
-            CoordinateFormat::Projected => (!projected).then_some(NOT_PROJECTED),
+            CoordinateFormat::Projected => (!projected).then_some(NOT_GEOREFERENCED),
             CoordinateFormat::Geographic => (!geographic).then_some(NOT_GEOREFERENCED),
             CoordinateFormat::Direction => (!direction).then_some(NO_ORIENTATION),
         };

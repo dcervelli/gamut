@@ -236,7 +236,7 @@ pub fn describe_format(format: PixelFormat) -> &'static str {
 pub fn describe_coordinates(format: CoordinateFormat) -> &'static str {
     match format {
         CoordinateFormat::Pixel => "Column and row of the pixel",
-        CoordinateFormat::Print => "Distance from top left when printed at the image's DPI",
+        CoordinateFormat::Print => "Distance from top left when printed with image DPI",
         CoordinateFormat::Projected => "Coordinates in the file's own system",
         CoordinateFormat::Geographic => "Latitude and longitude on WGS 84",
         CoordinateFormat::Direction => "Azimuth and elevation toward the pixel",
