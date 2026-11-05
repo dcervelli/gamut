@@ -136,6 +136,16 @@ impl Ruler {
         start + pixels * per_pixel
     }
 
+    /// What the measure reads at the pixel numbered `pixel` along `axis`: the
+    /// number itself where it measures pixels, as the readout has it, and
+    /// otherwise what it reads at the pixel's middle.
+    pub fn pixel_reading(&self, axis: usize, pixel: u32) -> f64 {
+        match self.unit {
+            Unit::Pixel => f64::from(pixel),
+            _ => self.at(axis, f64::from(pixel) + 0.5),
+        }
+    }
+
     /// Where along `axis` the measure reads `value`, in pixels from the
     /// picture's near edge: the other way round from [`Ruler::at`].
     pub fn pixels(&self, axis: usize, value: f64) -> f64 {

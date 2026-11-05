@@ -1203,13 +1203,14 @@ impl Pass<'_> {
                     minimap: thumbnail,
                     glass,
                 },
+                self.input.pointer,
                 &ruler,
                 grid::step(&ruler, zoom, self.input.scale),
                 self.theme,
                 &egui::TextStyle::Small.resolve(ui.style()),
             );
         }
-        // The horizon grid, over the pixel grid and under the region, and
+        // The horizon grid, over the grid and under the region, and
         // the two lines through the pointer — but not under the loupe,
         // whose glass is what the hand is reading then. A file that gives
         // its heading and not its tilt has only the ring at the middle.

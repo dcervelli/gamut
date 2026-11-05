@@ -679,7 +679,7 @@ fn foot(current: &Current, shown: &Shown) -> Option<[f32; 2]> {
 
 /// What the horizon grid leaves clear inside the content area: the
 /// loupe's glass and the minimap's thumbnail, which the image layer draws
-/// under the whole interface, as the pixel grid does.
+/// under the whole interface, as the grid does.
 #[derive(Clone, Copy)]
 enum Hole {
     Glass(Pos2, f32),

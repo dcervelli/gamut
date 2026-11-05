@@ -3461,6 +3461,45 @@ fn the_horizon_grid_follows_the_pointer() {
     assert!(curves(&mut harness) < without);
 }
 
+/// With the grid on, the pointer's pixel has two lines of its own, each in
+/// the accent and edged in black, the edges under both lines so that neither
+/// cuts the other, and a label for each on a ground of the accent, over the
+/// minimap.
+#[test]
+fn the_grid_follows_the_pointer() {
+    let mut on = panels();
+    on.show_grid = true;
+    let mut harness = open(WINDOW, 1, on);
+    let accent: egui::Color32 = Theme::FALLBACK.accent.into();
+    harness.state_mut().input.minimap_on_screen = true;
+    let fills = |harness: &mut Harness<'static, State>, ink: egui::Color32| {
+        harness.run();
+        harness
+            .output()
+            .shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(at, shape)| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == ink => Some(at),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let without = fills(&mut harness, accent).len();
+    let black = fills(&mut harness, egui::Color32::BLACK).len();
+    harness.state_mut().input.pointer = Some([2, 1]);
+    let inked = fills(&mut harness, accent);
+    let edges = fills(&mut harness, egui::Color32::BLACK);
+    assert_eq!(inked.len(), without + 4);
+    assert_eq!(edges.len(), black + 2);
+    let lines = &inked[inked.len() - 4..inked.len() - 2];
+    assert!(edges.iter().all(|edge| edge < &lines[0]));
+    assert!(matches!(
+        harness.output().shapes.last().map(|shape| &shape.shape),
+        Some(egui::Shape::Text(_))
+    ));
+}
+
 /// The horizon grid's toggle is dead and unlit for a file that does not
 /// say which way its camera faced, and while another file is on its way
 /// in, though the grid is asked for: a press reaches nothing. For a file

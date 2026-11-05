@@ -1596,7 +1596,7 @@ which one is up, the full one only ever meaning the horizon itself.
 That line and what goes with it are the horizon grid (`attitude::paint`),
 which the section previews while the pointer is anywhere on it and the
 compass toggle in the bottom bar keeps up (`Panels::horizon_grid`), drawn
-from `Pass::overlays` over the pixel grid and under the region. Everything in
+from `Pass::overlays` over the grid and under the region. Everything in
 it is one map between a way round the camera and a pixel. The ground's axes
 in the picture's are gravity, ahead — the lens's axis with gravity's share
 taken out — and right, `g × ahead`; the way `azimuth` round and `elevation`
@@ -1737,6 +1737,17 @@ units too, which on pixels that are not square is another shape in them:
 `Aspect::ratio` takes the pixels' `Ruler::shape`, and `Aspect::in_pixels`
 is what `Marking` holds a region to.
 
+The pixel under the pointer has two lines of its own in the accent, through
+its middle so that an overzoomed pixel is bisected, each edged in a physical
+pixel of black to be seen on any picture; both edges are drawn before either
+line, so that neither cuts the other where they cross. `grid::pointer_labels`
+numbers them in the rows the other labels were given, on a ground of the
+accent over them, on a Foreground layer of their own because the minimap is
+an area over the picture. Those two are moved back inside the content area
+rather than dropped, and read `Ruler::pixel_reading`, what the readout says, rather
+than the round reading of a line. They read `FrameInput::pointer`, which a
+move across a pixel owes a frame for already.
+
 The lines are numbered by `grid::labels`, which is geometry only and is
 tested with a stand-in for the font. A label goes beside the picture where
 the content area has room past the picture's edge — the near side first,
@@ -1744,10 +1755,12 @@ then the far — since that covers nothing and is where a printed map numbers
 its graticule; with no room it goes over the picture just inside the
 content area, on the menus' ground so it reads against anything. How many
 lines are numbered is `labeled_every`: the widest label any line would wear
-sets the room one needs, and the interval is the first of the ruler's own
-1-2-5 marks that is a whole number of spacings and gives that room, so the
-numbered lines stay round where a bare multiple of the spacing would number
-a grid in fives by twenty-fives. The words are the bare reading in the
+sets the room one needs, and the interval is every line or every other line
+if that gives the room, and otherwise the first of the ruler's own 1-2-5
+marks that is a whole number of spacings and does, so the numbered lines stay
+round where a bare multiple of the spacing would number a grid in fives by
+twenty-fives. Every other line comes first because a grid in twos would
+otherwise go straight from every line to every fifth. The words are the bare reading in the
 toggle's unit — kilometers where it says kilometers — to as many places as
 the interval needs. The left edge is laid out before the top, its labels
 being short and each one wanted, and a top label that would touch one, or

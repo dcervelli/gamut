@@ -795,7 +795,7 @@ pub fn words(tip: Tip) -> Option<String> {
         Tip::Control(Control::Export) => "Export the image as displayed",
         Tip::Control(Control::Remove) => "Remove the current file from the file list",
         Tip::Control(Control::Filmstrip) => "Toggle the file list",
-        Tip::Control(Control::Grid) => "Toggle the pixel grid",
+        Tip::Control(Control::Grid) => "Toggle the grid",
         Tip::Control(Control::HorizonGrid) => "Toggle the horizon grid",
         Tip::Control(Control::Region) => "Draw a region",
         // The region panel's: its cross and its copy say what they do and

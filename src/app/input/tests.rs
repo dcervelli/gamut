@@ -127,10 +127,7 @@ fn a_button_is_named_by_the_key_that_does_the_same_job() {
         named(Control::Histogram).as_deref(),
         Some("Toggle the histogram (h)")
     );
-    assert_eq!(
-        named(Control::Grid).as_deref(),
-        Some("Toggle the pixel grid (g)")
-    );
+    assert_eq!(named(Control::Grid).as_deref(), Some("Toggle the grid (g)"));
     assert_eq!(
         named(Control::Output).as_deref(),
         Some("Toggle HDR output, when monitor is capable (o)")
