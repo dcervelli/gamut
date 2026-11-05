@@ -23,7 +23,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   is square on the ground even where a map's pixels are not. The grid's lines
   are numbered along the top and the left of the view, just outside the
   picture where there is empty space beside it and just inside the window
-  where there is not.
+  where there is not. Two lines in the accent color cross at the pixel under
+  the pointer, each labeled over those numbers with where it is.
 - Keys for the pixel readout's menu: `.` opens it, even with the interface
   hidden, and while it is open a letter chooses each item — `h` hex, `d`
   decimal, `m` mapped, `z` depth; `x` pixel, `p` print, `e` projected, `g`

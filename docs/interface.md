@@ -1596,7 +1596,7 @@ which one is up, the full one only ever meaning the horizon itself.
 That line and what goes with it are the horizon grid (`attitude::paint`),
 which the section previews while the pointer is anywhere on it and the
 compass toggle in the bottom bar keeps up (`Panels::horizon_grid`), drawn
-from `Pass::overlays` over the pixel grid and under the region. Everything in
+from `Pass::overlays` over the grid and under the region. Everything in
 it is one map between a way round the camera and a pixel. The ground's axes
 in the picture's are gravity, ahead — the lens's axis with gravity's share
 taken out — and right, `g × ahead`; the way `azimuth` round and `elevation`
@@ -1736,6 +1736,17 @@ away rather than read in another unit. A held ratio is in the measure's
 units too, which on pixels that are not square is another shape in them:
 `Aspect::ratio` takes the pixels' `Ruler::shape`, and `Aspect::in_pixels`
 is what `Marking` holds a region to.
+
+The pixel under the pointer has two lines of its own in the accent, through
+its middle so that an overzoomed pixel is bisected, each edged in a physical
+pixel of black to be seen on any picture; both edges are drawn before either
+line, so that neither cuts the other where they cross. `grid::pointer_labels`
+numbers them in the rows the other labels were given, on a ground of the
+accent over them, on a Foreground layer of their own because the minimap is
+an area over the picture. Those two are moved back inside the content area
+rather than dropped, and read `Ruler::pixel_reading`, what the readout says, rather
+than the round reading of a line. They read `FrameInput::pointer`, which a
+move across a pixel owes a frame for already.
 
 The lines are numbered by `grid::labels`, which is geometry only and is
 tested with a stand-in for the font. A label goes beside the picture where

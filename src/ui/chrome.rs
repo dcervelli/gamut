@@ -765,7 +765,7 @@ impl Pass<'_> {
         self.reading_toggle(ui, icon::GRID_3X3, Control::Grid, spacing, true);
     }
 
-    /// The horizon grid's toggle, after the pixel grid's: the other grid
+    /// The horizon grid's toggle, after the grid's: the other grid
     /// laid over the picture, and so beside it. While it is on, the spacing
     /// of its uprights is written after the mark, as the grid's is; a file
     /// that gives only its heading has no uprights, and the toggle is lit

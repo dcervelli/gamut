@@ -998,6 +998,11 @@ the direction, or a map turned on the ground — the grid is in image pixels.
 The button at the head of the bottom bar says which spacing is in force, in
 the reading beside its mark, so a distance on screen can be counted off.
 
+While the grid is up, two lines in the accent color, edged in black to show on
+any picture, cross at the pixel under the pointer, through its middle, and run to the edges of the picture or the
+window. Each has a label over the grid's own numbers saying where it is, in
+the same units, so the pixel can be read off against the lines around it.
+
 The lines are numbered at the edges of what you can see: the lines down the
 picture across the top, the lines across it down the left. Where there is
 empty space beside the picture — zoomed out, or panned past its edge — the

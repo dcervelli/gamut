@@ -17,6 +17,10 @@
 //! starts at its edge, so the two are the same there, but the ground's does
 //! not, and its lines fall on the round eastings and northings a map is
 //! ruled on — which two rasters on the same ground share.
+//!
+//! The pixel under the pointer has two lines of its own, through its middle,
+//! and each is numbered with what the measure reads there, over the labels
+//! of the lines around it.
 
 use crate::render::Placement;
 
@@ -113,7 +117,8 @@ pub(super) struct Clear {
 /// also be zoomed until it runs off every edge, and the grid marks up an
 /// image rather than a window.
 ///
-/// `clear` is what is left clear of it — see [`Clear`].
+/// `clear` is what is left clear of it — see [`Clear`]. `pointer` is the
+/// pixel under the pointer, which is given its two lines and their labels.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint(
     painter: &egui::Painter,
@@ -121,6 +126,7 @@ pub(super) fn paint(
     scale: f32,
     content: Rect,
     clear: Clear,
+    pointer: Option<[u32; 2]>,
     ruler: &Ruler,
     step: f64,
     theme: &Theme,
@@ -170,21 +176,47 @@ pub(super) fn paint(
     let snap = |value: f32| (value * scale).round() / scale;
     let ink: egui::Color32 = theme.bar_background.into();
 
-    for x in across.lines(area.x, area.right()) {
-        let line = Rect::new(snap(x), area.y, width, area.height);
+    // Kept to the picture, a line wider than a hairline running off it.
+    let fill = |line: Rect, ink: egui::Color32| {
+        let Some(line) = line.intersect(area) else {
+            return;
+        };
         let holes = [
             minimap,
             glass.and_then(|(center, radius)| chord(line, center, radius)),
         ];
         fill_around(painter, line, &holes, ink);
+    };
+    // Each `edge` wider on either side than the hairline.
+    let vertical = |x: f32, edge: f32, ink: egui::Color32| {
+        let line = Rect::new(snap(x) - edge, area.y, width + 2.0 * edge, area.height);
+        fill(line, ink);
+    };
+    let horizontal = |y: f32, edge: f32, ink: egui::Color32| {
+        let line = Rect::new(area.x, snap(y) - edge, area.width, width + 2.0 * edge);
+        fill(line, ink);
+    };
+    for x in across.lines(area.x, area.right()) {
+        vertical(x, 0.0, ink);
     }
     for y in down.lines(area.y, area.bottom()) {
-        let line = Rect::new(area.x, snap(y), area.width, width);
-        let holes = [
-            minimap,
-            glass.and_then(|(center, radius)| chord(line, center, radius)),
-        ];
-        fill_around(painter, line, &holes, ink);
+        horizontal(y, 0.0, ink);
+    }
+    // In the accent, over the rest, to be told from them, and edged in black
+    // to be seen on whatever is under them. Both edges go down before either
+    // line, or one line's edge would cut the other where they cross. A pixel
+    // larger than the part of it in view can have its middle out of sight.
+    if let Some(pixel) = pointer {
+        let [x, y] = [across.middle(pixel[0]), down.middle(pixel[1])];
+        let accent = theme.accent.into();
+        for (edge, ink) in [(width, egui::Color32::BLACK), (0.0, accent)] {
+            if (area.x..area.right()).contains(&x) {
+                vertical(x, edge, ink);
+            }
+            if (area.y..area.bottom()).contains(&y) {
+                horizontal(y, edge, ink);
+            }
+        }
     }
 
     // Laid out with no ink of their own, so that the painter's is the one
@@ -216,6 +248,26 @@ pub(super) fn paint(
             egui::pos2(rect.x + LABEL_INSET[0], rect.y + LABEL_INSET[1]),
             laid(&label.text),
             text.into(),
+        );
+    }
+    // On a ground of their own, there being a label under them or the bare
+    // window, and on a layer of their own over the floating panels: unlike
+    // the labels of the lines they cannot give way to the minimap.
+    let Some(pixel) = pointer else { return };
+    let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("grid pointer"));
+    let painter = painter.ctx().layer_painter(layer);
+    for label in pointer_labels(across, down, pixel, image, content, measured) {
+        let rect = Rect::new(
+            snap(label.rect.x),
+            snap(label.rect.y),
+            label.rect.width,
+            label.rect.height,
+        );
+        painter.rect_filled(rect.into(), 3.0, theme.accent);
+        painter.galley(
+            egui::pos2(rect.x + LABEL_INSET[0], rect.y + LABEL_INSET[1]),
+            laid(&label.text),
+            theme.bar_background.into(),
         );
     }
 }
@@ -367,6 +419,11 @@ impl Along<'_> {
         out
     }
 
+    /// Where the middle of `pixel` falls, in logical pixels.
+    fn middle(self, pixel: u32) -> f32 {
+        self.origin + (f64::from(pixel) + 0.5) as f32 * self.per
+    }
+
     /// How far apart the lines are on screen, in logical pixels.
     fn spacing(self) -> f32 {
         (self.step / self.ruler.per_pixel(self.axis)) as f32 * self.per
@@ -410,6 +467,18 @@ fn reading(value: f64, every: f64, step: f64, ruler: &Ruler) -> String {
     match in_kilometers(step, ruler) {
         true => written(value / 1000.0, every / 1000.0),
         false => written(value, every),
+    }
+}
+
+/// What the pointer's line at `value` is labeled: as [`reading`] has the
+/// lines around it, in the same unit, to as many places as a pixel is worth.
+fn pointed(value: f64, step: f64, ruler: &Ruler) -> String {
+    match in_kilometers(step, ruler) {
+        true => {
+            let places = ruler.places() + 3;
+            unsigned_nought(format!("{:.places$}", value / 1000.0))
+        }
+        false => ruler.write(value),
     }
 }
 
@@ -521,7 +590,7 @@ fn labels(
     image: Rect,
     content: Rect,
     clear: Clear,
-    mut measure: impl FnMut(&str) -> [f32; 2],
+    measure: impl Fn(&str) -> [f32; 2],
 ) -> Vec<Label> {
     let Some(area) = image.intersect(content) else {
         return Vec::new();
@@ -539,19 +608,7 @@ fn labels(
         if ticks.is_empty() {
             continue;
         }
-        // Sized by the widest of what every line would say at the finest
-        // a label could be: the labels kept are among them.
-        let sizes: Vec<[f32; 2]> = ticks
-            .iter()
-            .map(|&(_, value)| measure(&reading(value, along.step, along.step, along.ruler)))
-            .collect();
-        let widest = sizes.iter().fold([0.0f32; 2], |most, size| {
-            [most[0].max(size[0]), most[1].max(size[1])]
-        });
-        let box_size = [
-            widest[0] + 2.0 * LABEL_INSET[0],
-            widest[1] + 2.0 * LABEL_INSET[1],
-        ];
+        let box_size = widest_box(along, &ticks, &measure);
         // Along the edge, a label takes its width across the top and its
         // height down the side.
         let (length, depth) = match axis {
@@ -567,44 +624,9 @@ fn labels(
                 continue;
             }
             let text = reading(value, every, along.step, along.ruler);
-            let size = measure(&text);
-            let size = [
-                size[0] + 2.0 * LABEL_INSET[0],
-                size[1] + 2.0 * LABEL_INSET[1],
-            ];
+            let size = boxed(measure(&text));
             let over = matches!(side, Side::Near { over: true });
-            let rect = match (axis, side) {
-                (0, Side::Near { over: false }) => Rect::new(
-                    at - size[0] / 2.0,
-                    image.y - LABEL_GAP - size[1],
-                    size[0],
-                    size[1],
-                ),
-                (0, Side::Far) => Rect::new(
-                    at - size[0] / 2.0,
-                    image.bottom() + LABEL_GAP,
-                    size[0],
-                    size[1],
-                ),
-                (0, Side::Near { over: true }) => {
-                    Rect::new(at - size[0] / 2.0, area.y + LABEL_GAP, size[0], size[1])
-                }
-                (_, Side::Near { over: false }) => Rect::new(
-                    image.x - LABEL_GAP - size[0],
-                    at - size[1] / 2.0,
-                    size[0],
-                    size[1],
-                ),
-                (_, Side::Far) => Rect::new(
-                    image.right() + LABEL_GAP,
-                    at - size[1] / 2.0,
-                    size[0],
-                    size[1],
-                ),
-                (_, Side::Near { over: true }) => {
-                    Rect::new(area.x + LABEL_GAP, at - size[1] / 2.0, size[0], size[1])
-                }
-            };
+            let rect = place(axis, side, at, size, image, area);
             let clear_of = |hole: Rect| rect.intersect(hole).is_none();
             let fits = inside(rect, content)
                 && clear.minimap.is_none_or(clear_of)
@@ -627,6 +649,117 @@ fn labels(
         }
     }
     placed
+}
+
+/// The labels of the two lines through `pixel`, in the same rows along the
+/// picture's edges as the labels of the lines around them, over which they
+/// are drawn. Unlike those they stay: a label that would run off the window
+/// is brought back inside it.
+fn pointer_labels(
+    across: Along,
+    down: Along,
+    pixel: [u32; 2],
+    image: Rect,
+    content: Rect,
+    measure: impl Fn(&str) -> [f32; 2],
+) -> Vec<Label> {
+    let Some(area) = image.intersect(content) else {
+        return Vec::new();
+    };
+    [across, down]
+        .into_iter()
+        .map(|along| {
+            let axis = along.axis;
+            let value = along.ruler.pixel_reading(axis, pixel[axis]);
+            let text = pointed(value, along.step, along.ruler);
+            let own = boxed(measure(&text));
+            let (from, to) = match axis {
+                0 => (area.x, area.right()),
+                _ => (area.y, area.bottom()),
+            };
+            // The side the lines' labels went to, which the depth of their
+            // widest decided: this one may be a little deeper.
+            let ticks = along.ticks(from, to);
+            let row = match ticks.is_empty() {
+                true => own,
+                false => widest_box(along, &ticks, &measure),
+            };
+            let side = side(axis, image, content, row[1 - axis]);
+            let over = matches!(side, Side::Near { over: true });
+            let rect = place(axis, side, along.middle(pixel[axis]), own, image, area);
+            Label {
+                text,
+                rect: within(rect, content),
+                over,
+            }
+        })
+        .collect()
+}
+
+/// The box a label of `size` is written in.
+fn boxed(size: [f32; 2]) -> [f32; 2] {
+    [
+        size[0] + 2.0 * LABEL_INSET[0],
+        size[1] + 2.0 * LABEL_INSET[1],
+    ]
+}
+
+/// The box of the widest of what `ticks` would say at the finest a label
+/// could be: the labels kept are among them.
+fn widest_box(along: Along, ticks: &[(f32, f64)], measure: impl Fn(&str) -> [f32; 2]) -> [f32; 2] {
+    boxed(ticks.iter().fold([0.0f32; 2], |most, &(_, value)| {
+        let size = measure(&reading(value, along.step, along.step, along.ruler));
+        [most[0].max(size[0]), most[1].max(size[1])]
+    }))
+}
+
+/// Where a label's box of `size` goes for the line at `at` along `axis`, on
+/// `side` of the picture, whose part in view is `area`.
+fn place(axis: usize, side: Side, at: f32, size: [f32; 2], image: Rect, area: Rect) -> Rect {
+    match (axis, side) {
+        (0, Side::Near { over: false }) => Rect::new(
+            at - size[0] / 2.0,
+            image.y - LABEL_GAP - size[1],
+            size[0],
+            size[1],
+        ),
+        (0, Side::Far) => Rect::new(
+            at - size[0] / 2.0,
+            image.bottom() + LABEL_GAP,
+            size[0],
+            size[1],
+        ),
+        (0, Side::Near { over: true }) => {
+            Rect::new(at - size[0] / 2.0, area.y + LABEL_GAP, size[0], size[1])
+        }
+        (_, Side::Near { over: false }) => Rect::new(
+            image.x - LABEL_GAP - size[0],
+            at - size[1] / 2.0,
+            size[0],
+            size[1],
+        ),
+        (_, Side::Far) => Rect::new(
+            image.right() + LABEL_GAP,
+            at - size[1] / 2.0,
+            size[0],
+            size[1],
+        ),
+        (_, Side::Near { over: true }) => {
+            Rect::new(area.x + LABEL_GAP, at - size[1] / 2.0, size[0], size[1])
+        }
+    }
+}
+
+/// `rect` moved the least that puts it inside `outer`, its near edges
+/// winning where it is the larger.
+fn within(rect: Rect, outer: Rect) -> Rect {
+    let to = |at: f32, length: f32, near: f32, far: f32| at.min(far - length).max(near);
+    Rect::new(
+        to(rect.x, rect.width, outer.x, outer.right()),
+        to(rect.y, rect.height, outer.y, outer.bottom()),
+        rect.width,
+        rect.height,
+    )
 }
 
 /// Whether the whole of `inner` is inside `outer`.
@@ -1049,6 +1182,50 @@ mod tests {
 
     /// Lines closer together than their words are labeled every so many,
     /// and nothing is written over the minimap or over another label.
+    #[test]
+    fn the_pointers_labels_sit_with_the_lines_labels_over_its_pixel() {
+        let content = Rect::new(0.0, 0.0, 800.0, 600.0);
+        let image = Rect::new(100.0, 100.0, 400.0, 300.0);
+        let (across, down) = alongs(image, 100.0);
+        let placed = pointer_labels(across, down, [150, 80], image, content, measured);
+        assert_eq!(
+            placed.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+            ["150", "80"]
+        );
+        let row = labels(across, down, image, content, Clear::default(), measured);
+        let top = row.iter().rfind(|label| label.text == "100").unwrap();
+        // Centered on the middle of the pixel, not its near edge.
+        let [x, y] = [&placed[0], &placed[1]];
+        assert_eq!(x.rect.y, top.rect.y);
+        assert_eq!(x.rect.x + x.rect.width / 2.0, 100.0 + 150.5);
+        assert_eq!(y.rect.y + y.rect.height / 2.0, 100.0 + 80.5);
+        assert!(y.rect.right() <= image.x);
+    }
+
+    /// A label the lines' would drop for running off the window stays.
+    #[test]
+    fn the_pointers_label_stays_in_the_window() {
+        let content = Rect::new(0.0, 0.0, 400.0, 300.0);
+        let (across, down) = alongs(content, 100.0);
+        for pixel in [[0, 0], [399, 299]] {
+            for label in pointer_labels(across, down, pixel, content, content, measured) {
+                assert!(inside(label.rect, content), "{}", label.text);
+            }
+        }
+    }
+
+    /// The pixels' own numbers read as the bar does, and the ground's in
+    /// the unit of the lines around it, to what a pixel is worth.
+    #[test]
+    fn the_pointers_label_reads_as_the_lines_do() {
+        assert_eq!(Ruler::PIXELS.pixel_reading(0, 11), 11.0);
+        let ground = ground();
+        let value = ground.pixel_reading(0, 0);
+        assert_eq!(value, ground.at(0, 0.5));
+        assert_eq!(pointed(1292450.0, 500.0, &ground), "1292450");
+        assert_eq!(pointed(1292450.0, 2000.0, &ground), "1292.450");
+    }
+
     #[test]
     fn crowded_labels_give_way() {
         let content = Rect::new(0.0, 0.0, 800.0, 600.0);
