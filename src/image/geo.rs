@@ -146,6 +146,10 @@ pub fn describe(tags: &Tags) -> Vec<Entry> {
             for (axis, [low, high]) in names.into_iter().zip(axes) {
                 rows.push(Entry::new(format!("Min {axis}"), number(low)));
                 rows.push(Entry::new(format!("Max {axis}"), number(high)));
+                rows.push(Entry::new(
+                    format!("Extent, {axis}"),
+                    with_unit(&number(high - low), unit),
+                ));
             }
         }
         if place.rotated {
@@ -706,8 +710,10 @@ mod tests {
                 ("Origin", "2655000, 1110000"),
                 ("Min easting", "2655000"),
                 ("Max easting", "2690000"),
+                ("Extent, easting", "35000 m"),
                 ("Min northing", "1086000"),
                 ("Max northing", "1110000"),
+                ("Extent, northing", "24000 m"),
             ]
             .map(|(name, value)| (name.to_string(), value.to_string()))
         );
@@ -1023,6 +1029,11 @@ mod tests {
         assert!(
             rows.iter()
                 .any(|(name, value)| name == "Pixel size" && value.ends_with('\u{00b0}')),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|(name, value)| name == "Extent, longitude" && value.ends_with('\u{00b0}')),
             "{rows:?}"
         );
         assert!(

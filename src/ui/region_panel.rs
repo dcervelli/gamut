@@ -30,7 +30,7 @@ use crate::image::region::Region;
 use super::ruler::Ruler;
 
 /// How wide the panel is inside its padding.
-const INSIDE: f32 = 204.0;
+const INSIDE: f32 = 224.0;
 /// How tall each row under the head is: a box's height.
 const ROW: f32 = 24.0;
 /// Between the rows, and between a word and its box.

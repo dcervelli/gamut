@@ -846,6 +846,32 @@ fn a_copy_cell_is_named_by_its_words_and_its_key() {
         Some(spelled_here("Ctrl+C").as_str())
     );
 
+    // The key that reverses the sort sits beside the way it would go, and
+    // moves when the sort does.
+    use ui::filmstrip::Direction;
+    let reversed = |direction| Namer {
+        order: ui::filmstrip::Order {
+            direction,
+            ..Default::default()
+        },
+        path: String::new(),
+        state: Vec::new(),
+        keys: Rc::new(Keymap::table()),
+        gestures: Rc::new(Gestures::table()),
+        ..namer
+    };
+    for (running, other) in [
+        (Direction::Ascending, Direction::Descending),
+        (Direction::Descending, Direction::Ascending),
+    ] {
+        let namer = reversed(running);
+        assert_eq!(namer.shortcut(Control::SortDirection(running)), None);
+        assert_eq!(
+            namer.shortcut(Control::SortDirection(other)).as_deref(),
+            Some(spelled_here("Shift+R").as_str())
+        );
+    }
+
     // And the button it hangs from says what the menu is of, no one key
     // doing that job.
     let button = names(Tip::Control(Control::Copy)).expect("the button names itself");

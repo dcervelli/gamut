@@ -238,7 +238,7 @@ from the list's button when it is, and otherwise from the file list button
 in the top bar, or from the corner of the picture when the bars are hidden.
 While the menu is open, the letter beside each sort chooses it, and every
 other key does what it always does. `R` reverses the order with the menu
-open or closed. Whatever both
+open or closed, and is written beside the direction it would go to. Whatever both
 leave tied goes by folder and then by name. Sorting by path sorts by
 folder alone, a folder's own files before its subfolders', so sorting by
 capture date and then by path leaves each folder in capture order. The kind of a file, its size, its dates
@@ -1173,10 +1173,11 @@ to apply it. A region covers whole pixels, so what you type goes to the
 nearest pixel edge, and the box then says where that is: at 300 dots to
 the inch, `20` millimeters becomes `19.98`. A width less than a pixel is a pixel.
 `Esc` puts the box back as it was. A new position moves the region without
-resizing it. A new width or height keeps the top left corner where it is,
-and with an aspect chosen the other side follows. A region does not reach
-past the edge of the image, so a number too large for the room there stops
-at that edge.
+resizing it, and one too large for the room there stops at the edge of the
+image. A new width or height keeps the top left corner where it is, and with
+an aspect chosen the other side follows. If the new size would run past the
+right or bottom edge, the region moves left or up to fit; only a size larger
+than the image itself is cut down.
 
 ## The mouse
 

@@ -2082,8 +2082,17 @@ impl Naming for Namer {
         Some(ui::Tooltip { title, hints })
     }
 
+    /// The key beside a menu's item. The one key that reverses the sort goes
+    /// beside the direction it would go to, the other being where the sort
+    /// already is; it is not [`action_of`]'s, the two items' tooltips saying
+    /// which way each runs rather than that the sort can be reversed.
     fn shortcut(&self, control: Control) -> Option<String> {
-        key_of(&self.keys, action_of(Tip::Control(control))?)
+        let action = match control {
+            Control::SortDirection(direction) if direction == self.order.direction => return None,
+            Control::SortDirection(_) => ReverseSort,
+            control => action_of(Tip::Control(control))?,
+        };
+        key_of(&self.keys, action)
     }
 
     fn help(&self) -> Vec<ui::help::Section> {
@@ -2831,8 +2840,9 @@ impl App {
     }
 
     /// One of the region panel's boxes was typed in: the place moves the
-    /// region, keeping its size, and the size sets that side from the top
-    /// left corner, the other following where the region is held.
+    /// region, keeping its size, and the size sets that side, the other
+    /// following where the region is held, the top left corner moving back
+    /// only as far as the size needs to stay on the image.
     fn type_region(&mut self, field: Field, number: u32) -> Effect {
         let Selection::Shown(region) = self.marking.selection else {
             return Effect::Nothing;
