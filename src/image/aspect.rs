@@ -21,7 +21,14 @@ pub enum Aspect {
 
 /// The ratios the menu offers, landscape: each is offered the other way
 /// up too while the aspect in force is portrait.
-pub const PRESETS: [(f64, f64); 5] = [(1.0, 1.0), (5.0, 4.0), (4.0, 3.0), (3.0, 2.0), (16.0, 9.0)];
+pub const PRESETS: [(f64, f64); 6] = [
+    (1.0, 1.0),
+    (5.0, 4.0),
+    (4.0, 3.0),
+    (7.0, 5.0),
+    (3.0, 2.0),
+    (16.0, 9.0),
+];
 
 /// The longest ratio either way a typed one may be. Past it the shorter
 /// side of any region worth drawing is under a pixel.

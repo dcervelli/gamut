@@ -1135,7 +1135,7 @@ first two do nothing until a region is drawn.
 
 **Aspect** holds the region to a shape. Open the menu at the end of its box
 for **Free**, which is any shape and where it starts; **Original**, the
-image's own shape; or one of 1:1, 5:4, 4:3, 3:2 and 16:9. Or type a ratio
+image's own shape; or one of 1:1, 5:4, 4:3, 7:5, 3:2 and 16:9. Or type a ratio
 into the box: `16:10`, `16/10` and `16x10` all work, as does one number such
 as `2.39`, which means 2.39 to 1. Choosing a shape while a region is on
 screen reshapes it about its center, keeping about the same number of pixels.
