@@ -415,13 +415,20 @@ fn reading(value: f64, every: f64, step: f64, ruler: &Ruler) -> String {
 
 /// How far apart, in `step`s, the lines that are labeled are: every one
 /// where a label has `room` logical pixels to go between two lines
-/// `spacing` apart, and otherwise the fewest that leave it that much — a
-/// round number of the unit apart, so that the lines labeled read as the
-/// marks a ruler numbers do: by tens on one ruled in fives, never by
-/// fifteens.
+/// `spacing` apart, every other one where that leaves it enough, and
+/// otherwise the fewest that do — a round number of the unit apart, so that
+/// the lines labeled read as the marks a ruler numbers do: by tens on one
+/// ruled in fives, never by fifteens.
 fn labeled_every(step: f64, spacing: f32, room: f32) -> u64 {
     if !spacing.is_finite() || spacing <= 0.0 {
         return u64::MAX;
+    }
+    // Every other line is always round enough, and on a grid ruled in twos
+    // it is the only step between every line and every fifth.
+    for count in [1, 2] {
+        if count as f32 * spacing >= room {
+            return count;
+        }
     }
     // The ruler's marks from the decade the step is in up, of which only
     // those a whole number of steps can be.
@@ -940,15 +947,17 @@ mod tests {
 
     /// A line is labeled as often as its words leave room for, and the
     /// lines labeled are a round number of the unit apart: on a grid ruled
-    /// in fives, by fives, tens or fifties, never by fifteens.
+    /// in fives, by fives, tens or twenties, never by fifteens; on one ruled
+    /// in twos, by twos, fours or tens.
     #[test]
     fn the_lines_labeled_are_a_round_number_apart() {
         assert_eq!(labeled_every(5.0, 50.0, 40.0), 1);
         assert_eq!(labeled_every(5.0, 50.0, 60.0), 2);
         assert_eq!(labeled_every(5.0, 50.0, 120.0), 4);
-        assert_eq!(labeled_every(2.0, 50.0, 60.0), 5);
+        assert_eq!(labeled_every(2.0, 50.0, 60.0), 2);
+        assert_eq!(labeled_every(2.0, 50.0, 120.0), 5);
         assert_eq!(labeled_every(1.0, 50.0, 60.0), 2);
-        assert_eq!(labeled_every(0.2, 50.0, 60.0), 5);
+        assert_eq!(labeled_every(0.2, 50.0, 60.0), 2);
         assert_eq!(labeled_every(1000.0, 30.0, 70.0), 5);
     }
 

@@ -1744,10 +1744,12 @@ then the far — since that covers nothing and is where a printed map numbers
 its graticule; with no room it goes over the picture just inside the
 content area, on the menus' ground so it reads against anything. How many
 lines are numbered is `labeled_every`: the widest label any line would wear
-sets the room one needs, and the interval is the first of the ruler's own
-1-2-5 marks that is a whole number of spacings and gives that room, so the
-numbered lines stay round where a bare multiple of the spacing would number
-a grid in fives by twenty-fives. The words are the bare reading in the
+sets the room one needs, and the interval is every line or every other line
+if that gives the room, and otherwise the first of the ruler's own 1-2-5
+marks that is a whole number of spacings and does, so the numbered lines stay
+round where a bare multiple of the spacing would number a grid in fives by
+twenty-fives. Every other line comes first because a grid in twos would
+otherwise go straight from every line to every fifth. The words are the bare reading in the
 toggle's unit — kilometers where it says kilometers — to as many places as
 the interval needs. The left edge is laid out before the top, its labels
 being short and each one wanted, and a top label that would touch one, or
