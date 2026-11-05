@@ -2082,8 +2082,17 @@ impl Naming for Namer {
         Some(ui::Tooltip { title, hints })
     }
 
+    /// The key beside a menu's item. The one key that reverses the sort goes
+    /// beside the direction it would go to, the other being where the sort
+    /// already is; it is not [`action_of`]'s, the two items' tooltips saying
+    /// which way each runs rather than that the sort can be reversed.
     fn shortcut(&self, control: Control) -> Option<String> {
-        key_of(&self.keys, action_of(Tip::Control(control))?)
+        let action = match control {
+            Control::SortDirection(direction) if direction == self.order.direction => return None,
+            Control::SortDirection(_) => ReverseSort,
+            control => action_of(Tip::Control(control))?,
+        };
+        key_of(&self.keys, action)
     }
 
     fn help(&self) -> Vec<ui::help::Section> {

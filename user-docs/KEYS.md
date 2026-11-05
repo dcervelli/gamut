@@ -238,7 +238,7 @@ from the list's button when it is, and otherwise from the file list button
 in the top bar, or from the corner of the picture when the bars are hidden.
 While the menu is open, the letter beside each sort chooses it, and every
 other key does what it always does. `R` reverses the order with the menu
-open or closed. Whatever both
+open or closed, and is written beside the direction it would go to. Whatever both
 leave tied goes by folder and then by name. Sorting by path sorts by
 folder alone, a folder's own files before its subfolders', so sorting by
 capture date and then by path leaves each folder in capture order. The kind of a file, its size, its dates
