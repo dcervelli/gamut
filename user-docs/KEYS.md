@@ -1173,10 +1173,11 @@ to apply it. A region covers whole pixels, so what you type goes to the
 nearest pixel edge, and the box then says where that is: at 300 dots to
 the inch, `20` millimeters becomes `19.98`. A width less than a pixel is a pixel.
 `Esc` puts the box back as it was. A new position moves the region without
-resizing it. A new width or height keeps the top left corner where it is,
-and with an aspect chosen the other side follows. A region does not reach
-past the edge of the image, so a number too large for the room there stops
-at that edge.
+resizing it, and one too large for the room there stops at the edge of the
+image. A new width or height keeps the top left corner where it is, and with
+an aspect chosen the other side follows. If the new size would run past the
+right or bottom edge, the region moves left or up to fit; only a size larger
+than the image itself is cut down.
 
 ## The mouse
 
