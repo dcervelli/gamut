@@ -371,14 +371,15 @@ render/        the GPU
                  loads it; texel.wgsl is the reading of one texel that mod.rs prepends to
                  image.wgsl and reduce.wgsl both
 packaging/     what the packages are built from: the Arch PKGBUILD, the Homebrew
-               formula (gamut.rb), the Mac bundle's Info.plist, the .desktop entry,
+               formula (gamut.rb) and cask (cask.rb), the Mac bundle's Info.plist, the .desktop entry,
                the icon — the desktop entry's, and macos-icon.svg, the same scene on
                Apple's grid — and hand-written shell completions
 bin/           release, pkgbuild-sha which points the PKGBUILD and the formula at a
                published tag, bundle which wraps a built binary in Gamut.app — ad hoc
                for this Mac, --sign for any, --dev for one that never stands in for
                the installed program — macos-deps, which builds the static LibRaw a
-               signed bundle's binary links (GAMUT_LIBRAW_PREFIX), and icon, which
+               signed bundle's binary links (GAMUT_LIBRAW_PREFIX), notarize, which
+               has Apple notarize a signed bundle and zips it, and icon, which
                draws packaging/'s icon from a model of its scene's light
 vendor/        crates built from a copy here rather than from crates.io, each through
                Cargo.toml's [patch.crates-io], which says why and until when, and

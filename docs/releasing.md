@@ -1,17 +1,17 @@
 # Releasing
 
 A release is a tag. `bin/release` makes it, `git push` publishes it, and
-`bin/pkgbuild-sha` points the packages at it afterwards. Nothing else is
-built or uploaded: the `Release` workflow in
-[`.github/workflows/release.yml`](../.github/workflows/release.yml) turns
-the tag into a GitHub release with generated notes, and the point of that
-release is its source tarball, which is what
+`bin/pkgbuild-sha` points the packages at it afterwards. The `Release`
+workflow in [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+turns the tag into a GitHub release with generated notes, and attaches one
+thing to it: the Mac application, signed and notarized (see
+[The Mac application](#the-mac-application)). The rest of what the release
+is for is its source tarball, which is what
 [`packaging/PKGBUILD`](../packaging/PKGBUILD) names in `source=`, and
 [`packaging/gamut.rb`](../packaging/gamut.rb), the Homebrew formula, in
 `url`. Omarchy builds the package from that tarball in an Arch container
-and signs the result itself, and Homebrew builds the formula from the same
-tarball on the Mac it installs to, so no binary is attached — there is
-nothing a binary could be for that the tarball is not.
+and signs the result itself, and the formula builds from the same tarball
+on the Mac it installs to.
 
 ## Before
 
@@ -118,9 +118,10 @@ tarball, so the same checksum goes into its `sha256`.
 
 ## The tap
 
-Homebrew reads a formula from a tap, a repository of its own that
-`brew install dcervelli/gamut/gamut` finds by name: `dcervelli/gamut` is
-short for `github.com/dcervelli/homebrew-gamut`. The formula is edited here,
+Homebrew reads a formula or a cask from a tap, a repository of its own
+that `brew install dcervelli/gamut/gamut` finds by name: `dcervelli/gamut`
+is short for `github.com/dcervelli/homebrew-gamut`. The cask is kept and
+copied the same way as the formula below, into the tap's `Casks/`. The formula is edited here,
 beside the PKGBUILD, where the release scripts and the tests reach it, and
 the tap holds a copy. `bin/pkgbuild-sha` makes the copy, into
 `../homebrew-gamut` or wherever `GAMUT_TAP` names, once the formula points at
@@ -136,6 +137,46 @@ The copy replaces the tap's file whole, so a bottle block the tap's
 `brew pr-pull` workflow added for the previous version goes with it, as it
 should: a bottle is for one version. The tap's README says how bottles are
 built and published.
+
+## The Mac application
+
+The workflow's `macos` job, on a `macos-15` runner once the release
+exists, builds what `brew install --cask gamut` installs: the binary
+linked against the static LibRaw `bin/macos-deps` builds — cached by the
+script's checksum, so the libraries are built once a version of it —
+bundled and signed by `bin/bundle --sign` with the Developer ID, notarized
+and stapled by `bin/notarize`, and attached to the release as
+`Gamut-X.Y.Z-arm64.zip`. [macOS](macos.md#the-bundle) says what the bundle
+holds and why it is built that way.
+
+It reads five secrets: `MACOS_CERT_P12` and `MACOS_CERT_PASSWORD`, the
+Developer ID certificate with its private key, exported as a `.p12`, in
+base64, and its password; and `ASC_KEY_P8`, `ASC_KEY_ID` and
+`ASC_ISSUER_ID`, an App Store Connect API key with the Developer role, in
+base64, which the notary service is asked with. The certificate goes into a
+keychain of the job's own, with Apple's Developer ID G2 intermediate beside
+it, and the keychain and the key are deleted however the job ends. The
+identity it signs with is named in the workflow; it is not secret.
+
+The zip takes several minutes after the tag to appear, so the cask is
+pointed at it by running `bin/pkgbuild-sha vX.Y.Z` again once the job is
+done: it fills in the zip's checksum in
+[`packaging/cask.rb`](../packaging/cask.rb), whose version `bin/release`
+already set, and copies the cask into the tap as `Casks/gamut.rb`. A run
+before the zip exists points the formula and says the cask is still to do.
+
+A signed bundle is tried before a tag by building and signing it locally,
+with the certificate in the login keychain and the notary's key saved as a
+keychain profile by `xcrun notarytool store-credentials`:
+
+```sh
+bin/macos-deps
+MACOSX_DEPLOYMENT_TARGET=15.0 GAMUT_LIBRAW_PREFIX=$PWD/target/macos-deps \
+    cargo build --release
+bin/bundle --sign "Developer ID Application: Daniel Cervelli (7732KLZN92)" \
+    target/release/gamut dist
+NOTARY_PROFILE=gamut bin/notarize dist/Gamut.app dist/Gamut.zip
+```
 
 ## What guards it
 
