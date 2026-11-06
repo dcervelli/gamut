@@ -344,7 +344,8 @@ image/         the data model, nothing GPU
                  ramps the image layer writes its texture from
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
                  dynamic.rs the shared DynamicImage bridge; heif/tmap.rs reads ISO 21496-1's gain-map item and
-                 heif/apple.rs Apple's maker note; raw/ffi.rs LibRaw's C interface by hand and raw/shim.c
+                 heif/apple.rs Apple's maker note; heif/imageio.rs (macOS tests) the same files read through
+                 ImageIO and compared, GAMUT_HEIF_CORPUS naming real ones; raw/ffi.rs LibRaw's C interface by hand and raw/shim.c
                  the three accessors it lacks, compiled against the library's header by build.rs;
                  raw/linear.rs develops a Linear Raw DNG — an iPhone's ProRAW, from its JPEG XL or
                  lossless JPEG tiles decoded here, a thread to a tile, or from what LibRaw unpacks

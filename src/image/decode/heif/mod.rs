@@ -46,6 +46,8 @@ use crate::image::xmp::Xmp;
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 mod apple;
+#[cfg(all(test, target_os = "macos"))]
+mod imageio;
 mod tmap;
 
 /// `libheif`'s global initialization, done once.

@@ -439,6 +439,53 @@ buffer on one thread, which is a few percent of the whole.
 is a property of the format rather than a choice made here; the formats that
 keep the tag beside the pixels are turned by [`image::orient`](#orientation).
 
+`libheif` 1.23's `clap` is wrong where the crop starts on an odd row or
+column of a 4:2:0 picture: the crop lands in the right place but its color
+does not. AOM's `kimono.crop.avif`, whose crop starts at row 39, decodes
+15.8 codes on average from the reference PNG beside it, where the same file
+uncropped decodes 3.2 from its own; `heif-dec` gives the same, so the fault
+is the library's and is in the Linux build as it stands.
+
+### ImageIO beside it
+
+On a Mac the system's own ImageIO reads HEIC and AVIF too, and
+`decode/heif/imageio.rs` decodes the same files both ways and compares
+them: the turned size, the layout, the color space, every sample, the gain
+map's codes, the depth map, and the time each takes. The fixtures are
+always compared; `GAMUT_HEIF_CORPUS` names real files to compare as well.
+Run over 122 iPhone photographs and the HEIF and AVIF conformance and test
+collections (Nokia's `heif_conformance`, AOM's `av1-avif/testFiles`,
+heic.fyi's samples), it found:
+
+- The size, the turn, the color space, the gain map's codes and the depth
+  map agree wherever both read the file — the gain maps byte for byte, the
+  depth maps with a correlation of 1.0000. ImageIO hands depth over as
+  disparity already in the units of the scale `libheif`'s XMP gives.
+- The samples of a phone's photograph differ by a third of a code on
+  average, at most 0.84, along edges where the two reconstruct 4:2:0 chroma
+  differently. Lossless files agree exactly.
+- Where a file leaves its matrix coefficients unspecified, or carries no
+  `colr` at all, the two assume different defaults, which is a few codes
+  apart on a Nokia file and seven to ten on some of Microsoft's AVIFs.
+  Neither is wrong: the file does not say.
+- ImageIO crops correctly where `libheif` does not (above), and opens image
+  sequences, predictively coded items and an AVC layer that `libheif`
+  refuses.
+- ImageIO decodes nothing, while reporting a complete image, for a gray
+  picture with an alpha plane (`heic-gray-alpha8.heic`), one iPhone
+  photograph out of 122 (an iPhone 15 on iOS 18.0.1), and two of Nokia's
+  files (C034, an image with EXIF; C046, a burst). `sips` fails on each of
+  them as well.
+- ImageIO gives a gray picture back as RGB, a 10-bit one as three 10-bit
+  components packed into a 32-bit word, a turn as an EXIF orientation
+  beside unturned pixels, and an HDR space by its name, where its ICC
+  profile reads as sRGB to `color::icc`.
+- ImageIO is about 1.65 times as fast on a phone's photograph and 1.5 on
+  the AVIFs, its decode and copy against `Heif::decode` whole.
+
+No camera's own HEIF — a Canon, Sony or Fujifilm `.HIF`, 10-bit and often
+HLG at 4:2:2 — has been through it yet.
+
 ## Camera raw
 
 A raw file is the sensor's counts, one color per photosite under the
