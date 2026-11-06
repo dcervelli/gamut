@@ -12,7 +12,9 @@
 
 use crate::image::apple_note;
 
-/// The auxiliary type of the map.
+/// The auxiliary type of the map, which `libheif` finds the map by; ImageIO
+/// finds it itself.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(super) const GAIN_MAP: &str = "urn:com:apple:photo:2020:aux:hdrgainmap";
 
 /// The headroom the maker note describes, from the EXIF block a HEIF

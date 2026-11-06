@@ -4,7 +4,7 @@
 | --- | --- |
 | PNG, JPEG, GIF, Radiance HDR, OpenEXR, BMP, netpbm | [`image`](https://crates.io/crates/image) |
 | TIFF | [`tiff`](https://crates.io/crates/tiff) directly |
-| HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif` |
+| HEIF — HEIC, AVIF | [`libheif-rs`](https://crates.io/crates/libheif-rs), onto the system `libheif`; on a Mac, ImageIO, bound by hand in `decode/heif/macos.rs` |
 | Camera raw — DNG, NEF, CR2, CR3, ARW, RAF, ORF, RW2, PEF and the rest | `decode::raw::ffi`, a hand-written binding onto the system LibRaw |
 | WebP — lossy, lossless, animated | [`image-webp`](https://crates.io/crates/image-webp) directly |
 | GIF's frame count and loop extension | [`gif`](https://crates.io/crates/gif), which `image` already carries |
@@ -395,12 +395,19 @@ upsample it.
 
 ## HEIF
 
-The only decoder that is not pure Rust, because there is no usable pure-Rust
-HEVC decoder to bind to instead. `libheif` also gets AVIF and whatever else
-its plugins can open for free, since HEIC and AVIF differ only in the codec
-inside the same container.
+Not pure Rust, because there is no usable pure-Rust HEVC decoder to bind to
+instead, and read through a different library on each platform:
+`decode/heif/libheif.rs` everywhere but the Mac, `decode/heif/macos.rs` on a
+Mac. Both get AVIF along with HEIC, since the two differ only in the codec
+inside the same container, and both hand back the same `DecodedImage`.
 
-It is the system's `libheif`, and it has to be 1.23 or newer: the binding is
+What neither library says is read from the file's own item tables by
+`decode/heif/items.rs`, which walks `meta`: the ISO 21496-1 `tmap` item
+everywhere, and on a Mac the picture's size once cropped and turned, its
+`colr`, its `pixi` channels, its EXIF and XMP items and its depth image's
+XMP as well.
+
+Elsewhere it is the system's `libheif`, and it has to be 1.23 or newer: the binding is
 built against the `v1_23` security-limits ABI, so an older library is a link
 error rather than a degraded build. Which codecs then work is a property of
 that installation's plugins and not of this tree — HEVC wants libde265 or
@@ -439,6 +446,19 @@ buffer on one thread, which is a few percent of the whole.
 is a property of the format rather than a choice made here; the formats that
 keep the tag beside the pixels are turned by [`image::orient`](#orientation).
 
+On a Mac the pixels are ImageIO's instead, Apple's own decoder with Apple's
+codecs, so that neither `libheif` nor an HEVC or AV1 codec has to travel in
+the bundle — see [macOS](macos.md#the-bundle). ImageIO hands its pixels
+over in shapes of its own, which `macos.rs` undoes: the picture as stored
+with an EXIF orientation beside it, which `image::orient` then applies; a
+10-bit picture as three 10-bit components packed into a 32-bit word,
+lifted to 16 bits as `libheif`'s are; a gray picture as RGB, taken back to
+one channel where `pixi` says the file holds one; and a depth map as
+disparity already scaled, turned back into the codes the file stored by
+the same line its XMP's scale draws, so that the readout reads it as it
+reads `libheif`'s. The color is the tables' `colr`, read as `libheif` reads
+it, and only where a file has no tables at all ImageIO's own color space.
+
 `libheif` 1.23's `clap` is wrong where the crop starts on an odd row or
 column of a 4:2:0 picture: the crop lands in the right place but its color
 does not. AOM's `kimono.crop.avif`, whose crop starts at row 39, decodes
@@ -446,21 +466,23 @@ does not. AOM's `kimono.crop.avif`, whose crop starts at row 39, decodes
 uncropped decodes 3.2 from its own; `heif-dec` gives the same, so the fault
 is the library's and is in the Linux build as it stands.
 
-### ImageIO beside it
+### The two readers held to each other
 
-On a Mac the system's own ImageIO reads HEIC and AVIF too, and
-`decode/heif/imageio.rs` decodes the same files both ways and compares
-them: the turned size, the layout, the color space, every sample, the gain
-map's codes, the depth map, and the time each takes. The fixtures are
-always compared; `GAMUT_HEIF_CORPUS` names real files to compare as well.
-Run over 122 iPhone photographs and the HEIF and AVIF conformance and test
-collections (Nokia's `heif_conformance`, AOM's `av1-avif/testFiles`,
-heic.fyi's samples), it found:
+`decode/heif/imageio.rs` decodes each file through both readers on a Mac,
+where `libheif` is built for the tests alone, and compares the two
+`DecodedImage`s: the size, the layout, the color space, every sample, the
+gain map, the depth map, what `dimensions` and `xmp` say without decoding,
+and the time each takes. The fixtures are always compared;
+`GAMUT_HEIF_CORPUS` names real files to compare as well, and where a file
+comes with the picture it should decode to beside it, as AOM's Link-U
+files do, each reader is scored against that instead. Run over 122 iPhone
+photographs and the HEIF and AVIF conformance and test collections
+(Nokia's `heif_conformance`, AOM's `av1-avif/testFiles`, heic.fyi's
+samples), it finds:
 
-- The size, the turn, the color space, the gain map's codes and the depth
-  map agree wherever both read the file — the gain maps byte for byte, the
-  depth maps with a correlation of 1.0000. ImageIO hands depth over as
-  disparity already in the units of the scale `libheif`'s XMP gives.
+- The size, the turn, the color space, the gain map and the depth map
+  agree wherever both read the file — the gain maps byte for byte, the
+  depth maps to within a code — and so do the XMP packets.
 - The samples of a phone's photograph differ by a third of a code on
   average, at most 0.84, along edges where the two reconstruct 4:2:0 chroma
   differently. Lossless files agree exactly.
@@ -468,23 +490,21 @@ heic.fyi's samples), it found:
   `colr` at all, the two assume different defaults, which is a few codes
   apart on a Nokia file and seven to ten on some of Microsoft's AVIFs.
   Neither is wrong: the file does not say.
-- ImageIO crops correctly where `libheif` does not (above), and opens image
-  sequences, predictively coded items and an AVC layer that `libheif`
-  refuses.
+- ImageIO crops correctly where `libheif` does not (above).
 - ImageIO decodes nothing, while reporting a complete image, for a gray
   picture with an alpha plane (`heic-gray-alpha8.heic`), one iPhone
-  photograph out of 122 (an iPhone 15 on iOS 18.0.1), and two of Nokia's
+  photograph of the 122 (an iPhone 15 on iOS 18.0.1), and two of Nokia's
   files (C034, an image with EXIF; C046, a burst). `sips` fails on each of
-  them as well.
-- ImageIO gives a gray picture back as RGB, a 10-bit one as three 10-bit
-  components packed into a 32-bit word, a turn as an EXIF orientation
-  beside unturned pixels, and an HDR space by its name, where its ICC
-  profile reads as sRGB to `color::icc`.
-- ImageIO is about 1.65 times as fast on a phone's photograph and 1.5 on
-  the AVIFs, its decode and copy against `Heif::decode` whole.
-
-No camera's own HEIF — a Canon, Sony or Fujifilm `.HIF`, 10-bit and often
-HLG at 4:2:2 — has been through it yet.
+  them as well. The Mac refuses them, where a blank picture would say
+  nothing; `fixture_tests.rs` leaves the gray one out on a Mac for that
+  reason, and `imageio.rs` holds the Mac to refusing it.
+- In a file holding more than one picture, ImageIO's primary image is not
+  always the file's: Nokia's C005 and C040 open at another image's size,
+  and a Netflix AVIF carrying a still and a sequence opens on the sequence,
+  at 8 bits rather than 10.
+- ImageIO is about 1.2 times as fast over the whole collection, and 1.65
+  on a phone's photograph. No camera's own HEIF — a Canon, Sony or
+  Fujifilm `.HIF`, 10-bit and often HLG at 4:2:2 — has been through it yet.
 
 ## Camera raw
 

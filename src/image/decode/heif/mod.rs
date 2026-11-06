@@ -1,422 +1,66 @@
-//! HEIF and the codecs that ride in it: HEIC (HEVC), AVIF (AV1), and the rest
-//! of what the installed `libheif` plugins can open.
+//! HEIF and the codecs that ride in it: HEIC (HEVC), AVIF (AV1), and the
+//! rest of what the platform's reader can open.
 //!
-//! There is no usable pure-Rust HEVC decoder, so this one binds to the system
-//! `libheif`. What is left to do here is the part `libheif` deliberately does
-//! not do: say what the numbers mean. A HEIF file states its color space in
-//! CICP codes (H.273) rather than by convention, so unlike PNG or TIFF this
-//! decoder is *told* the transfer function and the primaries, and passes them
-//! on rather than guessing. That is how a Display P3 phone photograph and a
-//! BT.2100 PQ frame end up in the right working space without a flag.
+//! There is no usable pure-Rust HEVC decoder, so the pixels come from the
+//! platform: the system `libheif` everywhere but the Mac (`libheif.rs`), and
+//! on a Mac the system's own ImageIO (`macos.rs`), which decodes with
+//! Apple's codecs and leaves nothing to bundle. Both hand back the same
+//! [`DecodedImage`](crate::image::DecodedImage) — the picture upright, at
+//! its own depth and channels, in the color space the file states — and
+//! `imageio`'s tests hold the two to each other over the fixtures and any
+//! real files named to them.
 //!
-//! Depth is preserved: a 10- or 12-bit file comes back as `U16` rather than
-//! being flattened to bytes, and a monochrome file stays one channel all the
-//! way to the GPU rather than being tripled into RGB.
-//!
-//! `libheif` applies the container's own geometric transformations — `irot`,
-//! `imir`, `clap` — while decoding, so a rotated phone photograph arrives
-//! upright.
+//! A HEIF file states its color space in CICP codes (H.273) rather than by
+//! convention, so unlike PNG or TIFF the decoder is *told* the transfer
+//! function and the primaries, and passes them on rather than guessing.
 //!
 //! An iPhone's HEIC is two pictures: the graded SDR photograph, and a gain
 //! map beside it saying how far above SDR white each pixel went. The map is
 //! described twice in a file from iOS 18 on — by an ISO 21496-1 `tmap` item
-//! that `tmap` reads, and by Apple's own auxiliary image and maker note
-//! that `apple` reads — and once, Apple's way, in an older one. Either way
-//! the map is decoded through `libheif` like any other image in the file
-//! and goes with the picture as [`crate::image::gain_map`] describes, the
-//! same as an Ultra HDR JPEG's, for the display to apply.
+//! that [`tmap`] reads, and by Apple's own auxiliary image and maker note
+//! that [`apple`] reads — and once, Apple's way, in an older one. Either way
+//! the map goes with the picture as [`crate::image::gain_map`] describes,
+//! the same as an Ultra HDR JPEG's, for the display to apply.
 //!
 //! A portrait may carry a depth map as well: another auxiliary image, of
-//! the type MPEG gives depth, decoded the same way and carried beside the
-//! picture for the readout under the pointer, with its own XMP saying what
-//! its codes stand for — see [`crate::image::depth`].
-
-use std::io::SeekFrom;
-use std::sync::{Arc, OnceLock};
-
-use anyhow::{Context, Result, anyhow, bail};
-use libheif_rs::{
-    ColorSpace as HeifColorSpace, HeifContext, ImageHandle, LibHeif, Plane, RgbChroma,
-    SecurityLimits, StreamReader,
-};
-
-use crate::image::depth::{self, DepthMap};
-use crate::image::gain_map::{GainMap, Lift};
-use crate::image::xmp::Xmp;
-use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
+//! the type MPEG gives depth, carried beside the picture for the readout
+//! under the pointer, with its own XMP saying what its codes stand for —
+//! see [`crate::image::depth`].
+//!
+//! [`items`] reads the file's item tables by walking the boxes, for what
+//! neither library says: the `tmap` item everywhere, and on a Mac the size,
+//! the color, the channels and the EXIF and XMP payloads as well.
 
 mod apple;
 #[cfg(all(test, target_os = "macos"))]
 mod imageio;
+mod items;
+#[cfg(any(not(target_os = "macos"), test))]
+mod libheif;
+#[cfg(target_os = "macos")]
+mod macos;
 mod tmap;
 
-/// `libheif`'s global initialization, done once.
-///
-/// `LibHeif::drop` calls `heif_deinit`, which unloads the codec plugins; doing
-/// that per image would rescan the plugin directory every time the user
-/// pressed `]`. The guard is deliberately never dropped.
-fn lib_heif() -> &'static LibHeif {
-    static LIB: OnceLock<LibHeif> = OnceLock::new();
-    LIB.get_or_init(LibHeif::new)
-}
-
-pub struct Heif;
-
-/// Reads the container's structure — its boxes, not its pixels — which is
-/// enough to ask what the image is before deciding to decode it.
-fn container<'a>(source: &'a mut dyn super::ReadSeek) -> Result<HeifContext<'a>> {
-    let length = source.seek(SeekFrom::End(0))?;
-    source.seek(SeekFrom::Start(0))?;
-
-    // Raise the stock limits to the same ceiling the other decoders use, so
-    // one format is not quietly stricter than another.
-    let mut limits = SecurityLimits::new();
-    limits.set_max_image_size_pixels(MAX_PIXELS);
-    limits.set_max_memory_block_size(super::MAX_DECODED_BYTES);
-    limits.set_max_total_memory(super::MAX_DECODED_BYTES);
-
-    let mut context = HeifContext::new()?;
-    context.set_security_limits(&limits)?;
-    // A phone's HEIC is a grid of tiles — an iPhone's 24-megapixel frame is
-    // 45 of them — and `libheif` decodes the tiles on a pool of its own,
-    // four threads deep unless told otherwise. On this machine's core count
-    // the same photograph decodes in half the time. A single-tile file,
-    // which is what an AVIF usually is, is unaffected: the parallelism
-    // there is the codec's own.
-    context.set_max_decoding_threads(
-        std::thread::available_parallelism().map_or(4, |threads| threads.get() as u32),
-    );
-    context.read_reader(Box::new(StreamReader::new(source, length)))?;
-    Ok(context)
-}
-
-impl super::Decoder for Heif {
-    fn name(&self) -> &'static str {
-        "heif/heic/avif"
-    }
-
-    /// The XMP packet the file's primary image carries, if it carries one: a
-    /// `mime` item of the packet's content type, which is where the container
-    /// keeps it. Read through `libheif` rather than by walking the boxes, since
-    /// an item is reached through the container's item tables rather than found
-    /// at the top level, and the library already reads those. The file is opened
-    /// as far as its structure and no further: nothing is decoded.
-    fn xmp(&self, source: &mut dyn super::ReadSeek) -> Result<Option<Vec<u8>>> {
-        lib_heif();
-        let handle = container(source)?.primary_image_handle()?;
-        Ok(xmp_of(&handle))
-    }
-
-    fn extensions(&self) -> &'static [&'static str] {
-        &["heic", "heif", "hif", "avif"]
-    }
-
-    fn sniff(&self, header: &[u8]) -> bool {
-        is_heif(header)
-    }
-
-    /// Which of the three, by the brands the `ftyp` box names: an AVIF
-    /// names `avif` or `avis` among them, a HEIC one of HEVC's, and a
-    /// file that names neither is the container itself.
-    fn format(&self, header: &[u8]) -> &'static str {
-        brand(header).unwrap_or_else(|| self.name())
-    }
-
-    fn dimensions(&self, source: &mut dyn super::ReadSeek) -> Result<Option<(u32, u32)>> {
-        // The handle's size is the size after any rotation the container asks
-        // for — `libheif` accounts for that itself, which is why nothing here
-        // has to swap anything the way the WebP decoder does.
-        let handle = container(source)?.primary_image_handle()?;
-        Ok(Some((handle.width(), handle.height())))
-    }
-
-    fn decode(
-        &self,
-        source: &mut dyn super::ReadSeek,
-        overrides: super::Overrides,
-    ) -> Result<DecodedImage> {
-        // Before the context, so that any external codec plugins are loaded
-        // by the time one is asked for.
-        let lib = lib_heif();
-
-        // Looked for before the context takes the source, since the walk is
-        // over the file's own boxes rather than through the library.
-        let tone_map = if overrides.gain_map {
-            tmap::find(source)?
-        } else {
-            None
-        };
-        let context = container(source)?;
-        let handle = context.primary_image_handle()?;
-        let (width, height) = (handle.width(), handle.height());
-        // Caught here rather than by `DecodedImage::validate`, because the
-        // row arithmetic below runs first and would underflow on a zero.
-        if width == 0 || height == 0 {
-            bail!("HEIF image is {width}x{height}");
-        }
-
-        // Bit depth of the luma (or the sole gray) channel: 8 for an ordinary
-        // photograph, 10 or 12 for HDR. `libheif` reports -1 for a handle it
-        // cannot make sense of, which arrives here as 255.
-        let depth = handle.luma_bits_per_pixel();
-        if !(1..=16).contains(&depth) {
-            bail!("HEIF image reports {depth} bits per channel");
-        }
-        let wide = depth > 8;
-
-        let monochrome = matches!(
-            handle.preferred_decoding_colorspace(),
-            Ok(HeifColorSpace::Monochrome)
-        );
-        let channels = match (monochrome, handle.has_alpha_channel()) {
-            (true, false) => Channels::Gray,
-            (true, true) => Channels::GrayAlpha,
-            (false, false) => Channels::Rgb,
-            (false, true) => Channels::Rgba,
-        };
-
-        super::check_decoded_size(width, height, channels.count(), if wide { 16 } else { 8 })?;
-
-        let requested = requested_color_space(channels, wide);
-        let image = lib.decode(&handle, requested, None)?;
-        if (image.width(), image.height()) != (width, height) {
-            // A grid or derived image whose handle and pixels disagree would
-            // otherwise read past the end of the buffer downstream.
-            bail!(
-                "HEIF handle says {width}x{height} but the decoded image is {}x{}",
-                image.width(),
-                image.height()
-            );
-        }
-
-        let planes = image.planes();
-        let samples = if monochrome {
-            let gray = planes
-                .y
-                .ok_or_else(|| anyhow!("monochrome HEIF image decoded without a gray plane"))?;
-            match channels {
-                Channels::GrayAlpha => {
-                    let alpha = planes.a.ok_or_else(|| {
-                        anyhow!("HEIF image claims an alpha channel but decoded without one")
-                    })?;
-                    interleave_planes(&[gray, alpha], width, height)?
-                }
-                _ => interleave_planes(&[gray], width, height)?,
-            }
-        } else {
-            let interleaved = planes
-                .interleaved
-                .ok_or_else(|| anyhow!("HEIF image decoded without an interleaved plane"))?;
-            pack_interleaved(&interleaved, width, height, channels)?
-        };
-
-        let mut image = DecodedImage::new(
-            width,
-            height,
-            samples,
-            color_space(&handle),
-            AlphaMode::of(channels, handle.is_premultiplied_alpha()),
-        );
-        // The lift is the display's to apply; the map goes with the picture.
-        if overrides.gain_map && channels == Channels::Rgb && !wide {
-            image.gain_map = gain_map(lib, &context, &handle, tone_map)?;
-        }
-        // A depth map that will not decode costs the readout its depth and
-        // nothing else, so it is let go rather than refusing the picture.
-        image.depth = depth_map(lib, &handle).ok().flatten();
-        Ok(image)
-    }
-}
-
-/// The picture's depth map, where it has one: the auxiliary image MPEG's
-/// type names as depth, which `libheif` finds by that type and hands back
-/// as a monochrome image at its own size. What its codes stand for is in
-/// the XMP packet the depth image carries of its own, in its vendor's
-/// words — an iPhone's portrait writes one — and where there is none, or
-/// none [`depth::scale`] knows, they are kept as codes.
-fn depth_map(lib: &LibHeif, handle: &ImageHandle) -> Result<Option<Arc<DepthMap>>> {
-    if !handle.has_depth_image() {
-        return Ok(None);
-    }
-    let mut ids = [0; 1];
-    if handle.depth_image_ids(&mut ids) == 0 {
-        return Ok(None);
-    }
-    let map = handle.depth_image_handle(ids[0])?;
-    let (width, height) = (map.width(), map.height());
-    if width == 0 || height == 0 {
-        bail!("the depth map is {width}x{height}");
-    }
-    let bits = map.luma_bits_per_pixel();
-    if !(1..=16).contains(&bits) {
-        bail!("the depth map reports {bits} bits per sample");
-    }
-    super::check_decoded_size(width, height, 1, if bits > 8 { 16 } else { 8 })?;
-    let image = lib
-        .decode(&map, HeifColorSpace::Monochrome, None)
-        .context("decoding the depth map")?;
-    if (image.width(), image.height()) != (width, height) {
-        bail!(
-            "the depth map's handle says {width}x{height} but it decoded to {}x{}",
-            image.width(),
-            image.height()
-        );
-    }
-    let gray = image
-        .planes()
-        .y
-        .ok_or_else(|| anyhow!("the depth map decoded without a gray plane"))?;
-    Ok(Some(Arc::new(DepthMap {
-        width,
-        height,
-        samples: interleave_planes(&[gray], width, height)?,
-        scale: xmp_of(&map)
-            .and_then(|packet| Xmp::parse(&packet))
-            .and_then(|xmp| depth::scale(&xmp)),
-    })))
-}
-
-/// The picture's gain map, where the file has one this reader can apply:
-/// an ISO 21496-1 tone map whose base is this picture, or Apple's auxiliary
-/// image with a maker note to say how far it lifts. `None` where it has
-/// neither, and the SDR picture stands on its own.
-fn gain_map(
-    lib: &LibHeif,
-    context: &HeifContext,
-    handle: &ImageHandle,
-    tone_map: Option<tmap::ToneMap>,
-) -> Result<Option<Arc<GainMap>>> {
-    let (map_handle, lift) = if let Some(tone_map) = tone_map {
-        if tone_map.base != handle.item_id() {
-            return Ok(None);
-        }
-        // v1.1 allows the stored image to be the HDR one, with the map
-        // saying how to get *down* to SDR. Nothing below implements that
-        // direction, and quietly brightening an image that is already
-        // bright would be worse than saying so.
-        if tone_map.metadata.backward_direction {
-            bail!(
-                "gain map runs the other way (the base image is the HDR one), \
-                 which this build cannot apply — try --no-gain-map"
-            );
-        }
-        let map_handle = context
-            .image_handle(tone_map.gain_map)
-            .context("opening the gain map")?;
-        (map_handle, Lift::Iso(tone_map.metadata))
-    } else {
-        let Some(map_handle) = handle
-            .auxiliary_images(None)
-            .into_iter()
-            .find(|aux| aux.auxiliary_type().ok().as_deref() == Some(apple::GAIN_MAP))
-        else {
-            return Ok(None);
-        };
-        let Some(headroom) = handle
-            .all_metadata()
-            .into_iter()
-            .find(|metadata| metadata.item_type.0 == *b"Exif")
-            .and_then(|exif| apple::headroom(&exif.raw_data))
-        else {
-            return Ok(None);
-        };
-        (map_handle, Lift::Apple { headroom })
-    };
-    let (width, height, channels, data) = decode_map(lib, &map_handle)?;
-    Ok(Some(Arc::new(GainMap {
-        width,
-        height,
-        channels,
-        data: crate::image::gain_map::Data::Codes(data),
-        lift,
-    })))
-}
-
-/// The gain map decoded: 8-bit, one channel or three, at its own size.
-fn decode_map(lib: &LibHeif, handle: &ImageHandle) -> Result<(u32, u32, u8, Vec<u8>)> {
-    let (width, height) = (handle.width(), handle.height());
-    // A zero dimension is refused outright: the taps would otherwise
-    // compute `width - 1` and index past the end of an empty buffer.
-    if width == 0 || height == 0 {
-        bail!("the gain map is {width}x{height}");
-    }
-    let depth = handle.luma_bits_per_pixel();
-    if depth != 8 {
-        bail!("the gain map is {depth}-bit, which this build cannot apply — try --no-gain-map");
-    }
-    let monochrome = matches!(
-        handle.preferred_decoding_colorspace(),
-        Ok(HeifColorSpace::Monochrome)
-    );
-    let channels = if monochrome {
-        Channels::Gray
-    } else {
-        Channels::Rgb
-    };
-    super::check_decoded_size(width, height, channels.count(), 8)?;
-    let image = lib
-        .decode(handle, requested_color_space(channels, false), None)
-        .context("decoding the gain map")?;
-    if (image.width(), image.height()) != (width, height) {
-        bail!(
-            "the gain map's handle says {width}x{height} but it decoded to {}x{}",
-            image.width(),
-            image.height()
-        );
-    }
-    let planes = image.planes();
-    let samples = if monochrome {
-        let gray = planes
-            .y
-            .ok_or_else(|| anyhow!("the gain map decoded without a gray plane"))?;
-        interleave_planes(&[gray], width, height)?
-    } else {
-        let interleaved = planes
-            .interleaved
-            .ok_or_else(|| anyhow!("the gain map decoded without an interleaved plane"))?;
-        pack_interleaved(&interleaved, width, height, channels)?
-    };
-    let Samples::U8 { data, .. } = samples else {
-        bail!("an 8-bit gain map decoded to something wider");
-    };
-    Ok((width, height, channels.count() as u8, data))
-}
-
-/// The XMP packet an image of the file carries, if it carries one: a `mime`
-/// item of the packet's content type, which the container ties to the image
-/// it describes — the primary one, or an auxiliary one beside it.
-fn xmp_of(handle: &ImageHandle) -> Option<Vec<u8>> {
-    let mut ids = vec![0; handle.number_of_metadata_blocks(b"mime").max(0) as usize];
-    let count = handle.metadata_block_ids(&mut ids, b"mime");
-    ids.truncate(count);
-    ids.into_iter()
-        .find(|&id| handle.metadata_content_type(id) == Some("application/rdf+xml"))
-        .and_then(|id| handle.metadata(id).ok())
-}
+#[cfg(not(target_os = "macos"))]
+pub use libheif::Heif;
+#[cfg(target_os = "macos")]
+pub use macos::Heif;
 
 /// The pixel-count ceiling, on the same reasoning as `MAX_DECODED_BYTES`:
 /// `max_texture_dimension_2d` is 32768 on current hardware, so anything past
 /// 32768 x 32768 could not be displayed even in principle.
 const MAX_PIXELS: u64 = 32768 * 32768;
 
+/// The extensions both readers answer to.
+const EXTENSIONS: &[&str] = &["heic", "heif", "hif", "avif"];
+
 /// What the `ftyp` box's brands say the file is — its major brand and the
 /// compatible ones after it, since an AVIF's major brand may be the plain
 /// `mif1` with `avif` among the compatibles — or `None` for a box that is
 /// not there or names no brand this reads.
 fn brand(header: &[u8]) -> Option<&'static str> {
-    if header.get(4..8) != Some(b"ftyp") {
-        return None;
-    }
-    let size = u32::from_be_bytes(header.get(0..4)?.try_into().ok()?) as usize;
-    let end = size.min(header.len());
-    // The major brand at 8, the minor version at 12, the compatibles from 16.
-    let brands = std::iter::once(header.get(8..12)).chain(
-        (16..end.saturating_sub(3))
-            .step_by(4)
-            .map(|at| header.get(at..at + 4)),
-    );
     let mut heic = false;
-    for brand in brands.flatten() {
+    for brand in brands(header) {
         match brand {
             b"avif" | b"avis" => return Some("avif"),
             b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"hevm" | b"hevs" => {
@@ -428,410 +72,28 @@ fn brand(header: &[u8]) -> Option<&'static str> {
     heic.then_some("heic")
 }
 
-/// Is this the start of an ISO base media file whose brand says still image?
-///
-/// The brand list lives in `libheif` rather than here, so a format its plugins
-/// learn to open is recognized without this file changing. `MayBe` means the
-/// header did not reach the end of the brand list, which for a real HEIF is
-/// worth handing on: `decode` gives a better message than the registry's
-/// "unsupported image format" would.
-fn is_heif(header: &[u8]) -> bool {
-    use libheif_rs::FileTypeResult::*;
-    // The call reads a length prefix out of the buffer, so it needs enough of
-    // the `ftyp` box to be there at all.
-    if header.len() < 12 {
-        return false;
-    }
-    matches!(libheif_rs::check_file_type(header), Supported | MayBe)
-}
-
-/// What to ask `libheif` to hand back.
-///
-/// Gray stays gray — expanding a one-channel image to RGB would triple what
-/// the GPU has to hold for nothing. Anything above 8 bits comes back as
-/// little-endian 16-bit words; the `LE` in the name is the buffer's byte
-/// order, not the host's, so reading it explicitly keeps this correct on a
-/// big-endian machine.
-fn requested_color_space(channels: Channels, wide: bool) -> HeifColorSpace {
-    match (channels, wide) {
-        (Channels::Gray | Channels::GrayAlpha, _) => HeifColorSpace::Monochrome,
-        (Channels::Rgb, false) => HeifColorSpace::Rgb(RgbChroma::Rgb),
-        (Channels::Rgb, true) => HeifColorSpace::Rgb(RgbChroma::HdrRgbLe),
-        (Channels::Rgba, false) => HeifColorSpace::Rgb(RgbChroma::Rgba),
-        (Channels::Rgba, true) => HeifColorSpace::Rgb(RgbChroma::HdrRgbaLe),
-    }
-}
-
-/// Copies one row-strided plane per component into a tightly packed buffer.
-///
-/// Used for monochrome, where gray and alpha arrive as separate planes and
-/// have to be woven together; the interleaved case has its own path because
-/// its components are already adjacent. A plane on its own — gray with no
-/// alpha — is copied a row at a time.
-fn interleave_planes(planes: &[Plane<&[u8]>], width: u32, height: u32) -> Result<Samples> {
-    let channels = match planes.len() {
-        1 => Channels::Gray,
-        _ => Channels::GrayAlpha,
-    };
-    let count = planes.len();
-    let mut layouts = Vec::with_capacity(count);
-    for plane in planes {
-        layouts.push(Layout::of(plane, width, height, 1)?);
-    }
-    let wide = layouts.iter().any(|layout| layout.wide);
-    let (w, h) = (width as usize, height as usize);
-
-    if wide {
-        let mut data = vec![0u16; w * h * count];
-        for (component, (plane, layout)) in planes.iter().zip(&layouts).enumerate() {
-            let lookup = layout.lookup();
-            for y in 0..h {
-                let row = &plane.data[y * plane.stride..];
-                let out = &mut data[y * w * count..(y + 1) * w * count];
-                for (x, slot) in out.iter_mut().skip(component).step_by(count).enumerate() {
-                    *slot = layout.sample(lookup.as_deref(), row, x);
-                }
-            }
-        }
-        Ok(Samples::U16 { channels, data })
-    } else {
-        let mut data = vec![0u8; w * h * count];
-        for (component, plane) in planes.iter().enumerate() {
-            for y in 0..h {
-                let row = &plane.data[y * plane.stride..][..w];
-                let out = &mut data[y * w * count..(y + 1) * w * count];
-                if count == 1 {
-                    out.copy_from_slice(row);
-                } else {
-                    for (slot, value) in out.iter_mut().skip(component).step_by(count).zip(row) {
-                        *slot = *value;
-                    }
-                }
-            }
-        }
-        Ok(Samples::U8 { channels, data })
-    }
-}
-
-/// Drops the row padding from an already-interleaved plane, and lifts a 10- or
-/// 12-bit image up to the full 16-bit range the rest of the program expects.
-fn pack_interleaved(
-    plane: &Plane<&[u8]>,
-    width: u32,
-    height: u32,
-    channels: Channels,
-) -> Result<Samples> {
-    let count = channels.count();
-    let layout = Layout::of(plane, width, height, count)?;
-    let row_components = width as usize * count;
-
-    if layout.wide {
-        let lookup = layout.lookup();
-        let mut data = vec![0u16; row_components * height as usize];
-        for y in 0..height as usize {
-            let row = &plane.data[y * plane.stride..];
-            let out = &mut data[y * row_components..][..row_components];
-            for (component, slot) in out.iter_mut().enumerate() {
-                *slot = layout.sample(lookup.as_deref(), row, component);
-            }
-        }
-        Ok(Samples::U16 { channels, data })
-    } else {
-        let mut data = Vec::with_capacity(row_components * height as usize);
-        for y in 0..height as usize {
-            data.extend_from_slice(&plane.data[y * plane.stride..][..row_components]);
-        }
-        Ok(Samples::U8 { channels, data })
-    }
-}
-
-/// How one decoded plane is laid out in memory, and how to read a sample from
-/// it.
-///
-/// The two bit counts `libheif` reports mean different things and are easy to
-/// confuse: `bits_per_pixel` is the range one component occupies — 8, 10, 12 —
-/// while `storage_bits_per_pixel` counts the bits a whole pixel takes up, so
-/// an interleaved 8-bit RGBA plane reports 32. Reading the second where the
-/// first was meant makes every ordinary photograph look like HDR data.
-#[derive(Clone, Copy)]
-struct Layout {
-    /// Two bytes per component rather than one.
-    wide: bool,
-    scale: Scale,
-}
-
-impl Layout {
-    fn of(plane: &Plane<&[u8]>, width: u32, height: u32, components: usize) -> Result<Self> {
-        if plane.width < width || plane.height < height {
-            bail!(
-                "HEIF plane is {}x{}, smaller than the {width}x{height} image",
-                plane.width,
-                plane.height
-            );
-        }
-
-        // A narrow plane is copied a byte at a time and left unscaled, which
-        // is only right if the byte *is* the full range. Nothing HEIF can
-        // hold breaks that, but it is what the copy quietly assumes.
-        let wide = plane.bits_per_pixel > 8;
-        if !wide && plane.bits_per_pixel != 8 {
-            bail!("HEIF plane is {} bits in a byte", plane.bits_per_pixel);
-        }
-        let bytes_per_component = usize::from(wide) + 1;
-        let expected_storage = components * bytes_per_component * 8;
-        if usize::from(plane.storage_bits_per_pixel) != expected_storage {
-            bail!(
-                "HEIF plane stores {} bits per pixel, expected {expected_storage} for \
-                 {components} components of {} bits",
-                plane.storage_bits_per_pixel,
-                plane.bits_per_pixel,
-            );
-        }
-
-        let row_bytes = width as usize * components * bytes_per_component;
-        let needed = plane.stride * (height as usize - 1) + row_bytes;
-        if plane.stride < row_bytes || plane.data.len() < needed {
-            bail!(
-                "HEIF plane has a {}-byte stride and {} bytes, needs {row_bytes} per row \
-                 and {needed} in total",
-                plane.stride,
-                plane.data.len(),
-            );
-        }
-
-        Ok(Self {
-            wide,
-            scale: Scale::new(plane.bits_per_pixel),
-        })
-    }
-
-    /// [`Scale::to_full`] over every value the plane's depth can hold, so
-    /// that a plane is lifted by a lookup a sample rather than a division:
-    /// `None` for a 16-bit plane, whose values are already full range.
-    /// Built once for the plane, ahead of its rows.
-    fn lookup(&self) -> Option<Vec<u16>> {
-        self.scale.table()
-    }
-
-    /// Reads component `index` of a row as a full-range 16-bit value,
-    /// through the plane's `lookup`.
-    ///
-    /// A narrow plane widens on the way through, which is what a monochrome
-    /// image with 10-bit gray and an 8-bit alpha plane needs: the two arrive
-    /// at different widths and have to leave at the same one.
-    ///
-    /// The `LE` in `libheif`'s chroma names is the buffer's byte order, not
-    /// the host's, so the two bytes are combined explicitly rather than
-    /// transmuted.
-    fn sample(self, lookup: Option<&[u16]>, row: &[u8], index: usize) -> u16 {
-        let raw = if self.wide {
-            u16::from_le_bytes([row[index * 2], row[index * 2 + 1]])
-        } else {
-            u16::from(row[index])
-        };
-        match lookup {
-            Some(table) => table[usize::from(raw).min(table.len() - 1)],
-            None => raw,
-        }
-    }
-}
-
-/// Lifts a value stored in `bits` of a 16-bit word up to the full range.
-///
-/// A 10-bit sample is 0..1023 in a `u16`, and `Samples::full_scale` says a
-/// `U16` image's white is 65535. Left unscaled, a 10-bit photograph would
-/// display as a sixteenth of its intended brightness.
-#[derive(Clone, Copy)]
-struct Scale {
-    max: u32,
-}
-
-impl Scale {
-    fn new(bits: u8) -> Self {
-        let bits = bits.clamp(1, 16);
-        Self {
-            max: (1u32 << bits) - 1,
-        }
-    }
-
-    fn to_full(self, value: u16) -> u16 {
-        if self.max == u16::MAX as u32 {
-            return value;
-        }
-        let value = u32::from(value).min(self.max);
-        ((value * 65535 + self.max / 2) / self.max) as u16
-    }
-
-    /// [`Scale::to_full`] of every value up to the depth's own maximum, in
-    /// order — a value past it is the maximum's, as `to_full` clamps it —
-    /// or `None` where the depth is the full sixteen bits and there is
-    /// nothing to lift.
-    fn table(self) -> Option<Vec<u16>> {
-        (self.max != u32::from(u16::MAX)).then(|| {
-            (0..=self.max)
-                .map(|value| self.to_full(value as u16))
-                .collect()
-        })
-    }
-}
-
-/// What the file says its numbers mean.
-///
-/// HEIF states this outright rather than leaving it to convention, in one of
-/// two ways. `nclx` is the usual one and the more precise, being CICP codes
-/// that name a transfer function this program models exactly. Some cameras
-/// write an ICC profile instead, which says the same thing less directly, and
-/// is read only when there is no `nclx` to prefer.
-///
-/// A file carrying neither falls back to sRGB, which is what an untagged
-/// still image means by convention and what every other decoder here assumes.
-fn color_space(handle: &ImageHandle) -> ColorSpace {
-    let nclx = handle.color_profile_nclx().map(|nclx| {
-        (
-            code(nclx.color_primaries() as i32),
-            code(nclx.transfer_characteristics() as i32),
-        )
-    });
-    // Asked for only where there is no `nclx` to prefer, as before: the
-    // profile is copied out of the handle on the way.
-    let profile = if nclx.is_none() {
-        handle.color_profile_raw()
-    } else {
-        None
-    };
-    ColorSpace::stated(
-        nclx,
-        profile.as_ref().map(|profile| profile.data.as_slice()),
+/// The brands an `ftyp` box at the head of `header` names, major first,
+/// as far as the header reaches. Nothing for a header that is not one.
+fn brands(header: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let size = (header.get(4..8) == Some(b"ftyp"))
+        .then(|| header.get(0..4))
+        .flatten()
+        .and_then(|size| size.try_into().ok())
+        .map_or(0, |size: [u8; 4]| u32::from_be_bytes(size) as usize);
+    let end = size.min(header.len());
+    // The major brand at 8, the minor version at 12, the compatibles from 16.
+    let major = (end >= 12).then(|| header.get(8..12)).flatten();
+    major.into_iter().chain(
+        (16..end.saturating_sub(3))
+            .step_by(4)
+            .filter_map(move |at| header.get(at..at + 4)),
     )
-}
-
-/// `libheif-rs` gives back C enums whose discriminants are the CICP code
-/// points themselves, except for the `Unknown` variant it invents when
-/// `libheif` reports a number it does not know. That one has no code point,
-/// so it becomes the one H.273 reserves for saying nothing.
-fn code(discriminant: i32) -> u8 {
-    u8::try_from(discriminant).unwrap_or(crate::image::color::cicp::UNSPECIFIED)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::image::decode::Decoder;
-
-    use libheif_rs::{ColorPrimaries, TransferCharacteristics};
-
-    #[test]
-    fn ten_bit_white_reaches_full_scale() {
-        let scale = Scale::new(10);
-        assert_eq!(scale.to_full(0), 0);
-        assert_eq!(scale.to_full(1023), u16::MAX);
-        // And mid gray stays mid gray rather than drifting a code value.
-        assert_eq!(scale.to_full(512), 32800);
-    }
-
-    #[test]
-    fn sixteen_bit_samples_pass_through_untouched() {
-        let scale = Scale::new(16);
-        for value in [0, 1, 12345, u16::MAX] {
-            assert_eq!(scale.to_full(value), value);
-        }
-    }
-
-    /// A sample wider than its declared depth is a broken file, not a reason
-    /// to hand the upload layer something over full scale.
-    #[test]
-    fn an_out_of_range_sample_is_clamped() {
-        assert_eq!(Scale::new(8).to_full(4000), u16::MAX);
-    }
-
-    /// The table a plane is lifted through is `to_full` at every value,
-    /// and a sample past the depth's maximum reads the maximum's entry.
-    #[test]
-    fn the_lookup_is_the_lift_at_every_value() {
-        for bits in [1, 8, 10, 12, 15] {
-            let scale = Scale::new(bits);
-            let table = scale.table().expect("a depth short of sixteen bits");
-            assert_eq!(table.len(), (1usize << bits), "{bits} bits");
-            for (value, lifted) in table.iter().enumerate() {
-                assert_eq!(
-                    *lifted,
-                    scale.to_full(value as u16),
-                    "{bits} bits at {value}"
-                );
-            }
-            let layout = Layout { wide: true, scale };
-            let over = (u16::MAX).to_le_bytes();
-            assert_eq!(layout.sample(Some(table.as_slice()), &over, 0), u16::MAX);
-        }
-        assert_eq!(Scale::new(16).table(), None);
-    }
-
-    /// The enum discriminants have to *be* the CICP code points, or the
-    /// shared translation is handed the wrong numbers and every tagged HEIF
-    /// silently reads as sRGB.
-    #[test]
-    fn the_enum_discriminants_are_the_cicp_code_points() {
-        use ColorPrimaries as P;
-        use TransferCharacteristics as T;
-
-        assert_eq!(code(T::IEC_61966_2_1 as i32), 13);
-        assert_eq!(code(T::ITU_R_BT_2100_0_PQ as i32), 16);
-        assert_eq!(code(T::ITU_R_BT_2100_0_HLG as i32), 18);
-        assert_eq!(code(T::Linear as i32), 8);
-        assert_eq!(code(P::ITU_R_BT_709_5 as i32), 1);
-        assert_eq!(code(P::ITU_R_BT_2020_2_and_2100_0 as i32), 9);
-        assert_eq!(code(P::SMPTE_EG_432_1 as i32), 12);
-
-        // And the invented variants, which stand for no code point at all,
-        // must land on "unspecified" rather than on a real space.
-        assert_eq!(
-            crate::image::color::cicp::color_space(
-                code(P::Unknown as i32),
-                code(T::Unknown as i32)
-            ),
-            ColorSpace::SRGB
-        );
-    }
-
-    /// Gray must not be widened to RGB, and a deep file must not be asked for
-    /// as bytes — either would be a silent loss on the way to the GPU.
-    #[test]
-    fn the_requested_layout_preserves_channels_and_depth() {
-        assert_eq!(
-            requested_color_space(Channels::Gray, false),
-            HeifColorSpace::Monochrome
-        );
-        assert_eq!(
-            requested_color_space(Channels::Gray, true),
-            HeifColorSpace::Monochrome
-        );
-        assert_eq!(
-            requested_color_space(Channels::Rgb, false),
-            HeifColorSpace::Rgb(RgbChroma::Rgb)
-        );
-        assert_eq!(
-            requested_color_space(Channels::Rgba, true),
-            HeifColorSpace::Rgb(RgbChroma::HdrRgbaLe)
-        );
-    }
-
-    /// The `ftyp` brand, not the extension, is what makes a file ours — and a
-    /// file that merely starts with a box header is not.
-    #[test]
-    fn brands_are_recognized_and_other_containers_are_not() {
-        let heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic";
-        assert!(is_heif(heic));
-        let avif = b"\x00\x00\x00\x1cftypavif\x00\x00\x00\x00avifmif1miaf";
-        assert!(is_heif(avif));
-
-        assert!(!is_heif(
-            b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"
-        ));
-        assert!(!is_heif(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"));
-        assert!(!is_heif(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"));
-        // Too short to hold a brand at all.
-        assert!(!is_heif(b"\x00\x00\x00\x18ftyp"));
-    }
 
     /// Which of the three a file is, by its brands: `avif` wherever it is
     /// named, among the compatibles as well as as the major brand; HEVC's
@@ -863,11 +125,11 @@ mod tests {
             decoder.name()
         );
         assert_eq!(
-            super::super::reader(std::path::Path::new("test_images/avif-rgb8.avif")),
+            crate::image::decode::reader(std::path::Path::new("test_images/avif-rgb8.avif")),
             Some("avif")
         );
         assert_eq!(
-            super::super::reader(std::path::Path::new("test_images/heic-gray8.heic")),
+            crate::image::decode::reader(std::path::Path::new("test_images/heic-gray8.heic")),
             Some("heic")
         );
     }
