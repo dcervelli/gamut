@@ -25,7 +25,8 @@
 //! ImageIO decodes some files to nothing while reporting a complete image:
 //! a gray picture with an alpha plane, and a few others (see
 //! `docs/formats.md`). That arrives as a buffer it will not hand over, and
-//! is refused in so many words rather than shown as a blank picture.
+//! is refused, saying that it was macOS that could not decode it, rather
+//! than shown as a blank picture.
 
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::Arc;

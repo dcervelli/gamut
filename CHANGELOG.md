@@ -13,8 +13,8 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   The pictures, their HDR gain maps, depth maps, color and metadata come out
   the same as before; photographs open about 1.65 times as fast. A file
   macOS cannot read — a gray picture with transparency, and the rare
-  photograph Preview shows blank — is refused with a message saying so
-  rather than shown blank.
+  photograph Preview shows blank — is reported as unreadable, as any file
+  that cannot be read is, rather than shown blank.
 
 ## 0.13.0 - 2026-11-06
 

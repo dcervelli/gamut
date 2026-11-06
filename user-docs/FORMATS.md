@@ -367,7 +367,8 @@ Caveats:
 - **On a Mac, HEIF is read by macOS itself**, so nothing needs installing,
   and a file opens in `gamut` exactly when it opens in Preview. A few that
   macOS cannot read — a gray picture with transparency, and the rare
-  photograph Preview shows blank — are refused with a message saying so.
+  photograph Preview shows blank — are reported as unreadable rather than
+  shown blank; the terminal says it was macOS that could not decode them.
   A file that leaves its color conversion unstated may look a shade
   different from the same file on Linux, since each system fills the gap
   its own way.
