@@ -375,8 +375,11 @@ packaging/     what the packages are built from: the Arch PKGBUILD, the Homebrew
                the icon — the desktop entry's, and macos-icon.svg, the same scene on
                Apple's grid — and hand-written shell completions
 bin/           release, pkgbuild-sha which points the PKGBUILD and the formula at a
-               published tag, bundle which wraps a built binary in Gamut.app, and
-               icon, which draws packaging/'s icon from a model of its scene's light
+               published tag, bundle which wraps a built binary in Gamut.app — ad hoc
+               for this Mac, --sign for any, --dev for one that never stands in for
+               the installed program — macos-deps, which builds the static LibRaw a
+               signed bundle's binary links (GAMUT_LIBRAW_PREFIX), and icon, which
+               draws packaging/'s icon from a model of its scene's light
 vendor/        crates built from a copy here rather than from crates.io, each through
                Cargo.toml's [patch.crates-io], which says why and until when, and
                each with a VENDORED.md saying where it came from and what changed:

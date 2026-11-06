@@ -2,31 +2,60 @@
 # Wrap a built binary in a Mac application bundle: Gamut.app, which Finder,
 # the Dock, Launchpad and "Open With" know the program by.
 #
-# The bundle holds the binary as it is, linked against the libraries it was
-# built with, so it runs where it was built: this is the bundle the Homebrew
-# formula installs, not one to hand to another Mac. It is signed ad hoc,
-# which is all a program built on the machine that runs it needs.
+# The bundle holds the binary, and beside it in Contents/Resources what a
+# package would install elsewhere: the command that runs the program from
+# the path (bin/gamut), the manual page and the shell completions, and the
+# licenses of everything linked into the binary. A cask links those out of
+# the bundle; the formula installs its own copies.
 #
-#   bin/bundle                      target/release/gamut into target/release/
-#   bin/bundle BINARY [DIRECTORY]   this binary, into this directory
+#   bin/bundle [--dev] [--sign IDENTITY] [BINARY [DIRECTORY]]
+#
+#   BINARY      the built program; target/release/gamut unless named
+#   DIRECTORY   where Gamut.app goes; beside the binary unless named
+#   --dev       a bundle of its own identifier and name, Gamut Dev, so that
+#               one built to try something never stands in for the
+#               installed program in Launch Services' eyes
+#   --sign ID   signed with that Developer ID, under the hardened runtime
+#               with a secure timestamp, for notarizing: a bundle to hand to
+#               another Mac. The binary must then link nothing outside the
+#               system — one built with GAMUT_LIBRAW_PREFIX, which
+#               bin/macos-deps builds — and that prefix's license texts are
+#               bundled with it.
+#
+# Without --sign the bundle is signed ad hoc and holds the binary as it is,
+# linked against the libraries it was built with, so it runs where it was
+# built: the bundle the Homebrew formula installs, and the one to try a
+# change in.
 #
 # Everything used is part of macOS: sips draws the icon from the Mac's SVG,
-# iconutil packs it, plutil stamps the version, codesign signs.
+# iconutil packs it, plutil stamps the version, otool reads what the binary
+# links, codesign signs.
 
 set -eu
 
 usage() {
-    echo "usage: bin/bundle [BINARY [DIRECTORY]]" >&2
+    echo "usage: bin/bundle [--dev] [--sign IDENTITY] [BINARY [DIRECTORY]]" >&2
     exit 2
 }
 
+DEV=
+IDENTITY=
+while [ $# -gt 0 ]; do
+    case $1 in
+        --dev) DEV=1; shift ;;
+        --sign) [ $# -ge 2 ] || usage; IDENTITY=$2; shift 2 ;;
+        --) shift; break ;;
+        -*) usage ;;
+        *) break ;;
+    esac
+done
 [ $# -le 2 ] || usage
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BINARY=${1:-$ROOT/target/release/gamut}
 OUT=${2:-$(dirname "$BINARY")}
 
-for tool in sips iconutil plutil codesign; do
+for tool in sips iconutil plutil otool codesign; do
     command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
 done
 [ -x "$BINARY" ] || { echo "$BINARY is not a built binary" >&2; exit 1; }
@@ -38,17 +67,44 @@ echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
     exit 1
 }
 
+# A bundle for another Mac carries everything it runs on: anything the
+# binary links from outside /usr/lib and /System would be missing there.
+if [ -n "$IDENTITY" ]; then
+    foreign=$(otool -L "$BINARY" | tail -n +2 | awk '{ print $1 }' |
+        grep -v -e '^/usr/lib/' -e '^/System/' || true)
+    [ -z "$foreign" ] || {
+        echo "$BINARY links libraries outside the system, which another Mac lacks:" >&2
+        echo "$foreign" >&2
+        echo "build it with GAMUT_LIBRAW_PREFIX set; see bin/macos-deps" >&2
+        exit 1
+    }
+    PREFIX=${GAMUT_LIBRAW_PREFIX:-$ROOT/target/macos-deps}
+    [ -d "$PREFIX/share/licenses" ] || {
+        echo "$PREFIX/share/licenses holds no license texts; run bin/macos-deps" >&2
+        exit 1
+    }
+fi
+
 APP="$OUT/Gamut.app"
+[ -z "$DEV" ] || APP="$OUT/Gamut Dev.app"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+RES="$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$RES"
 
-cp "$ROOT/packaging/Info.plist" "$APP/Contents/Info.plist"
-plutil -insert CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
-plutil -insert CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
-plutil -lint -s "$APP/Contents/Info.plist"
+PLIST="$APP/Contents/Info.plist"
+cp "$ROOT/packaging/Info.plist" "$PLIST"
+plutil -insert CFBundleShortVersionString -string "$VERSION" "$PLIST"
+plutil -insert CFBundleVersion -string "$VERSION" "$PLIST"
+if [ -n "$DEV" ]; then
+    id=$(plutil -extract CFBundleIdentifier raw "$PLIST")
+    plutil -replace CFBundleIdentifier -string "$id.dev" "$PLIST"
+    plutil -replace CFBundleName -string "Gamut Dev" "$PLIST"
+    plutil -replace CFBundleDisplayName -string "Gamut Dev" "$PLIST"
+fi
+plutil -lint -s "$PLIST"
 
 cp "$BINARY" "$APP/Contents/MacOS/gamut"
 
@@ -64,8 +120,45 @@ for size in 16 32 128 256 512; do
     sips -s format png -z "$double" "$double" "$ROOT/packaging/macos-icon.svg" \
         --out "$SET/icon_${size}x${size}@2x.png" >/dev/null
 done
-iconutil -c icns "$SET" -o "$APP/Contents/Resources/gamut.icns"
+iconutil -c icns "$SET" -o "$RES/gamut.icns"
 
-codesign --force --sign - "$APP"
+# The command on the path. macOS gives a process its bundle's identity —
+# the menu bar's name, the Dock's icon, the identifier — only when the
+# executable it was started from is inside the bundle, and a symlink to the
+# executable does not count; so the path holds this, which a cask links to,
+# and which runs the executable where it is.
+mkdir -p "$RES/bin"
+cat >"$RES/bin/gamut" <<'EOF'
+#!/bin/sh
+# Runs gamut from inside its application bundle, wherever the bundle is and
+# however this script was reached: macOS gives the program its name, icon
+# and identity only when it is started from there.
+here=$(dirname "$(realpath "$0")")
+exec "$here/../../MacOS/gamut" "$@"
+EOF
+chmod 755 "$RES/bin/gamut"
+
+# The manual page comes out of the binary itself, so it describes this
+# version and no other; the completions are the tree's.
+mkdir -p "$RES/man/man1" "$RES/completions"
+"$BINARY" --print-man >"$RES/man/man1/gamut.1"
+cp "$ROOT/packaging/completions/gamut.bash" "$ROOT/packaging/completions/_gamut" \
+    "$ROOT/packaging/completions/gamut.fish" "$RES/completions/"
+
+# The program's own licenses and the notices of every crate linked into it;
+# and for a bundle that links C libraries in, theirs.
+mkdir -p "$RES/licenses"
+cp "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$ROOT/THIRD-PARTY-NOTICES" \
+    "$RES/licenses/"
+if [ -n "$IDENTITY" ]; then
+    cp -R "$PREFIX/share/licenses/." "$RES/licenses/"
+fi
+
+if [ -n "$IDENTITY" ]; then
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+    codesign --verify --strict --verbose=1 "$APP"
+else
+    codesign --force --sign - "$APP"
+fi
 
 echo "$APP"
