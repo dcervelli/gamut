@@ -4,7 +4,7 @@ Just pass filenames or directories to `gamut`:
 ```
 gamut file1.jpg pictures file2.png
 ```
-Directories are scanned non-recursively.
+Directories are scanned non-recursively by default (use `-r`/`--recursive`, if desired).
 
 ## Keyboard
 

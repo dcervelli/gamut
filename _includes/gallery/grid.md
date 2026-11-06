@@ -1,0 +1,1 @@
+A dynamically scaled grid atop the image. The labeled grid shows in pixels, [print units](#print-size) (in or mm), or [georeferenced map units](#pixel-copy). The mouse cursor shows as a full-image, labeled crosshair. `g` to toggle.

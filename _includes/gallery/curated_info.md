@@ -4,7 +4,7 @@ A curated set of image metadata is collected from the file. EXIF, XMP, RAW field
 
 | File | Name, path, size and last modified date. Always shown. |
 | About | Title, caption, comment, artist, keywords and copyright. Only shown if available from EXIF/XMP. |
-| Image | Resolution, format, samples, color space, alpha, and more. Always shown. |
+| Image | Resolution, format, [DPI, print size](#print-size), samples, color space, alpha, and more. Always shown. |
 | Camera | Camera make and model, lens, owner, serial numbers and software. Shown if available. |
 | Exposure | Capture time, mode, shutter speed, aperture, ISO, compensation, focal length, metering, white balance, flash. Shown if available. |
 | Location | GPS and compass information. [Link to external map](#open-in-map). Shown if available. |

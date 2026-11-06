@@ -87,12 +87,18 @@ groups:
         src: screenshots/loupe.mp4
         thumb: screenshots/loupe_thumb.jpg
         file: loupe.md
-      - id: pixel-grid
-        title: Pixel Grid
+      - id: print-size
+        title: Print Size
         kind: video
-        src: screenshots/pixel_grid.mp4
-        thumb: screenshots/pixel_grid_thumb.jpg
-        file: pixel_grid.md
+        src: screenshots/print_size.mp4
+        thumb: screenshots/print_size_thumb.jpg
+        file: print_size.md
+      - id: grid
+        title: Grid
+        kind: video
+        src: screenshots/grid.mp4
+        thumb: screenshots/grid_thumb.jpg
+        file: grid.md
       - id: pixel-copy
         title: Pixel Copy
         kind: video

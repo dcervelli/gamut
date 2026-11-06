@@ -29,7 +29,7 @@
 
 | Format | Notes |
 | --- | --- |
-| TIFF / BigTIFF | 8 to 64-bit integer or float, never rescaled; false color ramps; no-data values excluded; GeoTIFF latitude and longitude; multi-page |
+| TIFF / BigTIFF | 8 to 64-bit integer or float, never rescaled; false color ramps; no-data values excluded; GeoTIFF latitude and longitude; multi-page; multi-band files open as named pages; WebP-compressed; |
 
 ### Other
 

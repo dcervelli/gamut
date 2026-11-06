@@ -13,9 +13,6 @@ This is the portion of the current default config not involved with keybindings 
 # The minimap, while the picture is larger than the window.
 # show_minimap = true
 
-# The file list down the left, while there is more than one file.
-# show_filmstrip = true
-
 # The histogram, in the side panel; it wins over show_info where both are on.
 # show_histogram = false
 
@@ -24,6 +21,9 @@ This is the portion of the current default config not involved with keybindings 
 
 # A single file opened alone steps on through the other images in its folder.
 # browse_folder = true
+
+# How many images a folder and its subfolders may add to the list before the search for more stops.
+# max_files = 10000
 
 # The web page the map buttons in the info panel's Location and Georeference sections open: {lat} and {lng} are where the picture was taken, or the middle of what it covers, in degrees.
 # open_map_link = https://geojson.io/#data=data:application/json,%7B%22type%22%3A%22Feature%22%2C%22properties%22%3A%7B%7D%2C%22geometry%22%3A%7B%22type%22%3A%22Point%22%2C%22coordinates%22%3A%5B{lng}%2C{lat}%5D%7D%7D
