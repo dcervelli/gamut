@@ -11,6 +11,7 @@ use std::ops::Range;
 use crate::gestures::{Button, Kind};
 use crate::image::aspect::Aspect;
 use crate::image::decode::Reading;
+use crate::image::density::Unit;
 use crate::image::region::{Grip, Region};
 
 use super::chooser::Step;
@@ -194,20 +195,24 @@ controls! {
     /// is up. `?` and `/` do the same.
     Help,
     /// The dot at the head of the pixel readout, at the other end of that
-    /// bar, which opens the menu of ways to write a pixel's value.
+    /// bar, which opens the menu of ways to write a pixel's value and its
+    /// place.
     PixelFormat,
     /// The cross on the message at the foot of the content area, which takes
     /// it off. On screen only while there is a message.
     Dismiss,
     /// A cell of the zoom menu: a zoom to go to, a fit, or a filter.
     ZoomTo(ZoomChoice) = ZoomChoice::Scale(1.0),
-    /// A cell of the pixel-format menu.
+    /// An item of the pixel menu's ways to write the value.
     Format(PixelFormat) = PixelFormat::Hex,
-    /// A cell of the same menu's row of coordinates, which is on it only
-    /// for a georeferenced file.
+    /// An item of the same menu's ways to write where the pixel is, dead
+    /// where the file cannot answer it.
     Coordinates(CoordinateFormat) = CoordinateFormat::Pixel,
-    /// A cell of its row of ways to write a latitude, on it only for a file
-    /// that can give one.
+    /// An item of its pair of units for a print, on it only for a file
+    /// that says its density.
+    PrintUnit(Unit) = Unit::Inches,
+    /// An item of its pair of ways to write a latitude, on it only for a
+    /// file that can give one.
     Geographic(GeographicFormat) = GeographicFormat::Decimal,
     /// An item of the menu of copies.
     Copies(Copies) = Copies::Name,
@@ -280,6 +285,16 @@ controls! {
     /// outside it also do.
     RenameTo,
     CancelRename,
+    /// The button beside the zoom menu's print size that puts up its
+    /// calibration — see [`calibrate`](super::calibrate) — and that
+    /// dialog's two buttons, as the rename dialog's are. Dead where the
+    /// window's monitor cannot be told apart from another. And the button
+    /// after the dialog's readout that puts the slider back on the size the
+    /// monitor says.
+    Calibrate,
+    CalibrateOk,
+    CancelCalibrate,
+    CalibrateReset,
     /// The buttons in the middle of an empty window that put up the
     /// desktop's file dialog, for image files and for a folder — see
     /// `ui::empty`. `Ctrl+O` and `Ctrl+Shift+O` come through here too,
@@ -381,6 +396,10 @@ impl Control {
             Control::ZoomTo(choice) => choice.label(),
             Control::Format(format) => format.label().to_string(),
             Control::Coordinates(format) => format.label().to_string(),
+            Control::PrintUnit(unit) => unit.label().to_string(),
+            // Set apart from the value's own decimal, which the same menu
+            // holds.
+            Control::Geographic(GeographicFormat::Decimal) => "Decimal degrees".to_string(),
             Control::Geographic(format) => format.label().to_string(),
             Control::Copies(copies) => copies.label().to_string(),
             Control::Facts(Copyable::All) => "Copy All".to_string(),
@@ -410,6 +429,10 @@ impl Control {
             Control::CancelExport => "Cancel".to_string(),
             Control::RenameTo => "OK".to_string(),
             Control::CancelRename => "Cancel".to_string(),
+            Control::Calibrate => "Calibrate print size".to_string(),
+            Control::CalibrateOk => "OK".to_string(),
+            Control::CancelCalibrate => "Cancel".to_string(),
+            Control::CalibrateReset => "Reset".to_string(),
             Control::OpenFiles => "Open files".to_string(),
             Control::OpenFolder => "Open folder".to_string(),
             Control::OpenLastFolder => "Open last folder".to_string(),
@@ -539,6 +562,9 @@ pub enum Command {
     ExportName(String),
     /// The export dialog's quality slider moved: this is where it now stands.
     ExportQuality(u8),
+    /// The calibration's slider moved: this is where it now stands, in
+    /// stops of the card's size.
+    Calibration(f32),
     /// One of the export dialog's size boxes changed: which, and what it
     /// now says.
     ExportSize(Dimension, String),

@@ -8,20 +8,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Added
 
-- `-r` or `--recursive` opens every image under a directory named, in its
-  subfolders however deep, and keeps each of those folders watched as a
-  directory named is. Hidden folders, folders reached through a link and,
-  on a Mac, photo libraries and other packages are not searched.
-- The folder dialog has an *Include subfolders* box that does the same for
-  the folder chosen, left as it was last left.
-- `max_files` in the configuration file: how many images opening folders
-  may add to the list in one run, 10,000 unless it says otherwise. The
-  search stops there, and the window says so.
-- A panel beside the region button while a region is up: buttons that fit
-  the window to the region, copy it and take it off; an aspect to hold the
-  region to, either Free, the image's Original shape, a preset or a typed
-  ratio, with a button that swaps width and height; and boxes for its
-  position and size in the image's pixels.
 - Commands of your own in the configuration file: a line of the shell run
   on the file on screen from the foot of the file menu, or from a key bound
   to `keys.command.<name>`, with the file, the picture's size, where it was
@@ -73,11 +59,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   offered under an extension it writes.
 - A command's replacement of a file is refused when it is a different
   kind of file from the original, which keeps its name.
-- A TIFF holding several bands of gray, as a GIS writes a stack of a
-  satellite's bands or a classifier's probabilities, opens with each band
-  as a page, named in the bar where the file describes it. It was refused.
-- WebP-compressed TIFFs open, as GDAL writes an orthophoto with
-  `COMPRESS=WEBP`, an alpha band included.
 
 ### Changed
 
@@ -90,15 +71,122 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   time the program starts, with your comments where you left them, and the
   window says so; the old file is left as it was. `--print-config` and
   `Ctrl+,` write the new format.
-- Two key names change, since TOML cannot hold a name and a longer one that
-  starts with it: `zoom.100.toggle` is `zoom.toggle`, and `files.map.bounds`
-  is `files.map-bounds`. The rewrite renames them.
+- Five key names change, since TOML cannot hold a name and a longer one that
+  starts with it: `zoom.100.toggle` is `zoom.toggle`, `zoom.print.calibrate`
+  is `zoom.print-calibrate`, `files.map.bounds` is `files.map-bounds`,
+  `files.sort` is `files.sort.menu`, and `interface.readout` is
+  `interface.readout.menu`. The rewrite renames them.
+
+### Fixed
+
+- A file saved by a program that takes it away before writing it again no
+  longer drops off the list when its folder is looked at in between.
+
+## 0.13.0 - 2026-11-06
+
+### Added
+
+- The pixel readout gives a **Print** coordinate for a file that records
+  its dots per inch: how far the pixel is from the picture's top left when
+  printed, `(0.998, 0.002) in`, in inches or millimeters as **Print unit**
+  in the same menu chooses. The file information's *Print size* follows that
+  choice, which starts in the unit the system's region measures in.
+- The grid measures in what the readout shows: image pixels, a print's inches
+  or millimeters, or a map's own coordinates — `500 m`, `2 km` — its lines on
+  round eastings and northings. With the readout on latitude and longitude,
+  which curve across a projected map, the grid uses the map's coordinates.
+  A region's size and edges are written in the same units, and so are the
+  region panel's boxes, each with its unit after it: what is typed goes to
+  the nearest pixel edge. An aspect ratio is held in the same units, so 1:1
+  is square on the ground even where a map's pixels are not. The grid's lines
+  are numbered along the top and the left of the view, just outside the
+  picture where there is empty space beside it and just inside the window
+  where there is not. Two lines in the accent color cross at the pixel under
+  the pointer, each labeled over those numbers with where it is.
+- Keys for the pixel readout's menu: `.` opens it, even with the interface
+  hidden, and while it is open a letter chooses each item — `h` hex, `d`
+  decimal, `m` mapped, `z` depth; `x` pixel, `p` print, `e` projected, `g`
+  geographic, `a` direction; `u` switches the print unit and `s` a
+  latitude's degrees. Each letter appears beside its item.
+- Keys for the file list's order: `O` opens the sort menu, even with the
+  list hidden, and while it is open a letter chooses each sort: `n` name,
+  `p` path, `e` type, `m` modified, `t` captured, `s` size, `w` width,
+  `h` height, `a` area. Each letter appears beside its sort in the menu.
+  `R` reverses the order, with or without the menu, and appears beside the
+  direction it would go to.
+- The top bar gives the folder the file is in after its name, dimmed:
+  *photo.png · ~/Pictures/2026*. When the bar runs short of room the
+  folder is shortened in the middle, keeping the folder nearest the file,
+  and then left out. The size and color facts keep their place before it.
+- **Print Size** in the zoom menu shows the picture at the size the file
+  says it prints, on the display the window is on, from the density the
+  file gives and the physical size the display reports. Resting on it while
+  it is dead says which of the two is missing. `Shift+0` does the same.
+- The ruler beside **Print Size** calibrates the display against a credit
+  card or a ruler held to the screen, for a display that reports its size
+  wrongly or not at all. The size is kept for that make and model of display.
+  `Alt+0` (`⌥0` on a Mac) does the same.
+- Stepping between two georeferenced files in the same coordinate system
+  lines them up on the ground: when the file arriving covers any of the
+  ground on screen, that ground stays in the middle of the window at the
+  same scale, whatever the two files' sizes and resolutions.
+- The info panel's Georeference section gives how far the raster reaches
+  along each axis: *Extent, easting* and *Extent, northing*, or longitude
+  and latitude for geographic coordinates.
+- The info panel's Image section gives the density the file says it has —
+  *600 dpi* — and the size the picture prints at at that density, naming
+  the sheet where it is one: *420 × 297 mm · A3*. A size no sheet is is
+  written in millimeters, or in inches where the system's region measures
+  in them.
+- `-r` or `--recursive` opens every image under a directory named, in its
+  subfolders however deep, and keeps each of those folders watched as a
+  directory named is. Hidden folders, folders reached through a link and,
+  on a Mac, photo libraries and other packages are not searched.
+- The folder dialog has an *Include subfolders* box that does the same for
+  the folder chosen, left as it was last left.
+- `max_files` in the configuration file: how many images opening folders
+  may add to the list in one run, 10,000 unless it says otherwise. The
+  search stops there, and the window says so.
+- A panel beside the region button while a region is up: buttons that fit
+  the window to the region, copy it and take it off; an aspect to hold the
+  region to, either Free, the image's Original shape, a preset or a typed
+  ratio, with a button that swaps width and height; and boxes for its
+  position and size in the image's pixels.
+- A TIFF holding several bands of gray, as a GIS writes a stack of a
+  satellite's bands or a classifier's probabilities, opens with each band
+  as a page, named in the bar where the file describes it. It was refused.
+- WebP-compressed TIFFs open, as GDAL writes an orthophoto with
+  `COMPRESS=WEBP`, an alpha band included.
+
+### Changed
+
+- The pixel readout's menu is a list with a key beside each item, rather
+  than rows of cells. `.` opens it instead of stepping through the value's
+  formats, and `Shift+,` no longer switches a latitude's degrees: `s` does,
+  in the menu. A configuration file's `interface.pixel-format` or
+  `interface.geographic-format` line is now passed over; bind
+  `interface.readout` or `interface.readout.lat-long` instead. Ways of writing a coordinate that a
+  file cannot give are dimmed in the menu rather than left out.
+- The file list remembers the sort chosen before the one in force and
+  breaks ties by it, so sorting by size and then by kind keeps each kind in
+  size order across restarts, and a file arriving lands among the files it
+  ties with rather than after them. Choosing the earlier sort again swaps
+  the two; the sort button's tooltip names both. Files neither tells apart
+  go by folder and then by name, rather than in the order they arrived.
+- Sorting the file list by path sorts by folder: a folder's own files come
+  before its subfolders', and within a folder the files go by the sort
+  before. It used to sort by the whole path as text, which mixed a folder's
+  files in among its subfolders by name.
+- Stepping to a file of the same shape as the one on screen at another
+  size, such as a map of the same ground at twice the detail, keeps the
+  same spot in the middle of the window at the same size on screen, as a
+  file of the same size keeps the pan and zoom. It used to be fitted.
 - The picture can be dragged past its edge, until the edge reaches the
   middle of the window, so an edge can be pulled out from under whatever is
   covering it. A fitted or small picture can be dragged that far too. The
-  minimap's marker hangs off the side of the map by as much, and the minimap
-  comes up whenever any of the picture is off screen, a fitted picture
-  dragged aside included.
+  minimap's marker stops at the edge of the map, that side of it dashed,
+  and the minimap comes up whenever any of the picture is off screen, a
+  fitted picture dragged aside included.
 - `Space` on a view dragged past the picture's edge puts the whole image
   back first, centered, before going on to the window filled and actual
   size. A filled window scrolled along the picture still goes on to actual
@@ -109,9 +197,15 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 - A folder in a tree that changes is read again by itself, the open folder
   and the one named looked at four times a second and the rest in turn, so
   a large tree costs little to keep watched.
+- The file list opens as it was left when the window last closed, and
+  open the first time. The configuration file's `show_filmstrip` is
+  retired: a line naming it is passed over.
 
 ### Fixed
 
+- Some LZW-compressed TIFFs in tiles, as GDAL writes a map, no longer fail
+  to open with *no lzw end code found*. A tile at the picture's right edge
+  could fail, depending on what it held.
 - A large PNG is no longer refused a thumbnail in the background for what
   its pixels might come to rather than what they do: a picture of 8-bit
   color now gets one up to about 350 megapixels, where it stopped at 67.
@@ -121,8 +215,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   no longer recorded as one that failed, so it is tried again later.
 - The file list no longer slides under the pointer when files arrive above
   the one on screen.
-- A file saved by a program that takes it away before writing it again no
-  longer drops off the list when its folder is looked at in between.
 - On a display scaled by a fraction, such as 1.6, the words over the file
   list's thumbnails no longer flicker a pixel up and down while the list's
   pictures are read.

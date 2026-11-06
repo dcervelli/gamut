@@ -37,6 +37,8 @@ pub(super) enum Then {
     Chooser,
     /// The file list, put up.
     Filmstrip,
+    /// The menu of sorts, opened.
+    Sorting,
 }
 
 /// Where the folder beside the list stands.
@@ -377,6 +379,7 @@ impl App {
             Then::Step(forward) => self.step(forward),
             Then::End(last) => self.step_to_end(last),
             Then::Chooser => self.press(Control::Chooser),
+            Then::Sorting => self.press(Control::Sorting),
             Then::Filmstrip => {
                 self.panels.show_filmstrip = true;
                 self.filmstrip.reveal();

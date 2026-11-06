@@ -411,28 +411,29 @@ impl Region {
     }
 
     /// The region with its width — `axis` 0 — or its height set to
-    /// `extent`, its top left corner where it was: a size typed. Held to
-    /// `ratio`, the other side follows from the same corner. As much as the
-    /// image has room for from there.
+    /// `extent`: a size typed. Held to `ratio`, the other side follows. Its
+    /// top left corner stays where it was unless the new size would run off
+    /// the image, when the corner moves back to make room; only a size
+    /// larger than the whole image comes out smaller than was asked for.
     pub fn sized(self, axis: usize, extent: u32, ratio: Option<f64>, image: [u32; 2]) -> Self {
-        let at = [i64::from(self.x), i64::from(self.y)];
-        let Some(ratio) = ratio else {
-            let mut sides = [self.width, self.height];
-            let room = image[axis].saturating_sub([self.x, self.y][axis]).max(1);
-            sides[axis] = extent.clamp(1, room);
-            return Self {
-                width: sides[0],
-                height: sides[1],
-                ..self
-            };
+        let [width, height] = match ratio {
+            Some(ratio) => {
+                let from = Placing::From { at: 0, toward: 1 };
+                let held = Self::held(axis, f64::from(extent), ratio, [from, from], image);
+                [held.width, held.height]
+            }
+            None => {
+                let mut sides = [self.width, self.height];
+                sides[axis] = extent.clamp(1, image[axis].max(1));
+                sides
+            }
         };
-        Self::held(
-            axis,
-            f64::from(extent),
-            ratio,
-            at.map(|at| Placing::From { at, toward: 1 }),
-            image,
-        )
+        Self {
+            width,
+            height,
+            ..self
+        }
+        .moved_by(0, 0, image)
     }
 
     /// The region the other way up about its middle: its width and height
@@ -1125,12 +1126,26 @@ mod tests {
     fn a_size_typed_keeps_the_corner() {
         let start = region(10, 10, 20, 10);
         assert_eq!(start.sized(0, 40, None, IMAGE), region(10, 10, 40, 10));
-        assert_eq!(start.sized(0, 400, None, IMAGE), region(10, 10, 90, 10));
         assert_eq!(start.sized(1, 30, Some(2.0), IMAGE), region(10, 10, 60, 30));
-        // As far as the room from the corner allows, in the ratio.
+    }
+
+    /// A size that would run off the image moves the corner back and is
+    /// given in full; only what the whole image cannot hold is cut.
+    #[test]
+    fn a_size_typed_past_the_edge_moves_the_corner() {
+        let start = region(70, 40, 20, 10);
+        assert_eq!(start.sized(0, 50, None, IMAGE), region(50, 40, 50, 10));
+        assert_eq!(start.sized(1, 50, None, IMAGE), region(70, 10, 20, 50));
+        // The whole image's side is as far as a side goes.
+        assert_eq!(start.sized(0, 400, None, IMAGE), region(0, 40, 100, 10));
+        assert_eq!(start.sized(1, 400, None, IMAGE), region(70, 0, 20, 60));
+        // Held, the side that follows moves its corner back too.
+        assert_eq!(start.sized(0, 80, Some(2.0), IMAGE), region(20, 20, 80, 40));
+        assert_eq!(start.sized(1, 50, Some(0.5), IMAGE), region(70, 10, 25, 50));
+        // And past the whole image, the most it holds in the ratio.
         assert_eq!(
             start.sized(0, 400, Some(2.0), IMAGE),
-            region(10, 10, 90, 45)
+            region(0, 10, 100, 50)
         );
     }
 }

@@ -17,6 +17,7 @@ use crate::render::Placement;
 
 use super::chrome::Pass;
 use super::control::Grab;
+use super::ruler::{Ruler, Unit};
 use super::{PANEL_RADIUS, Rect, icon, outline};
 
 /// The side of a handle, in logical pixels: large enough to take hold of,
@@ -129,9 +130,50 @@ pub(super) fn cursor(grab: Grab) -> CursorIcon {
     }
 }
 
-/// What the label under the region's middle handle says.
+/// What the label under the region's middle handle says, in pixels.
 pub(super) fn dimensions(region: Region) -> String {
     format!("{} \u{00d7} {}", region.width, region.height)
+}
+
+/// The words a region wears, in what the picture is measured in: its size,
+/// and the coordinate of each of its edges — the left, the right, the top
+/// and the bottom.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) struct Words {
+    pub size: String,
+    pub edges: [String; 4],
+}
+
+/// What `region` says of itself measured by `ruler`: in pixels, its size
+/// and its boundaries as they are counted; in anything else, the same
+/// boundaries read off the measure, and its size in the measure's unit,
+/// each to as many places as a pixel of it is worth.
+///
+/// The coordinates are the region's boundaries and not the pixels beside
+/// them: the right minus the left is the width, which is the number written
+/// at the middle, and two readings that did not add up would be worse than
+/// either alone.
+pub(super) fn words(region: Region, ruler: &Ruler) -> Words {
+    let [x, y, width, height] = [region.x, region.y, region.width, region.height].map(f64::from);
+    let edge = |axis: usize, at: f64| ruler.write(ruler.at(axis, at));
+    let size = match ruler.unit {
+        Unit::Pixel => dimensions(region),
+        _ => format!(
+            "{} \u{00d7} {}{}",
+            ruler.write(ruler.length(0, width)),
+            ruler.write(ruler.length(1, height)),
+            ruler.suffix()
+        ),
+    };
+    Words {
+        size,
+        edges: [
+            edge(0, x),
+            edge(0, x + width),
+            edge(1, y),
+            edge(1, y + height),
+        ],
+    }
 }
 
 /// One of the words written on the region: what it says, the pill it is
@@ -146,9 +188,9 @@ pub(super) struct Label {
     pub size: bool,
 }
 
-/// The words a region wears, and where each goes: its size under the
-/// handle at the middle, and each edge's coordinate inside the mark in the
-/// middle of that edge.
+/// Where each of the `words` a region wears goes: its size under the handle
+/// at the middle, and each edge's coordinate inside the mark in the middle
+/// of that edge.
 ///
 /// A label is left out rather than written where it will not fit, so that
 /// the words never spill over the outline or cover one another on a region
@@ -165,13 +207,8 @@ pub(super) struct Label {
 /// for neither — and sits at the middle of `visible` when the handle is
 /// not, so that a region larger than the window still says its size
 /// somewhere it can be read.
-///
-/// The coordinates are the region's boundaries and not the pixels beside
-/// them: the right minus the left is the width, which is the number written
-/// at the middle, and two readings that did not add up would be worse than
-/// either alone.
 pub(super) fn labels(
-    region: Region,
+    words: Words,
     rect: Rect,
     visible: Rect,
     grid: icon::Grid,
@@ -181,14 +218,14 @@ pub(super) fn labels(
     // edge and so reaches half its own width into the region.
     let inset = grid.line_width(HANDLE) / 2.0 + LABEL_GAP;
     let mut placed: Vec<Label> = Vec::new();
-    let coordinates = [
-        (Side::Left, region.x),
-        (Side::Right, region.right()),
-        (Side::Top, region.y),
-        (Side::Bottom, region.bottom()),
-    ];
-    let wanted = std::iter::once((dimensions(region), None))
-        .chain(coordinates.map(|(side, at)| (at.to_string(), Some(side))));
+    let Words { size, edges } = words;
+    let sides = [Side::Left, Side::Right, Side::Top, Side::Bottom];
+    let wanted = std::iter::once((size, None)).chain(
+        sides
+            .into_iter()
+            .zip(edges)
+            .map(|(side, text)| (text, Some(side))),
+    );
     let middle = [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0];
     let middle_shown = visible.contains(middle);
 
@@ -333,7 +370,8 @@ pub(super) fn show(pass: &Pass, ui: &mut egui::Ui) {
             fonts.layout_no_wrap(text.to_string(), font.clone(), egui::Color32::PLACEHOLDER)
         })
     };
-    for label in labels(region, rect, visible, grid, |text| {
+    let words = words(region, &pass.ruler(current));
+    for label in labels(words, rect, visible, grid, |text| {
         let size = laid(text).size();
         [size.x, size.y]
     }) {
@@ -497,7 +535,13 @@ mod tests {
         };
         let rect = Rect::new(50.0, 60.0, 300.0, 240.0);
         let content = Rect::new(0.0, 0.0, 1000.0, 700.0);
-        let labels = super::labels(region, rect, rect, icon::Grid::new(1.0), measured);
+        let labels = super::labels(
+            words(region, &Ruler::PIXELS),
+            rect,
+            rect,
+            icon::Grid::new(1.0),
+            measured,
+        );
         assert_eq!(
             written(&labels),
             ["300 \u{00d7} 240", "100", "400", "200", "440"]
@@ -551,7 +595,7 @@ mod tests {
         // Too short for the size under the middle handle or over it, and
         // it goes on the handle rather than nowhere.
         let short = Rect::new(0.0, 0.0, 300.0, 40.0);
-        let labels = super::labels(region, short, short, grid, measured);
+        let labels = super::labels(words(region, &Ruler::PIXELS), short, short, grid, measured);
         assert_eq!(written(&labels), ["300 \u{00d7} 300", "10", "310"]);
         let size = labels[0].pill;
         assert_eq!(size.y + size.height / 2.0, 20.0);
@@ -560,24 +604,33 @@ mod tests {
         // foot of the window just below its middle — and the size goes over.
         let tall = Rect::new(0.0, 0.0, 300.0, 300.0);
         let cut = Rect::new(0.0, 0.0, 300.0, 160.0);
-        let labels = super::labels(region, tall, cut, grid, measured);
+        let labels = super::labels(words(region, &Ruler::PIXELS), tall, cut, grid, measured);
         assert_eq!(labels[0].text, "300 \u{00d7} 300");
         assert_eq!(labels[0].pill.bottom(), 150.0 - HANDLE / 2.0 - LABEL_GAP);
 
         let narrow = Rect::new(0.0, 0.0, 90.0, 300.0);
-        let labels = super::labels(region, narrow, narrow, grid, measured);
+        let labels = super::labels(
+            words(region, &Ruler::PIXELS),
+            narrow,
+            narrow,
+            grid,
+            measured,
+        );
         assert_eq!(written(&labels), ["300 \u{00d7} 300", "20", "320"]);
 
         // Too small for any of it, and nothing is written rather than
         // something spilling over the outline.
         let tiny = Rect::new(0.0, 0.0, 30.0, 20.0);
-        assert!(super::labels(region, tiny, tiny, grid, measured).is_empty());
+        assert!(
+            super::labels(words(region, &Ruler::PIXELS), tiny, tiny, grid, measured).is_empty()
+        );
 
         // Whatever is placed, no two of them touch.
         for width in [40.0, 90.0, 140.0, 300.0, 600.0] {
             for height in [20.0, 45.0, 90.0, 300.0] {
                 let rect = Rect::new(0.0, 0.0, width, height);
-                let labels = super::labels(region, rect, rect, grid, measured);
+                let labels =
+                    super::labels(words(region, &Ruler::PIXELS), rect, rect, grid, measured);
                 for (index, label) in labels.iter().enumerate() {
                     assert!(within(label.pill, rect), "{width}x{height}: {label:?}");
                     for other in &labels[index + 1..] {
@@ -610,7 +663,7 @@ mod tests {
         // at (100, 150), is on it.
         let rect = Rect::new(-200.0, -100.0, 600.0, 500.0);
         let visible = rect.intersect(content).expect("part of it is on screen");
-        let labels = super::labels(region, rect, visible, grid, measured);
+        let labels = super::labels(words(region, &Ruler::PIXELS), rect, visible, grid, measured);
         assert_eq!(written(&labels), ["400 \u{00d7} 300", "400", "300"]);
         for label in &labels {
             assert!(within(label.pill, visible), "{label:?}");
@@ -624,11 +677,46 @@ mod tests {
         // the square from the origin to 100, and nothing else fits there.
         let rect = Rect::new(-500.0, -400.0, 600.0, 500.0);
         let visible = rect.intersect(content).expect("part of it is on screen");
-        let labels = super::labels(region, rect, visible, grid, measured);
+        let labels = super::labels(words(region, &Ruler::PIXELS), rect, visible, grid, measured);
         assert_eq!(written(&labels), ["400 \u{00d7} 300"]);
         let size = labels[0].pill;
         assert_eq!(size.x + size.width / 2.0, 50.0);
         assert_eq!(size.y + size.height / 2.0, 50.0);
+    }
+
+    /// Measured on a print or on the ground, a region's edges are read off
+    /// the measure at its boundaries and its size is in the measure's unit,
+    /// to the places a pixel of it is worth; a northing falls down the
+    /// picture, and the size is a length whichever way it runs.
+    #[test]
+    fn a_region_is_written_in_what_the_picture_is_measured_in() {
+        let region = Region {
+            x: 100,
+            y: 200,
+            width: 300,
+            height: 240,
+        };
+        let print = Ruler::print([100.0, 100.0], crate::image::density::Unit::Inches);
+        assert_eq!(
+            words(region, &print),
+            Words {
+                size: "3.00 \u{00d7} 2.40 in".to_string(),
+                edges: ["1.00", "4.00", "2.00", "4.40"].map(String::from),
+            }
+        );
+        let ground = Ruler::test(
+            [500_000.0, 4_500_000.0],
+            [0.5, -0.5],
+            Unit::Ground(Some("m")),
+        );
+        assert_eq!(
+            words(region, &ground),
+            Words {
+                size: "150.0 \u{00d7} 120.0 m".to_string(),
+                edges: ["500050.0", "500200.0", "4499900.0", "4499780.0"].map(String::from),
+            }
+        );
+        assert_eq!(words(region, &Ruler::PIXELS).size, "300 \u{00d7} 240");
     }
 
     #[test]

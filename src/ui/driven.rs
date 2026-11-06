@@ -113,6 +113,7 @@ pub(super) fn panels() -> Panels {
         loupe_magnification: super::loupe::DEFAULT_MAGNIFICATION,
         pixel_format: PixelFormat::default(),
         coordinate_format: CoordinateFormat::default(),
+        print_unit: crate::image::density::Unit::Inches,
         geographic_format: GeographicFormat::default(),
         info_tab: super::tags::Tab::Facts,
     }
@@ -136,6 +137,7 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         index: 0,
         count,
         arriving: None,
+        directory: String::new(),
         deleted: false,
         headroom: Headroom::None,
         hdr_available: false,
@@ -154,6 +156,7 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         aspect: crate::image::aspect::Aspect::Free,
         transport: None,
         filmstrip: None,
+        order: filmstrip::Order::default(),
         side: None,
         chooser: None,
         tags: None,
@@ -169,6 +172,9 @@ pub(super) fn input(logical: [f32; 2], count: usize) -> FrameInput {
         standin: None,
         thumb: None,
         waiting: false,
+        print_zoom: None,
+        calibrate: None,
+        calibratable: false,
     }
 }
 
@@ -1287,7 +1293,6 @@ fn strip(count: usize, current: Option<usize>, reveal: bool) -> filmstrip::Input
         slot: filmstrip::SLOT_MIN,
         listing: 0,
         current,
-        order: filmstrip::Order::default(),
         back: false,
         forward: true,
         reveal,
@@ -1343,6 +1348,32 @@ fn the_file_list_offers_its_rows_its_menus_and_the_way_back() {
             filmstrip::Direction::Descending
         ))]
     );
+}
+
+/// The menu of sorts a key opens with the list down hangs from the list's
+/// toggle in the top bar, and with the bars hidden too from the corner of
+/// the picture; either way its items press as the list's own menu's do.
+#[test]
+fn the_sort_menu_hangs_elsewhere_with_the_list_down() {
+    let mut bare = panels();
+    bare.show_ui = false;
+    for panels in [panels(), bare] {
+        let mut harness = open(WINDOW, 3, panels);
+        egui::Popup::open_id(&harness.ctx, filmstrip::sort_menu_id());
+        harness.run();
+        assert_eq!(
+            click(&mut harness, "Area"),
+            [Command::Press(Control::SortBy(filmstrip::Sort::Area))]
+        );
+        egui::Popup::open_id(&harness.ctx, filmstrip::sort_menu_id());
+        harness.run();
+        assert_eq!(
+            click(&mut harness, "Descending"),
+            [Command::Press(Control::SortDirection(
+                filmstrip::Direction::Descending
+            ))]
+        );
+    }
 }
 
 /// A dead control still names itself when the pointer rests on it — with
@@ -1523,6 +1554,45 @@ fn the_top_bar_drops_the_facts_before_the_name() {
     );
     assert!(harness.query_by_label("Zoom").is_some());
     assert!(harness.query_by_label("Maximize").is_some());
+}
+
+/// The folder follows the name in the top bar: whole where there is room,
+/// cut in its middle with its last directory kept where there is less, and
+/// gone before the facts are where there is too little for any of it.
+#[test]
+fn the_top_bar_writes_the_folder_after_the_name_while_there_is_room() {
+    let folder = |harness: &Harness<'static, State>| {
+        harness
+            .query_by_label_contains("\u{00b7} ~/")
+            .and_then(|node| node.accesskit_node().value())
+    };
+    let mut harness = build(WINDOW, 3, panels());
+    harness.state_mut().input.directory = "~/Pictures/2026".to_string();
+    harness.run();
+    assert_eq!(
+        folder(&harness).as_deref(),
+        Some(" \u{00b7} ~/Pictures/2026")
+    );
+    drop(harness);
+
+    let mut harness = build(WINDOW, 3, panels());
+    let long = format!("~/{}/Holiday", "a-long-directory-name/".repeat(8));
+    harness.state_mut().input.directory = long.replace("//", "/");
+    harness.run();
+    let cut = folder(&harness).expect("a cut folder");
+    assert!(cut.contains('\u{2026}'), "{cut}");
+    assert!(cut.ends_with("/Holiday"), "{cut}");
+    assert!(
+        harness.query_by_label_contains("\u{00d7}").is_some(),
+        "the facts stay beside it"
+    );
+    drop(harness);
+
+    let mut harness = build([300.0, 300.0], 3, panels());
+    harness.state_mut().input.directory = "~/Pictures/2026".to_string();
+    harness.run();
+    assert!(harness.query_by_label("photo.png").is_some());
+    assert_eq!(folder(&harness), None);
 }
 
 /// A window with nothing open offers the three ways of giving it
@@ -2178,7 +2248,7 @@ fn the_minimap_asks_to_center_on_what_is_pressed() {
 }
 
 /// The dot at the head of the pixel readout opens the menu of formats, and
-/// a cell of it chooses that format.
+/// an item of it chooses that format.
 #[test]
 fn the_pixel_menu_offers_every_format() {
     let mut harness = open(WINDOW, 1, panels());
@@ -2189,15 +2259,45 @@ fn the_pixel_menu_offers_every_format() {
     );
 }
 
-/// Only a georeferenced file brings the rows of coordinates to that menu,
-/// and only the coordinates it can give: a raster in a system the table
-/// holds offers all three and the two ways of writing a latitude.
+/// Every way of writing where a pixel is is on that menu, and those the
+/// file cannot give are dead: a raster in a system the table holds can
+/// give the ground's two and brings the two ways of writing a latitude,
+/// and a file that says its density can give the print's and brings its
+/// two units.
 #[test]
-fn the_pixel_menu_offers_coordinates_only_for_a_map() {
+fn the_pixel_menu_offers_the_coordinates_a_file_can_give() {
     let mut harness = open(WINDOW, 1, panels());
     assert_eq!(click(&mut harness, "Pixel format"), []);
-    assert!(harness.query_by_label("Projected").is_none());
+    for dead in ["Print", "Projected", "Geographic", "Azimuth/Elevation"] {
+        let node = harness.get_by_role_and_label(egui::accesskit::Role::Button, dead);
+        assert!(node.accesskit_node().is_disabled(), "{dead}");
+    }
     assert!(harness.query_by_label("DMS").is_none());
+    assert!(harness.query_by_label("Millimeters").is_none());
+
+    let mut harness = build(WINDOW, 1, panels());
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture")
+        .exif
+        .density = crate::image::density::Density::new([300.0, 300.0], 25.4);
+    harness.run();
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "Print"),
+        [Command::Press(Control::Coordinates(
+            CoordinateFormat::Print
+        ))]
+    );
+    assert_eq!(click(&mut harness, "Pixel format"), []);
+    assert_eq!(
+        click(&mut harness, "Millimeters"),
+        [Command::Press(Control::PrintUnit(
+            crate::image::density::Unit::Millimeters
+        ))]
+    );
 
     let mut harness = build(WINDOW, 1, panels());
     let placed = crate::image::geo::Tags {
@@ -3364,6 +3464,45 @@ fn the_horizon_grid_follows_the_pointer() {
     assert!(curves(&mut harness) < without);
 }
 
+/// With the grid on, the pointer's pixel has two lines of its own, each in
+/// the accent and edged in black, the edges under both lines so that neither
+/// cuts the other, and a label for each on a ground of the accent, over the
+/// minimap.
+#[test]
+fn the_grid_follows_the_pointer() {
+    let mut on = panels();
+    on.show_grid = true;
+    let mut harness = open(WINDOW, 1, on);
+    let accent: egui::Color32 = Theme::FALLBACK.accent.into();
+    harness.state_mut().input.minimap_on_screen = true;
+    let fills = |harness: &mut Harness<'static, State>, ink: egui::Color32| {
+        harness.run();
+        harness
+            .output()
+            .shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(at, shape)| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == ink => Some(at),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let without = fills(&mut harness, accent).len();
+    let black = fills(&mut harness, egui::Color32::BLACK).len();
+    harness.state_mut().input.pointer = Some([2, 1]);
+    let inked = fills(&mut harness, accent);
+    let edges = fills(&mut harness, egui::Color32::BLACK);
+    assert_eq!(inked.len(), without + 4);
+    assert_eq!(edges.len(), black + 2);
+    let lines = &inked[inked.len() - 4..inked.len() - 2];
+    assert!(edges.iter().all(|edge| edge < &lines[0]));
+    assert!(matches!(
+        harness.output().shapes.last().map(|shape| &shape.shape),
+        Some(egui::Shape::Text(_))
+    ));
+}
+
 /// The horizon grid's toggle is dead and unlit for a file that does not
 /// say which way its camera faced, and while another file is on its way
 /// in, though the grid is asked for: a press reaches nothing. For a file
@@ -3504,6 +3643,7 @@ fn the_readout_says_which_way_a_pixel_looks() {
             [2, 1],
             CoordinateFormat::Direction,
             GeographicFormat::Decimal,
+            crate::image::density::Unit::Inches,
             padded,
         )
     };
@@ -3967,5 +4107,117 @@ fn the_output_tab_shows_the_last_run_and_copies_a_line() {
     assert!(
         harness.query_by_label("Output").is_some(),
         "the tab's name is not covered"
+    );
+}
+
+/// Measured as a print, the region's boxes are in inches with the unit
+/// after them: what is typed is handed over as the nearest pixel edge or
+/// the nearest whole number of pixels, the unit's own word after it or
+/// not; a box let go of unchanged hands nothing over.
+#[test]
+fn the_region_boxes_are_in_what_the_picture_is_measured_in() {
+    use egui::accesskit::Role;
+    let mut printed = panels();
+    printed.coordinate_format = CoordinateFormat::Print;
+    let mut harness = build(WINDOW, 1, printed);
+    // Two pixels to the inch: half an inch a pixel.
+    harness
+        .state_mut()
+        .current
+        .as_mut()
+        .expect("a picture")
+        .exif
+        .density = crate::image::density::Density::new([2.0, 2.0], 25.4);
+    harness.state_mut().input.selection = Selection::Shown(Region {
+        x: 1,
+        y: 1,
+        width: 2,
+        height: 1,
+    });
+    harness.run();
+    let boxes: Vec<String> = harness
+        .get_all_by_role(Role::TextInput)
+        .filter_map(|node| node.value())
+        .collect();
+    assert_eq!(boxes, ["Free", "0.5", "0.5", "1.0", "0.5"]);
+
+    let typed = |harness: &mut Harness<'static, State>, holds: &str, text: &str| {
+        harness
+            .get_all_by_role(Role::TextInput)
+            .find(|node| node.value().as_deref() == Some(holds))
+            .expect("the box")
+            .focus();
+        harness.run();
+        harness.state_mut().commands.clear();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.event(egui::Event::Text(text.to_string()));
+        harness.step();
+        harness.key_press(egui::Key::Enter);
+        harness.step();
+        harness.step();
+        asked(harness)
+    };
+    // 1.4 inches is 2.8 pixels: the edge at 3.
+    assert_eq!(
+        typed(&mut harness, "1.0", "1.4"),
+        [Command::RegionField(Field::Width, 3)]
+    );
+    assert_eq!(
+        typed(&mut harness, "1.0", "2 in"),
+        [Command::RegionField(Field::Width, 4)]
+    );
+    // Less than a pixel is a pixel; nothing at all is refused.
+    assert_eq!(
+        typed(&mut harness, "1.0", "0.1"),
+        [Command::RegionField(Field::Width, 1)]
+    );
+    assert_eq!(typed(&mut harness, "1.0", "0"), []);
+    assert_eq!(typed(&mut harness, "1.0", "1.0"), []);
+}
+
+/// Beside the zoom menu's print size, a button puts up its calibration.
+#[test]
+fn the_zoom_menu_offers_the_calibration() {
+    let mut harness = open(WINDOW, 1, panels());
+    harness.state_mut().input.calibratable = true;
+    assert_eq!(click(&mut harness, "Zoom"), []);
+    assert_eq!(
+        click(&mut harness, &Control::Calibrate.label()),
+        [Command::Press(Control::Calibrate)]
+    );
+}
+
+/// The calibration's dialog: the slider, and OK and Cancel, each asking
+/// for what it says.
+#[test]
+fn the_calibration_asks_for_its_buttons() {
+    let mut harness = open(WINDOW, 1, panels());
+    harness.state_mut().input.calibrate = Some(super::calibrate::Input {
+        points_per_mm: [4.0, 4.0],
+        stops: 0.0,
+        low: -0.5,
+        high: 0.5,
+        step: 0.001,
+        diagonal: 15.3,
+    });
+    harness.run();
+    assert_eq!(
+        click(&mut harness, "OK"),
+        [Command::Press(Control::CalibrateOk)]
+    );
+    assert_eq!(
+        click(&mut harness, "Cancel"),
+        [Command::Press(Control::CancelCalibrate)]
+    );
+    // The reset, alive once the slider is off the size the monitor says —
+    // the card larger with it, as the application makes it.
+    if let Some(input) = harness.state_mut().input.calibrate.as_mut() {
+        input.stops = 0.1;
+        input.points_per_mm = [4.0 * 0.1_f32.exp2(); 2];
+    }
+    harness.run();
+    assert_eq!(
+        click(&mut harness, "Reset"),
+        [Command::Press(Control::CalibrateReset)]
     );
 }

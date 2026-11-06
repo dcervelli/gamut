@@ -2,6 +2,7 @@
 
 mod animation;
 pub mod arranging;
+mod calibration;
 mod chooser;
 mod commands;
 mod copying;
@@ -10,6 +11,7 @@ mod exporting;
 mod files;
 mod filmstrip;
 pub mod folder;
+mod ground;
 mod gui;
 pub mod input;
 mod kept;
@@ -43,6 +45,7 @@ use crate::image::DecodedImage;
 use crate::image::auxiliary::{Auxiliary, Showing};
 use crate::image::decode::{self, CameraJpeg, Reading, Rendering};
 use crate::image::display::{Display, Headroom, Startup};
+use crate::image::geo::Georeference;
 use crate::image::orient::Turn;
 use crate::image::sequence::Sequence;
 use crate::loader::{Decoded, Loader, Opened, Ready, Reload, Source};
@@ -79,7 +82,7 @@ use kept::{Kept, Left, Settings};
 use measuring::{Measured, Measuring};
 use region::Marking;
 use tags::Tags;
-use window::{file_label, initial_window_size, loading_title, window_title};
+use window::{file_label, folder_label, initial_window_size, loading_title, window_title};
 
 /// What wakes the event loop from another thread.
 pub enum UserEvent {
@@ -293,10 +296,10 @@ pub struct Opening {
 }
 
 /// `files` in `order`, as far as what is known of each — `glimpsed` — can
-/// put them: files the order knows nothing of keep the order they stand in,
-/// after those it does. What `main` puts the command line's list in when
-/// the order needs only the names, and what files chosen in the window are
-/// put in once they have been read for it (see [`arranging`]).
+/// put them: files the order knows nothing of by folder and then by name,
+/// after those it does. What `main` puts the command line's list in, and
+/// what files chosen in the window are put in once they have been read
+/// for it (see [`arranging`]).
 pub fn arranged(
     files: Vec<PathBuf>,
     order: ui::filmstrip::Order,
@@ -599,6 +602,11 @@ pub struct App {
     /// The configuration file's commands, the run in flight and its
     /// dialog — see [`commands`].
     commands: commands::Commands,
+    /// The print size's calibration, while it is up.
+    calibrating: Option<calibration::Calibrating>,
+    /// The size each model of monitor was measured at by hand, kept in the
+    /// state file — see [`calibration`].
+    displays: std::collections::BTreeMap<String, [f64; 2]>,
     /// How the desktop's file dialog hands its answer back: what `main`
     /// made from the loop's proxy.
     picker: portal::Deliver,
@@ -800,7 +808,7 @@ impl App {
             measuring: Measuring::new(measured),
             panels: Panels {
                 show_ui: config.show_ui,
-                show_filmstrip: config.show_filmstrip,
+                show_filmstrip: kept_state.show_filmstrip,
                 // The histogram where both are asked for: it is the first
                 // of the two buttons.
                 side: if config.show_histogram {
@@ -819,6 +827,9 @@ impl App {
                 loupe_magnification: kept_state.loupe_magnification,
                 pixel_format: kept_state.pixel_format,
                 coordinate_format: kept_state.coordinate_format,
+                print_unit: kept_state
+                    .print_unit
+                    .unwrap_or_else(crate::measurement::unit),
                 geographic_format: kept_state.geographic_format,
                 info_tab: ui::tags::Tab::Facts,
             },
@@ -826,6 +837,8 @@ impl App {
             edits: Vec::new(),
             renaming: None,
             exporting: None,
+            calibrating: None,
+            displays: kept_state.displays.clone(),
             picker,
             picking: false,
             clipboard_offers: false,
@@ -1415,6 +1428,50 @@ impl App {
             .and_then(|monitor| monitor::key_of(&monitor))
     }
 
+    /// The window's physical pixels to the millimeter on the monitor it is
+    /// on, across and down: the monitor's logical density at the scale the
+    /// window is drawn at, which on a compositor that cannot run a
+    /// fractional scale is not the monitor's own. `None` where the monitor
+    /// has neither said how large it is nor been measured by hand.
+    fn surface_density(&self) -> Option<[f64; 2]> {
+        let screen = self.screen()?;
+        let mm = self.screen_size(&screen)?;
+        let scale = f64::from(self.device_scale());
+        Some(screen.density(mm).map(|per_mm| per_mm * scale))
+    }
+
+    /// The zoom that shows the picture at the size the file says it prints:
+    /// as many of the window's pixels to an image pixel as make the file's
+    /// inch an inch on the glass. `None` where the file does not say its
+    /// density or the monitor its size.
+    ///
+    /// The file's density is of its pixels as stored, and the monitor's is
+    /// across and down the desk, so each is read along the axis of the other
+    /// it lies on — through the orientation the file asks for and the turn
+    /// on screen. A map shown in the picture's place is at the picture's size
+    /// on the glass, its pixels larger as it has fewer. The zoom is one number
+    /// where the two axes could ask for two, and is the mean of them; they
+    /// differ only where a file says its pixels are not square.
+    pub(super) fn print_zoom(&self) -> Option<f32> {
+        let current = self.current.as_ref()?;
+        let density = current.exif.density?;
+        let surface = self.surface_density()?;
+        let stood = current
+            .exif
+            .orientation
+            .is_some_and(crate::image::orient::quarter_turn);
+        let per_mm = if stood { density.swapped() } else { density }.per_mm();
+        let picture = current.picture().0;
+        let upright = [picture.width, picture.height];
+        let shown = [current.image.width, current.image.height];
+        let zooms = [0, 1].map(|axis| {
+            let across = usize::from(current.turn.is_quarter()) ^ axis;
+            surface[across] / per_mm[axis] * f64::from(upright[axis]) / f64::from(shown[axis])
+        });
+        let zoom = (zooms[0] * zooms[1]).sqrt() as f32;
+        zoom.is_finite().then_some(zoom)
+    }
+
     /// [`App::hdr_state`] read as the yes or no the button is drawn from.
     fn hdr_available(&self) -> bool {
         self.hdr_state() == Hdr::Available
@@ -1699,6 +1756,33 @@ impl App {
         Some((view, size))
     }
 
+    /// The view a file arriving placed by `geo`, `stored` pixels as stored
+    /// and shown under `turn`, lines up with the picture on screen by —
+    /// where both are georeferenced in one system and the ground on screen
+    /// overlaps it. Asked by the arrival itself, and by the stand-in from
+    /// what the header said, so that the two land in the same place.
+    fn on_the_same_ground(
+        &self,
+        geo: Option<&Georeference>,
+        stored: [u32; 2],
+        turn: Turn,
+    ) -> Option<View> {
+        let current = self.current.as_ref()?;
+        let (view, _) = self.picture_view()?;
+        let (picture, _) = current.picture();
+        let from = ground::Placed {
+            geo: current.exif.georeference.as_ref()?,
+            stored: [picture.width, picture.height],
+            turn: current.turn,
+        };
+        let to = ground::Placed {
+            geo: geo?,
+            stored,
+            turn,
+        };
+        ground::aligned(view, from, to, self.viewport())
+    }
+
     /// A read asked for `asked` has landed. Where the preference has moved
     /// since and the picture on screen has another rendering to move to, it
     /// is read again in the one asked for now.
@@ -1756,6 +1840,7 @@ impl App {
     /// as the loop ends.
     pub(super) fn kept_state(&self) -> State {
         State {
+            show_filmstrip: self.panels.show_filmstrip,
             filmstrip_width: self.filmstrip.slot(),
             loupe_magnification: self.panels.loupe_magnification,
             horizon_step: self.panels.horizon_step,
@@ -1765,8 +1850,11 @@ impl App {
             profile: self.profile,
             pixel_format: self.panels.pixel_format,
             coordinate_format: self.panels.coordinate_format,
+            print_unit: Some(self.panels.print_unit)
+                .filter(|&unit| unit != crate::measurement::unit()),
             geographic_format: self.panels.geographic_format,
             include_subfolders: self.trees.include_subfolders,
+            displays: self.displays.clone(),
         }
     }
 
@@ -1943,7 +2031,8 @@ impl App {
     /// is, being a better picture of itself than any thumbnail.
     fn standin(&self, sight: &Sight) -> Option<ui::Standin> {
         let path = self.replacing()?;
-        let (width, height) = self.chooser.facts_of(path)?.size?;
+        let facts = self.chooser.facts_of(path)?;
+        let (width, height) = facts.size?;
         let thumb = self.thumbs.get(path)?;
         // Where the picture will land, decided as its arrival will decide it.
         let kept = self.kept.left(path);
@@ -1959,7 +2048,9 @@ impl App {
             .zip(self.files.shown_path())
             .map(|(size, path)| (path, size));
         let (arrival, _) = arrival(Reload::Fresh, path, size, shown);
-        let view = arriving_view(arrival, kept, view, picture, size);
+        let view = self
+            .on_the_same_ground(facts.georeference.as_deref(), [width, height], turn)
+            .unwrap_or_else(|| arriving_view(arrival, kept, view, picture, size));
         Some(ui::Standin {
             thumb,
             placement: view.placement(size, sight.viewport),
@@ -2218,6 +2309,11 @@ impl App {
             index: self.files.target(),
             count: self.files.len(),
             arriving: self.arriving().map(file_label),
+            directory: self
+                .arriving()
+                .or_else(|| self.files.shown_path())
+                .map(folder_label)
+                .unwrap_or_default(),
             deleted: self.watch.missing(),
             headroom: self.headroom(),
             hdr_available: self.hdr_available(),
@@ -2240,6 +2336,7 @@ impl App {
             aspect: self.marking.aspect,
             transport: self.transport(),
             filmstrip,
+            order: self.filmstrip.order(),
             side: self.side_showing(),
             chooser,
             tags,
@@ -2262,6 +2359,9 @@ impl App {
                 .shown_path()
                 .and_then(|path| self.thumbs.get(path)),
             waiting: self.replacing().is_some(),
+            print_zoom: self.print_zoom(),
+            calibrate: self.calibration_input(),
+            calibratable: conditions.screen,
         }
     }
 
@@ -2900,7 +3000,7 @@ impl App {
         // left in: an exposure set on the camera's JPEG means nothing to
         // linear sensor counts, and the other way about.
         let kept = match arrival {
-            Arrival::Beside | Arrival::Anew => self
+            Arrival::Beside | Arrival::Matched | Arrival::Anew => self
                 .kept
                 .left(&file.path)
                 .filter(|left| left.rendering == rendering)
@@ -2989,6 +3089,7 @@ impl App {
                 bytes: facts.bytes,
                 modified: facts.modified,
                 taken: exif.taken,
+                georeference: exif.georeference.clone().map(Box::new),
             },
         );
         // Made from the picture itself, decoded already, rather than read
@@ -3006,12 +3107,28 @@ impl App {
         if stepping
             || matches!(
                 arrival,
-                Arrival::Rescaled | Arrival::Reshaped | Arrival::Anew | Arrival::Rerendered
+                Arrival::Rescaled
+                    | Arrival::Reshaped
+                    | Arrival::Matched
+                    | Arrival::Anew
+                    | Arrival::Rerendered
             )
         {
             self.marking.clear();
         }
-        self.view = arriving_view(arrival, kept.as_ref(), self.view, shown_size, size);
+        // Another file of the ground on screen lines up with it, ahead of
+        // anything its arrival or what it was left in would make of the
+        // view: the comparison is of the place, wherever its pixels are.
+        let on_the_ground = match stepping {
+            true => self.on_the_same_ground(
+                exif.georeference.as_ref(),
+                [image.width, image.height],
+                turn,
+            ),
+            false => None,
+        };
+        self.view = on_the_ground
+            .unwrap_or_else(|| arriving_view(arrival, kept.as_ref(), self.view, shown_size, size));
         if arrival != Arrival::Reread {
             // A move under way was about the picture that has just left, and
             // there is nothing for it to carry the eye across any more.
@@ -3019,7 +3136,7 @@ impl App {
         }
         // And what else could open the file arriving, read here with the rest
         // of what the file itself says about it.
-        if matches!(arrival, Arrival::Beside | Arrival::Anew) {
+        if matches!(arrival, Arrival::Beside | Arrival::Matched | Arrival::Anew) {
             self.openers = openers::for_file(&file.path);
         }
         self.current = Some(Current {
@@ -3560,6 +3677,11 @@ enum Arrival {
     /// Another file, of the same size as the picture on screen: the view
     /// carries over, the display is its own.
     Beside,
+    /// Another file of the same shape as the picture on screen at another
+    /// size — the same ground mapped at two resolutions, say: the view is
+    /// rescaled so the same detail stays where it was, at the size it was
+    /// on screen, and the display is its own.
+    Matched,
     /// Another file of another size, or a file into an empty window: put
     /// back as it was left, or fitted afresh.
     Anew,
@@ -3590,6 +3712,7 @@ fn arrival(
         (true, false) if same_shape => Arrival::Rescaled,
         (true, false) => Arrival::Reshaped,
         (false, true) => Arrival::Beside,
+        (false, false) if same_shape => Arrival::Matched,
         (false, false) => Arrival::Anew,
     };
     (arrival, stepping)
@@ -3632,10 +3755,11 @@ fn arriving_view(
             fitted.reset();
             fitted
         }
-        // The same scene rendered again, or at another size: the detail
-        // under the center of the window stays there, at the size it was
-        // on screen.
-        (Arrival::Rerendered | Arrival::Rescaled, _) => {
+        // The same scene rendered again, or at another size, or another
+        // file of the same shape — which is the same case as one of the
+        // same size, made at another resolution: the detail under the
+        // center of the window stays there, at the size it was on screen.
+        (Arrival::Rerendered | Arrival::Rescaled | Arrival::Matched, _) => {
             let mut rescaled = view;
             if let Some(from) = shown_size {
                 rescaled.rescale(from, size);
@@ -3838,11 +3962,13 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput { event: key, .. }
                 if key.state == winit::event::ElementState::Pressed =>
             {
-                let region = matches!(self.marking.selection, ui::Selection::Shown(_));
                 let logical = input::logical_key(key, self.pointer.modifiers);
-                self.keys
-                    .action_for(&logical, key.physical_key, self.pointer.modifiers, region)
-                    == Some(input::Action::OpenChooser)
+                self.keys.action_for(
+                    &logical,
+                    key.physical_key,
+                    self.pointer.modifiers,
+                    &self.holding(),
+                ) == Some(input::Action::OpenChooser)
             }
             _ => false,
         };

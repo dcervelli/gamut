@@ -32,6 +32,7 @@ use exif::{Context, In, Rational, Tag, Value};
 
 use super::attitude::{self, Attitude, FULL_FRAME_DIAGONAL};
 use super::decode::{Opened, ReadSeek};
+use super::density::{self, Density};
 use super::level::{self, Level};
 use super::metadata_region::{MetadataRegion, Placed};
 use super::orient::Turn;
@@ -164,6 +165,10 @@ pub struct Exif {
     /// file — a raw's directory is about the preview in front of it, and
     /// any other container's EXIF block has no pixels of its own.
     pub compression: Option<String>,
+    /// How many pixels the file says go to an inch: the block's, or where it
+    /// says nothing, the container's own (see [`density`]). In the picture
+    /// as stored; `None` for a raw, whose block is about the preview.
+    pub density: Option<Density>,
     /// When the picture was taken, as [`taken`] reads it.
     pub taken: Option<Taken>,
 }
@@ -225,6 +230,12 @@ impl Exif {
         // CRW, which has no EXIF, and the exposure of a Phase One, whose
         // EXIF names the camera and stops — and the color temperature, which
         // only the library's reading of the sensor can work out.
+        if exif.density.is_none()
+            && let Some(opened) = opened.as_deref_mut()
+            && let Ok(source) = opened.source()
+        {
+            exif.density = density::in_container(source);
+        }
         let facts = opened.and_then(Opened::facts);
         exif.taken = taken_of(block.as_ref(), &xmp, || facts.clone());
         if let Some(rows) = facts {
@@ -237,6 +248,7 @@ impl Exif {
                 exif.fill(group, entry);
             }
             exif.compression = None;
+            exif.density = None;
         }
         exif
     }
@@ -431,6 +443,7 @@ impl Exif {
                 heading: None,
                 magnetic: false,
                 compression: None,
+                density: None,
                 taken: None,
             };
         };
@@ -473,6 +486,7 @@ impl Exif {
             compression: primary(exif, Tag::Compression)
                 .map(|field| display(exif, field))
                 .filter(|value| !value.is_empty()),
+            density: density_of(exif),
             taken: None,
         }
     }
@@ -1057,6 +1071,19 @@ fn positioning_error(exif: &exif::Exif) -> Option<String> {
 
 /// A tag holding one rational, as a number; `None` for one that holds
 /// anything else, or a zero denominator.
+/// The density the block says, in `ResolutionUnit`s — inches where it does
+/// not say which, as the standard has it; a unit of none is no density.
+fn density_of(exif: &exif::Exif) -> Option<Density> {
+    let mm = match uint(exif, Tag::ResolutionUnit).unwrap_or(2) {
+        2 => 25.4,
+        3 => 10.0,
+        _ => return None,
+    };
+    let x = rational(exif, Tag::XResolution)?;
+    let y = rational(exif, Tag::YResolution).unwrap_or(x);
+    Density::new([x, y], mm)
+}
+
 fn rational(exif: &exif::Exif, tag: Tag) -> Option<f64> {
     match &primary(exif, tag)?.value {
         Value::Rational(parts) => Some(parts.first()?.to_f64()).filter(|value| value.is_finite()),
@@ -1443,6 +1470,24 @@ const WIDEST_ZONE: i64 = 14 * 3600;
 pub fn taken(path: &Path, mut opened: Option<&mut Opened>, xmp: &Xmp) -> Option<Taken> {
     let block = Exif::parse(path, opened.as_deref_mut(), tiff::PREFIX);
     taken_of(block.as_ref(), xmp, || opened?.facts())
+}
+
+/// [`taken`], and where the file's pixels are on the ground, from the one
+/// parse of its EXIF block: what the thumbnailer's header pass reads, the
+/// georeference being what the stand-in for a slow read is placed by.
+pub fn taken_and_placed(
+    path: &Path,
+    mut opened: Option<&mut Opened>,
+    xmp: &Xmp,
+) -> (Option<Taken>, Option<geo::Georeference>) {
+    let block = Exif::parse(path, opened.as_deref_mut(), tiff::PREFIX);
+    let georeference = block
+        .as_ref()
+        .and_then(|block| geo::Georeference::read(&geo_tags(block)));
+    (
+        taken_of(block.as_ref(), xmp, || opened?.facts()),
+        georeference,
+    )
 }
 
 /// [`taken`], from the EXIF block already parsed, the packet, and the
@@ -2679,6 +2724,37 @@ mod tests {
             equivalent("focal-stated", (42343, 10), Some(63)),
             Some(63.0)
         );
+    }
+
+    /// The block's density is read in its unit — centimeters here — and
+    /// one in no unit, as the fixtures' JFIF headers say, is no density.
+    #[test]
+    fn a_density_is_read_in_its_unit() {
+        let mut ifd = Block::new();
+        ifd.rational(0x011a, &[(1181, 10)]); // XResolution
+        ifd.rational(0x011b, &[(1181, 10)]); // YResolution
+        ifd.short(0x0128, 3); // ResolutionUnit, centimeters
+        let path = written("density-cm", &jpeg_with(with_exif(ifd, Block::new())));
+        let read = Exif::read(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            read.density.map(|density| density.words()).as_deref(),
+            Some("300 dpi")
+        );
+        assert_eq!(Exif::read(&fixture("jpeg-rgb.jpg")).density, None);
+    }
+
+    /// The print size's ruler says 150 dpi in its `pHYs` chunk, as near as
+    /// whole pixels to the meter come, and the rulers drawn in it are only
+    /// true at that.
+    #[test]
+    fn the_print_size_ruler_is_150_dpi() {
+        let read = Exif::read(&fixture("print-size/ruler-150dpi.png"));
+        let density = read.density.expect("the ruler says its density");
+        for per_inch in density.per_inch {
+            assert!((per_inch - 150.0).abs() < 0.02, "{per_inch}");
+        }
+        assert_eq!(density.words(), "150 dpi");
     }
 
     #[test]

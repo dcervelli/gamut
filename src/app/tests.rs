@@ -23,6 +23,42 @@ fn write_png(dir: &Path, name: &str, width: u32, height: u32) -> PathBuf {
     path
 }
 
+/// A gray GeoTIFF `width` by `height` in NZTM (EPSG:2193), its first
+/// corner at `corner` and a pixel `pixel` meters across.
+fn write_geotiff(
+    dir: &Path,
+    name: &str,
+    [width, height]: [u32; 2],
+    corner: [f64; 2],
+    pixel: f64,
+) -> PathBuf {
+    use tiff::tags::Tag;
+    let path = dir.join(name);
+    let file = std::fs::File::create(&path).expect("the temporary directory is writable");
+    let mut tiff = tiff::encoder::TiffEncoder::new(std::io::BufWriter::new(file)).unwrap();
+    let mut image = tiff
+        .new_image::<tiff::encoder::colortype::Gray8>(width, height)
+        .unwrap();
+    let tags = image.encoder();
+    tags.write_tag(Tag::Unknown(33550), &[pixel, pixel, 0.0][..])
+        .unwrap();
+    tags.write_tag(
+        Tag::Unknown(33922),
+        &[0.0, 0.0, 0.0, corner[0], corner[1], 0.0][..],
+    )
+    .unwrap();
+    // Projected, under EPSG:2193.
+    tags.write_tag(
+        Tag::Unknown(34735),
+        &[1u16, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 2193][..],
+    )
+    .unwrap();
+    image
+        .write_data(&vec![128u8; (width * height) as usize])
+        .unwrap();
+    path
+}
+
 /// The files are written under a directory of their own so that the tests,
 /// which run alongside each other, cannot tread on each other's files.
 fn opening(name: &str, files: &[(&str, u32, u32)]) -> (App, PathBuf) {
@@ -80,7 +116,7 @@ fn open(paths: Vec<PathBuf>, named: Vec<PathBuf>) -> App {
             size: size.map(|(w, h)| [w as f32, h as f32]),
         }),
         options(),
-        StateFile::none(),
+        StateFile::holding(kept()),
         threads(),
     )
 }
@@ -172,9 +208,18 @@ fn opened_on_nothing() -> App {
         Vec::new(),
         None,
         options(),
-        StateFile::none(),
+        StateFile::holding(kept()),
         threads(),
     )
+}
+
+/// The state the tests were written against: the file list down, rather
+/// than up as a first run has it.
+fn kept() -> State {
+    State {
+        show_filmstrip: false,
+        ..State::default()
+    }
 }
 
 fn options() -> Options {
@@ -187,7 +232,6 @@ fn options() -> Options {
         config: Config {
             show_ui: true,
             show_minimap: false,
-            show_filmstrip: false,
             show_histogram: false,
             show_info: false,
             browse_folder: true,
@@ -381,6 +425,7 @@ fn a_folder_read_steps_in_the_order_in_force() {
     app.filmstrip.set_order(ui::filmstrip::Order {
         sort: ui::filmstrip::Sort::Size,
         direction: ui::filmstrip::Direction::Ascending,
+        ..Default::default()
     });
 
     let _ = app.step(true);
@@ -500,6 +545,7 @@ fn a_directory_opens_in_the_order_last_left() {
     let order = ui::filmstrip::Order {
         sort: ui::filmstrip::Sort::Size,
         direction: ui::filmstrip::Direction::Descending,
+        ..Default::default()
     };
     let size = decode::probe(&paths[0]).unwrap();
     let mut app = App::new(
@@ -511,10 +557,7 @@ fn a_directory_opens_in_the_order_last_left() {
             size: size.map(|(w, h)| [w as f32, h as f32]),
         }),
         options(),
-        StateFile::holding(State {
-            order,
-            ..State::default()
-        }),
+        StateFile::holding(State { order, ..kept() }),
         threads(),
     );
     assert!(
@@ -561,6 +604,7 @@ fn files_chosen_open_on_the_first_in_the_order() {
     let order = ui::filmstrip::Order {
         sort: ui::filmstrip::Sort::Size,
         direction: ui::filmstrip::Direction::Descending,
+        ..Default::default()
     };
     app.filmstrip.set_order(order);
     let _ = app.apply_order();
@@ -1849,6 +1893,42 @@ fn stepping_to_an_image_of_the_same_size_keeps_the_view() {
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
+/// A file of the same shape at another size is the same comparison made
+/// at another resolution — one map of the ground at twice the detail of
+/// another: the detail under the center of the window stays there, at the
+/// size it was on screen, and the display is the file's own.
+#[test]
+fn stepping_to_an_image_of_the_same_shape_rescales_the_view() {
+    let (mut app, dir) = app_over("shape", &[("a.png", 32, 24), ("b.png", 64, 48)]);
+    app.view
+        .set_zoom_at(4.0, VIEWPORT.center(), app.image_size(), VIEWPORT);
+    app.view.pan_by(-40.0, 30.0, app.image_size(), VIEWPORT);
+    let before = app.view.placement(app.image_size(), VIEWPORT);
+    let centered = before.image_point(VIEWPORT.center());
+    if let Some(current) = app.current.as_mut() {
+        current.display.set_exposure(1.0);
+    }
+
+    let _ = app.step(true);
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.image_size(), [64.0, 48.0]);
+    let after = app.view.placement(app.image_size(), VIEWPORT);
+    let landed = after.image_point(VIEWPORT.center());
+    assert!(
+        (after.width - before.width).abs() < 1e-3,
+        "the same size on screen: {after:?} {before:?}"
+    );
+    assert!(
+        (landed[0] - centered[0] * 2.0).abs() < 1e-3
+            && (landed[1] - centered[1] * 2.0).abs() < 1e-3,
+        "the same detail at the center: {landed:?} {centered:?}"
+    );
+    let current = app.current.as_ref().unwrap();
+    assert_eq!(current.display.exposure_stops(), 0.0, "its own display");
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
 /// A file coming back at the size of the one it is arriving beside is a
 /// comparison, and it is made where the eye is: the pan and zoom carry
 /// over from the picture leaving the screen, whatever this file was left
@@ -2081,7 +2161,7 @@ fn open_directories(named: Vec<PathBuf>, recursive: bool, cap: usize) -> App {
             recursive,
             ..options()
         },
-        StateFile::none(),
+        StateFile::holding(kept()),
         threads,
     )
 }
@@ -2374,6 +2454,7 @@ fn thumbnailed(app: &mut App, path: &Path, size: (u32, u32)) {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     let ctx = egui::Context::default();
@@ -2470,6 +2551,63 @@ fn a_slow_read_stands_the_thumbnail_where_the_picture_lands_and_the_panels_wait(
     std::fs::remove_dir_all(dir).expect("we just wrote it");
 }
 
+/// Stepping between georeferenced files of the same ground lines them up
+/// on it, and the stand-in for a slow read lands where the picture will,
+/// placed by what the header said of the file before its pixels are in.
+#[test]
+fn a_georeferenced_file_and_its_stand_in_land_on_the_same_ground() {
+    let dir = std::env::temp_dir().join(format!("gamut-ground-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the temporary directory is writable");
+    let a = write_geotiff(&dir, "a.tif", [400, 300], [1_000.0, 9_000.0], 7.0);
+    // Twice the detail, of ground starting fifty of a's pixels east.
+    let b = write_geotiff(&dir, "b.tif", [500, 700], [1_350.0, 9_000.0], 3.5);
+    let mut app = open(vec![a.clone(), b.clone()], vec![]);
+    app.headless = Some(WINDOW);
+    answer(&mut app, Reload::Fresh);
+    let ground = |app: &App| {
+        let placement = app.view.placement(app.image_size(), app.viewport());
+        let at = placement.image_point(app.viewport().center());
+        let geo = app.current.as_ref().unwrap().exif.georeference.clone();
+        geo.expect("placed").ground(at.map(f64::from))
+    };
+    let (image, viewport) = (app.image_size(), app.viewport());
+    app.view
+        .set_zoom_at(2.0, viewport.center(), image, viewport);
+    app.view.center_on([120.0, 150.0], image, viewport);
+    let before = ground(&app);
+
+    let _ = app.step(true);
+    let since = app.files.pending().expect("a read is in flight").since;
+    let _ = app.files.announce_slow_read(since + files::SLOW_READ);
+    thumbnailed(&mut app, &b, (500, 700));
+    let packet = crate::image::xmp::Xmp::read_from(&b, None);
+    let (_, georeference) = exif::taken_and_placed(&b, None, &packet);
+    assert!(georeference.is_some(), "the header places it");
+    let facts = app.chooser.facts_of(&b).unwrap().clone();
+    let _ = app.chooser.learn(
+        &b,
+        Facts {
+            georeference: georeference.map(Box::new),
+            ..facts
+        },
+    );
+    let stood = app
+        .standin(&app.sight())
+        .expect("the wait is said and the thumbnail held")
+        .placement;
+
+    answer(&mut app, Reload::Fresh);
+    assert_eq!(app.view.zoom(app.image_size(), app.viewport()), 1.0);
+    let after = ground(&app);
+    assert!(
+        (after[0] - before[0]).abs() < 1e-3 && (after[1] - before[1]).abs() < 1e-3,
+        "{before:?} -> {after:?}"
+    );
+    assert_eq!(landed(&app), [stood.x, stood.y, stood.width, stood.height]);
+
+    std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
 /// A step moves what says where in the list the key has gone — the
 /// count, the name in the bar and the title, the file list's highlight —
 /// at once, while the picture stays; what acts on the file waits, the
@@ -2557,6 +2695,7 @@ fn the_transport_bar_is_the_arriving_files_from_the_key() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     assert_eq!(
@@ -2609,6 +2748,7 @@ fn a_kind_that_was_slow_is_said_to_be_slow_at_once() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     let _ = app.step(true);
@@ -2628,6 +2768,7 @@ fn a_kind_that_was_slow_is_said_to_be_slow_at_once() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         },
     );
     assert!(said(&app).is_none());
@@ -3025,7 +3166,7 @@ fn the_rendering_comes_back_from_the_state_file() {
         options(),
         StateFile::holding(State {
             camera_jpeg: true,
-            ..State::default()
+            ..kept()
         }),
         threads(),
     );
@@ -3045,7 +3186,7 @@ fn the_readout_s_formats_come_back_from_the_state_file() {
             pixel_format: ui::PixelFormat::Depth,
             coordinate_format: ui::CoordinateFormat::Projected,
             geographic_format: ui::GeographicFormat::Dms,
-            ..State::default()
+            ..kept()
         }),
         threads(),
     );
@@ -3055,6 +3196,60 @@ fn the_readout_s_formats_come_back_from_the_state_file() {
         ui::CoordinateFormat::Projected
     );
     assert_eq!(app.panels.geographic_format, ui::GeographicFormat::Dms);
+}
+
+/// The file list comes back up or down as it was left, and is up where
+/// the state file says nothing.
+#[test]
+fn the_file_list_s_toggle_comes_back_from_the_state_file() {
+    let opened = |state| {
+        App::new(
+            Vec::new(),
+            Vec::new(),
+            None,
+            options(),
+            StateFile::holding(state),
+            threads(),
+        )
+    };
+    assert!(opened(State::default()).panels.show_filmstrip);
+    let mut app = opened(kept());
+    assert!(!app.panels.show_filmstrip);
+    assert_eq!(app.press(ui::Control::Filmstrip), Effect::Redraw);
+    assert!(app.kept_state().show_filmstrip);
+}
+
+/// The print unit is the locale's until one is chosen against it, and
+/// choosing the locale's own again lets it follow the locale once more:
+/// the state file keeps a unit only while it differs from the locale's.
+/// The choosing itself is `the_print_coordinate_needs_the_files_density`'s.
+#[test]
+fn the_print_unit_is_kept_only_against_the_locale() {
+    let locale = crate::measurement::unit();
+    let opened = |state| {
+        App::new(
+            Vec::new(),
+            Vec::new(),
+            None,
+            options(),
+            StateFile::holding(state),
+            threads(),
+        )
+    };
+    let mut app = opened(kept());
+    assert_eq!(app.panels.print_unit, locale);
+    assert_eq!(app.kept_state().print_unit, None);
+
+    app.panels.print_unit = locale.other();
+    assert_eq!(app.kept_state().print_unit, Some(locale.other()));
+    app.panels.print_unit = locale;
+    assert_eq!(app.kept_state().print_unit, None);
+
+    let app = opened(State {
+        print_unit: Some(locale.other()),
+        ..kept()
+    });
+    assert_eq!(app.panels.print_unit, locale.other());
 }
 
 /// A fixture from `test_images/`, opened on its own.
@@ -3338,7 +3533,7 @@ fn the_messages_name_the_key_that_undoes() {
             &winit::keyboard::Key::Character("z".into()),
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ),
             winit::keyboard::ModifiersState::CONTROL,
-            false
+            &[]
         ),
         Some(Action::Undo),
         "the plain letter under Ctrl"
@@ -3620,6 +3815,7 @@ fn a_removal_waits_and_a_file_on_its_way_out_is_refused_again() {
 #[test]
 fn the_list_is_put_in_order_between_reads_and_the_file_on_screen_stays() {
     use crate::thumbnailer::{Delivered, Facts, News};
+    use crate::ui::Naming;
     use crate::ui::filmstrip::Sort;
     let (mut app, dir) = opening(
         "order",
@@ -3643,9 +3839,18 @@ fn the_list_is_put_in_order_between_reads_and_the_file_on_screen_stays() {
     assert_eq!(app.files.index(), 1);
 
     // By area: only the file on screen has been read, and the rest
-    // wait at the end in the order they stood.
+    // wait at the end by name, the sort before.
     assert_eq!(app.press(ui::Control::SortBy(Sort::Area)), Effect::Redraw);
     assert_eq!(names(&app), ["b.png", "a.png", "c.png"]);
+    assert_eq!(
+        app.namer()
+            .tooltip(ui::Tip::Control(ui::Control::Sorting))
+            .map(|tooltip| tooltip.hints),
+        Some(vec![
+            "Sorted by Area, ascending, then by Name, ascending".to_string()
+        ]),
+        "the button says what breaks the ties"
+    );
     assert_eq!(app.files.index(), 0);
     assert!(
         app.filmstrip.reveals(),
@@ -3661,6 +3866,7 @@ fn the_list_is_put_in_order_between_reads_and_the_file_on_screen_stays() {
             bytes: None,
             modified: None,
             taken: None,
+            georeference: None,
         }),
     };
     app.take_thumbnail(learned("a.png", 4));
@@ -4817,6 +5023,14 @@ fn an_arrival_is_named_by_what_it_stands_to() {
             b,
             large,
             Some((a, small)),
+            Arrival::Matched,
+            true,
+        ),
+        (
+            Reload::Fresh,
+            b,
+            [6.0, 16.0],
+            Some((a, small)),
             Arrival::Anew,
             true,
         ),
@@ -5344,6 +5558,34 @@ fn i_and_shift_i_each_put_up_their_own_tab() {
     let _ = app.press(ui::Control::Info);
     assert_eq!(shown(&app), (true, Tab::Tags), "the button keeps the tab");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The pixel menu's items, chosen by their keys, are refused where the
+/// file cannot answer them — the print's for a file that does not say its
+/// density — and the readout stays as it was; where it can, the readout
+/// takes the choice, and the print's unit switches with its one key.
+#[test]
+fn the_print_coordinate_needs_the_files_density() {
+    use crate::image::density::{Density, Unit};
+    use crate::ui::CoordinateFormat;
+    use input::Action;
+
+    let (mut app, _dir) = app_over("print-coordinate", &[("a.png", 64, 48)]);
+    let print = Action::ShowCoordinates(CoordinateFormat::Print);
+    assert_eq!(app.perform(print), Effect::Nothing);
+    assert_eq!(app.panels.coordinate_format, CoordinateFormat::Pixel);
+    assert_eq!(app.perform(Action::TogglePrintUnit), Effect::Nothing);
+
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([300.0, 300.0], 25.4);
+    assert_eq!(app.perform(print), Effect::Redraw);
+    assert_eq!(app.panels.coordinate_format, CoordinateFormat::Print);
+    app.panels.print_unit = Unit::Inches;
+    assert_eq!(app.perform(Action::TogglePrintUnit), Effect::Redraw);
+    assert_eq!(app.panels.print_unit, Unit::Millimeters);
 }
 
 /// The horizon grid is refused for a picture that does not say which way
@@ -6579,4 +6821,181 @@ fn a_file_said_gone_that_is_there_stays_on_the_list() {
     );
     assert_eq!(app.files.paths(), [dir.join("a.png"), dir.join("b.png")]);
     std::fs::remove_dir_all(dir).expect("we just wrote it");
+}
+
+/// The print size is the zoom that makes the file's inch an inch on the
+/// monitor: dead, saying why, until the file says its density and the
+/// monitor its size, and then a press that goes there.
+#[test]
+fn the_print_size_needs_the_file_and_the_monitor_to_say_their_sizes() {
+    use crate::image::density::Density;
+    use crate::ui::Naming;
+    use crate::ui::menu::ZoomChoice;
+
+    let (mut app, _dir) = app_over("print", &[("a.png", 300, 200)]);
+    let print = ui::Control::ZoomTo(ZoomChoice::Print);
+    let said = |app: &App| {
+        app.namer()
+            .tooltip(ui::Tip::Control(print))
+            .map(|tooltip| tooltip.title)
+    };
+    assert_eq!(app.press(print), Effect::Nothing);
+    assert_eq!(
+        said(&app),
+        Some(vec!["This file doesn't provide DPI".to_string()])
+    );
+
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([100.0, 100.0], 25.4);
+    assert_eq!(app.print_zoom(), None);
+    assert_eq!(app.press(print), Effect::Nothing);
+    assert_eq!(
+        said(&app),
+        Some(vec![
+            "This display didn't report its physical size".to_string()
+        ])
+    );
+
+    let monitors = Monitors::stub(true);
+    monitors.set_screen("DP-1", [1600, 1000], Some([400.0, 250.0]));
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("DP-1".to_string());
+    let zoom = app.print_zoom().expect("both say their sizes");
+    assert!((zoom - 4.0 * 25.4 / 100.0).abs() < 1e-5, "{zoom}");
+    assert_eq!(app.press(print), Effect::Redraw);
+    assert!((app.view.zoom(app.image_size(), app.viewport()) - zoom).abs() < 1e-5);
+    let named = said(&app).expect("named").concat();
+    assert!(named.starts_with(&ZoomChoice::Print.describe()), "{named}");
+}
+
+/// The calibration keeps the size its slider says against the monitor's
+/// model, which the print size then reads in place of the size the monitor
+/// says; Cancel keeps nothing; and while it is up, the keys are its own.
+#[test]
+fn the_calibration_keeps_the_size_the_slider_says() {
+    use crate::image::density::Density;
+    use winit::event::ElementState;
+    use winit::keyboard::{Key, NamedKey, NativeKeyCode, PhysicalKey};
+
+    let (mut app, _dir) = app_over("calibrate", &[("a.png", 300, 200)]);
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([100.0, 100.0], 25.4);
+    assert_eq!(
+        app.press(ui::Control::Calibrate),
+        Effect::Nothing,
+        "no monitor"
+    );
+    assert!(app.calibrating.is_none());
+
+    let monitors = Monitors::stub(true);
+    monitors.set_screen("DP-1", [1600, 1000], Some([400.0, 250.0]));
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("DP-1".to_string());
+    let said = app.print_zoom().expect("the monitor says its size");
+
+    // Cancel, by the key: nothing kept.
+    assert_eq!(app.press(ui::Control::Calibrate), Effect::Redraw);
+    let input = app.calibration_input().expect("the dialog is up");
+    assert_eq!(input.stops, 0.0);
+    assert!((input.points_per_mm[0] - 4.0).abs() < 1e-5);
+    let step = |app: &mut App, key| {
+        app.handle_key(
+            &key,
+            PhysicalKey::Unidentified(NativeKeyCode::Unidentified),
+            ElementState::Pressed,
+        )
+    };
+    assert_eq!(
+        step(&mut app, Key::Named(NamedKey::ArrowRight)),
+        Effect::Redraw
+    );
+    assert_eq!(
+        step(&mut app, Key::Character("n".into())),
+        Effect::Nothing,
+        "the picture's keys wait"
+    );
+    assert_eq!(step(&mut app, Key::Named(NamedKey::Escape)), Effect::Redraw);
+    assert!(app.calibrating.is_none());
+    assert!(app.displays.is_empty());
+
+    // A card a tenth larger: the monitor is a tenth smaller than it says,
+    // and the print size a tenth larger.
+    let _ = app.press(ui::Control::Calibrate);
+    let stops = 1.1_f32.log2();
+    let _ = app.act(ui::Command::Calibration(stops));
+    assert_eq!(app.press(ui::Control::CalibrateOk), Effect::Redraw);
+    let kept = app.displays.get("model-of-DP-1").expect("kept by model");
+    assert!((kept[0] - 400.0 / 1.1).abs() < 1e-3, "{kept:?}");
+    let zoom = app.print_zoom().expect("calibrated");
+    assert!((zoom / said - 1.1).abs() < 1e-4, "{zoom} after {said}");
+    assert_eq!(app.kept_state().displays, app.displays);
+
+    // Opened again, it starts where it was left; moved back to what the
+    // monitor says, OK lets the measured size go.
+    let _ = app.press(ui::Control::Calibrate);
+    let input = app.calibration_input().expect("up again");
+    assert!(
+        (input.stops - stops).abs() <= calibration::STEP / 2.0,
+        "on the slider's steps"
+    );
+    let _ = app.act(ui::Command::Calibration(0.0));
+    let _ = app.handle_key(
+        &Key::Named(NamedKey::Enter),
+        PhysicalKey::Unidentified(NativeKeyCode::Unidentified),
+        ElementState::Pressed,
+    );
+    assert!(app.displays.is_empty());
+}
+
+/// A monitor that says nothing of its size can be measured, and then has a
+/// print size.
+#[test]
+fn a_monitor_that_says_no_size_is_measured() {
+    use crate::image::density::Density;
+
+    let (mut app, _dir) = app_over("measured", &[("a.png", 300, 200)]);
+    app.current
+        .as_mut()
+        .expect("a.png is on screen")
+        .exif
+        .density = Density::new([100.0, 100.0], 25.4);
+    let monitors = Monitors::stub(true);
+    monitors.set_screen("HDMI-A-1", [1920, 1080], None);
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("HDMI-A-1".to_string());
+    assert_eq!(app.print_zoom(), None);
+    let _ = app.press(ui::Control::Calibrate);
+    assert_eq!(app.press(ui::Control::CalibrateOk), Effect::Redraw);
+    let zoom = app.print_zoom().expect("measured at the guess");
+    assert!((zoom - 96.0 / 100.0).abs() < 1e-4, "{zoom}");
+}
+
+/// The dialog's reset puts the slider back on the size the monitor says,
+/// and centers its run there, however far off the size kept was.
+#[test]
+fn the_calibrations_reset_goes_back_to_what_the_monitor_says() {
+    let (mut app, _dir) = app_over("reset", &[("a.png", 300, 200)]);
+    let monitors = Monitors::stub(true);
+    monitors.set_screen("DP-1", [1600, 1000], Some([400.0, 250.0]));
+    app.output.monitors = Some(monitors);
+    app.headless_monitor = Some("DP-1".to_string());
+    app.displays
+        .insert("model-of-DP-1".to_string(), [250.0, 156.25]);
+
+    let _ = app.press(ui::Control::Calibrate);
+    let input = app.calibration_input().expect("up");
+    assert!(input.stops > 0.6, "{input:?}");
+    assert!(input.low > 0.0, "the size the monitor says is past the run");
+    assert_eq!(app.press(ui::Control::CalibrateReset), Effect::Redraw);
+    let input = app.calibration_input().expect("still up");
+    assert_eq!((input.stops, input.low, input.high), (0.0, -0.5, 0.5));
+    assert_eq!(app.press(ui::Control::CalibrateReset), Effect::Nothing);
+    let _ = app.press(ui::Control::CalibrateOk);
+    assert!(app.displays.is_empty(), "back to what the monitor says");
 }

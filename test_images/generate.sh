@@ -769,6 +769,12 @@ gdal_translate -q -of GTiff -co COMPRESS=WEBP -co WEBP_LOSSLESS=YES \
 magick tiff-rgb8.tif -alpha opaque -depth 8 -type TrueColorAlpha "$work/opaque.tif"
 gdal_translate -q -of GTiff -co COMPRESS=WEBP -co WEBP_LOSSLESS=YES \
   -co TILED=YES -co BLOCKXSIZE=16 -co BLOCKYSIZE=16 "$work/opaque.tif" tiff-webp-opaque.tif
+# LZW in tiles wider than the picture, so that every row of every tile is
+# padded past its edge. With this pattern and these tiles the stream of the
+# first tile runs out as the last row's padding is reached, which is where
+# `tiff` on weezl 0.1 took the stream for one with no end code.
+gdal_translate -q -of GTiff -co COMPRESS=LZW -co TILED=YES -co BLOCKXSIZE=48 \
+  -co BLOCKYSIZE=16 tiff-rgb8.tif tiff-lzw-padded.tif
 # A picture with an internal mask, as GDAL writes one from an alpha band: a
 # one-bit transparency-mask directory after the picture, which is not a page.
 # The upside-down page is appended after it, so that reaching the second page

@@ -167,9 +167,12 @@ fn commented(line: &str) -> Option<String> {
 /// Key names that held another name inside their own — `zoom.100` and
 /// `zoom.100.toggle` — which TOML cannot hold side by side, since the one is
 /// then both a value and a table of more; and what each is called now.
-const RENAMED: [(&str, &str); 2] = [
+const RENAMED: [(&str, &str); 5] = [
     ("zoom.100.toggle", "zoom.toggle"),
     ("files.map.bounds", "files.map-bounds"),
+    ("zoom.print.calibrate", "zoom.print-calibrate"),
+    ("files.sort", "files.sort.menu"),
+    ("interface.readout", "interface.readout.menu"),
 ];
 
 /// A key's name as it is called now.

@@ -10,6 +10,7 @@
 use egui::{Button, RichText, Sense, Ui, Vec2, WidgetInfo, WidgetType, vec2};
 
 use crate::image::aspect::Aspect;
+use crate::image::density::Unit;
 use crate::render::Upscale;
 use crate::view::{Axis, Fit, View, Viewport};
 
@@ -44,6 +45,9 @@ const MENU_SECTION_GAP: f32 = 10.0;
 /// The room set aside for the mark in a fit cell. Larger than a toggle's,
 /// the cells of a menu being larger than a button in a bar.
 const FIT_ICON: f32 = 24.0;
+/// The room set aside for the ruler on the calibration's button, which is
+/// as tall as a cell and no wider.
+const CALIBRATE_ICON: f32 = 18.0;
 
 /// A copy the interface can be asked for, and so an item of the menu of
 /// copies.
@@ -93,13 +97,18 @@ impl Copies {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ZoomChoice {
     Scale(f32),
+    /// The zoom that shows the picture at the size the file says it prints,
+    /// on the monitor the window is on — which is not a number the menu
+    /// knows, and so is handed to [`ZoomChoice::apply`] and
+    /// [`ZoomChoice::active`] by the application that does.
+    Print,
     Fit(Fit),
     Filter(Upscale),
 }
 
 /// What the zoom menu offers. The order is the order the cells are laid out
 /// in, section by section and left to right within each.
-pub const ZOOM_CHOICES: [ZoomChoice; 12] = [
+pub const ZOOM_CHOICES: [ZoomChoice; 13] = [
     ZoomChoice::Scale(0.10),
     ZoomChoice::Scale(0.25),
     ZoomChoice::Scale(0.50),
@@ -108,6 +117,7 @@ pub const ZOOM_CHOICES: [ZoomChoice; 12] = [
     ZoomChoice::Scale(4.0),
     ZoomChoice::Scale(8.0),
     ZoomChoice::Scale(16.0),
+    ZoomChoice::Print,
     ZoomChoice::Fit(Fit::Whole),
     ZoomChoice::Fit(Fit::Fill),
     ZoomChoice::Filter(Upscale::Nearest),
@@ -117,35 +127,59 @@ pub const ZOOM_CHOICES: [ZoomChoice; 12] = [
 /// How the zoom menu is divided: a section's name, how many of
 /// [`ZOOM_CHOICES`] it takes, in that order, and how many to a row.
 ///
-/// Three things are chosen from it and they are not the same kind of thing:
-/// a zoom to go to, a rule for the view to keep, and how the magnified image
-/// is resampled. Undivided, the last of them read as a third fit. Eight
-/// numbers in fours, the two fits abreast, and two filters named in words
-/// rather than drawn as icons — the one pair of cells cut wider, and only
-/// because a word needs more room than a number.
-pub const ZOOM_SECTIONS: [(&str, usize, usize); 3] =
-    [("Zoom", 8, 4), ("Fit", 2, 2), ("Up-scaling", 2, 2)];
+/// Four things are chosen from it and they are not the same kind of thing:
+/// a zoom to go to, the zoom the picture is its own size at, a rule for the
+/// view to keep, and how the magnified image is resampled. Undivided, the
+/// last of them read as a third fit, and the print size as a ninth number
+/// that wears no number. Eight numbers in fours, the print size alone, the
+/// two fits abreast, and two filters named in words rather than drawn as
+/// icons — the print size and the filters cut wider, and only because a word
+/// needs more room than a number.
+pub const ZOOM_SECTIONS: [(&str, usize, usize); 4] = [
+    ("Zoom", 8, 4),
+    ("Physical", 1, 1),
+    ("Fit", 2, 2),
+    ("Up-scaling", 2, 2),
+];
 
 impl ZoomChoice {
     /// Whether this is what the view is already doing — `fit`, `zoom` and
     /// `upscale` being what it is doing — which is what lights the cell. A
     /// fit is only itself; a scale counts as matched when it is the zoom on
     /// screen and the view is not in a fit that happens to have landed there,
-    /// since pressing it would then mean something. A filter is always one of
-    /// the two, so one of that section's cells is always lit.
-    pub fn active(self, fit: Option<Fit>, zoom: f32, upscale: Upscale) -> bool {
+    /// since pressing it would then mean something. The print size is a
+    /// scale like the others, at `print`, the zoom it stands for where there
+    /// is one. A filter is always one of the two, so one of that section's
+    /// cells is always lit.
+    pub fn active(self, fit: Option<Fit>, zoom: f32, upscale: Upscale, print: Option<f32>) -> bool {
         match self {
             ZoomChoice::Scale(scale) => fit.is_none() && (zoom - scale).abs() < scale * 1e-3,
+            ZoomChoice::Print => {
+                print.is_some_and(|print| ZoomChoice::Scale(print).active(fit, zoom, upscale, None))
+            }
             ZoomChoice::Fit(fit_choice) => fit == Some(fit_choice),
             ZoomChoice::Filter(filter) => filter == upscale,
         }
     }
 
     /// Does what the cell says to `view`; a scale is zoomed to about
-    /// `anchor`, in window pixels, as [`View::set_zoom_at`] takes it.
-    pub fn apply(self, view: &mut View, anchor: [f32; 2], image: [f32; 2], viewport: Viewport) {
+    /// `anchor`, in window pixels, as [`View::set_zoom_at`] takes it, and the
+    /// print size is the scale `print`, where there is one.
+    pub fn apply(
+        self,
+        view: &mut View,
+        anchor: [f32; 2],
+        image: [f32; 2],
+        viewport: Viewport,
+        print: Option<f32>,
+    ) {
         match self {
             ZoomChoice::Scale(scale) => view.set_zoom_at(scale, anchor, image, viewport),
+            ZoomChoice::Print => {
+                if let Some(print) = print {
+                    view.set_zoom_at(print, anchor, image, viewport);
+                }
+            }
             ZoomChoice::Fit(fit) => view.set_fit(fit),
             ZoomChoice::Filter(filter) => view.set_upscale(filter),
         }
@@ -155,6 +189,7 @@ impl ZoomChoice {
     pub fn label(self) -> String {
         match self {
             ZoomChoice::Scale(scale) => percent(scale),
+            ZoomChoice::Print => "Print Size".to_string(),
             ZoomChoice::Fit(Fit::Whole) => "Fit whole".to_string(),
             ZoomChoice::Fit(Fit::Fill) => "Fill".to_string(),
             ZoomChoice::Filter(filter) => filter.label().to_string(),
@@ -171,6 +206,7 @@ impl ZoomChoice {
     pub fn describe(self) -> String {
         match self {
             ZoomChoice::Scale(scale) => format!("Zoom to {}", percent(scale)),
+            ZoomChoice::Print => "Zoom to actual print size based on DPI".to_string(),
             ZoomChoice::Fit(Fit::Whole) => "Fit the whole image".to_string(),
             ZoomChoice::Fit(Fit::Fill) => "Fill the window with the image".to_string(),
             ZoomChoice::Filter(Upscale::Nearest) => "Magnify to hard pixel edges".to_string(),
@@ -200,9 +236,18 @@ pub fn describe_format(format: PixelFormat) -> &'static str {
 pub fn describe_coordinates(format: CoordinateFormat) -> &'static str {
     match format {
         CoordinateFormat::Pixel => "Column and row of the pixel",
+        CoordinateFormat::Print => "Distance from top left when printed with image DPI",
         CoordinateFormat::Projected => "Coordinates in the file's own system",
         CoordinateFormat::Geographic => "Latitude and longitude on WGS 84",
         CoordinateFormat::Direction => "Azimuth and elevation toward the pixel",
+    }
+}
+
+/// What each unit of a print measures in, for its item's tooltip.
+pub fn describe_print_unit(unit: Unit) -> &'static str {
+    match unit {
+        Unit::Inches => "Measure print size in inches",
+        Unit::Millimeters => "Measure print size in millimeters",
     }
 }
 
@@ -231,6 +276,7 @@ fn heading(pass: &Pass, ui: &mut Ui, title: &str, first: bool) {
 pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     let (fit, upscale) = (pass.view.fit(), pass.view.upscale());
+    let print = pass.input.print_zoom;
     let mut first = 0;
     for (index, (title, count, columns)) in ZOOM_SECTIONS.into_iter().enumerate() {
         heading(pass, ui, title, index == 0);
@@ -240,10 +286,22 @@ pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
             .spacing(vec2(MENU_GAP, MENU_GAP))
             .show(ui, |ui| {
                 for (place, choice) in choices.iter().enumerate() {
-                    let active = choice.active(fit, zoom, upscale);
+                    let active = choice.active(fit, zoom, upscale, print);
                     let response = match choice {
                         ZoomChoice::Scale(scale) => {
                             ui.add_sized(MENU_CELL, Button::new(percent(*scale)).selected(active))
+                        }
+                        // Dead where the file or the monitor does not say
+                        // its size, and its tooltip says which.
+                        ZoomChoice::Print => {
+                            let response = ui.add_enabled(
+                                print.is_some(),
+                                egui::Button::new(choice.label())
+                                    .selected(active)
+                                    .min_size(vec2(MENU_WORD_CELL, MENU_CELL[1])),
+                            );
+                            calibrate_cell(pass, ui);
+                            response
                         }
                         // In marks, where the filters below are in words.
                         ZoomChoice::Fit(fit) => fit_cell(pass, ui, *fit, fills, active),
@@ -267,6 +325,31 @@ pub(super) fn zoom_cells(pass: &mut Pass, ui: &mut Ui, zoom: f32, fills: Axis) {
                     }
                 }
             });
+    }
+}
+
+/// The button beside the print size that puts up its calibration: a
+/// square the cell's height, wearing a ruler. A press closes the menu, the
+/// dialog being a question asked over the window.
+fn calibrate_cell(pass: &mut Pass, ui: &mut Ui) {
+    let control = Control::Calibrate;
+    let live = pass.input.calibratable;
+    let sense = if live { Sense::CLICK } else { Sense::HOVER };
+    let (rect, response) = ui.allocate_exact_size(vec2(MENU_CELL[1], MENU_CELL[1]), sense);
+    let (background, ink) = pass.button_ink(false, &response, live);
+    ui.painter().rect_filled(rect, TOGGLE_RADIUS, background);
+    icon::paint(
+        ui.painter(),
+        icon::RULER,
+        icon::square(pass.grid, rect, CALIBRATE_ICON),
+        ink,
+        background,
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, live, control.label()));
+    let response = pass.tooltip(response, Tip::Control(control));
+    if response.clicked() {
+        pass.press(control);
+        ui.close();
     }
 }
 
@@ -300,72 +383,56 @@ fn fit_cell(pass: &mut Pass, ui: &mut Ui, fit: Fit, fills: Axis, active: bool) -
     response
 }
 
-/// The pixel-format menu: the three formats abreast, in cells cut for
-/// words, under the one heading that says what the menu is of — it hangs
-/// from a dot rather than from a word.
+/// The pixel menu: the ways of writing where a pixel is, and under them the
+/// ways of writing its value — the order the readout writes the two in —
+/// each item a line with the key that chooses it while the menu is open
+/// beside it, as the sort menu's are.
 ///
-/// A file that says where its pixels are on the ground brings two rows more:
-/// the coordinates it can give, and — where one of them is a latitude — the
-/// two ways of writing one. Every other file brings neither, so a menu that
-/// nearly everyone opens for the value alone is never longer for it. The
+/// Every way of writing where a pixel is keeps its place, dead where the
+/// file cannot answer it, so that a key learned on one file is where it was
+/// on the next. The two pairs that only say how one of them is written —
+/// the print's unit, and a latitude's degrees — come only with the file
+/// that can give that one, being nothing to choose between otherwise. The
 /// lit coordinate is the one the bar is showing, which is the pixel's where
 /// the file cannot answer what was chosen.
-pub(super) fn pixel_cells(pass: &mut Pass, ui: &mut Ui) {
-    ui.spacing_mut().item_spacing = Vec2::ZERO;
-    heading(pass, ui, "Pixel value", true);
-    let chosen = pass.panels.pixel_format;
-    cell_row(
-        pass,
-        ui,
-        PixelFormat::ALL.map(|format| (Control::Format(format), format == chosen)),
-    );
-
+pub(super) fn pixel_items(pass: &mut Pass, ui: &mut Ui) {
     let answers = Answers::of(pass.current);
-    let offered: Vec<CoordinateFormat> = CoordinateFormat::ALL
-        .into_iter()
-        .filter(|format| format.offered(answers))
-        .collect();
-    if offered.len() < 2 {
-        return;
-    }
-    heading(pass, ui, "Coordinate", false);
-    let shown = pass.panels.coordinate_format.shown(answers);
-    cell_row(
-        pass,
-        ui,
-        offered
-            .iter()
-            .map(|format| (Control::Coordinates(*format), *format == shown)),
-    );
-    if !offered.contains(&CoordinateFormat::Geographic) {
-        return;
-    }
-    heading(pass, ui, "Latitude and longitude", false);
-    let chosen = pass.panels.geographic_format;
-    cell_row(
-        pass,
-        ui,
-        GeographicFormat::ALL.map(|format| (Control::Geographic(format), format == chosen)),
-    );
-}
-
-/// One row of word cells of the pixel menu, each lit where it is `active`,
-/// each closing the menu on the press it sends.
-fn cell_row(pass: &mut Pass, ui: &mut Ui, cells: impl IntoIterator<Item = (Control, bool)>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = vec2(MENU_GAP, 0.0);
-        for (control, active) in cells {
-            let response = ui.add_sized(
-                [MENU_WORD_CELL, MENU_CELL[1]],
-                Button::new(control.label()).selected(active),
-            );
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
-                ui.close();
-            }
+    let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
+        // Dead by the reading the application's `Conditions` are made
+        // from, which is what refuses the press.
+        let enabled = match control {
+            Control::Coordinates(format) => format.offered(answers),
+            _ => true,
+        };
+        if keyed_item(pass, ui, &control.label(), control, active, enabled).clicked() {
+            ui.close();
         }
-    });
+    };
+    heading(pass, ui, "Coordinate", true);
+    let shown = pass.panels.coordinate_format.shown(answers);
+    for format in CoordinateFormat::ALL {
+        item(pass, ui, Control::Coordinates(format), format == shown);
+    }
+    if CoordinateFormat::Print.offered(answers) {
+        heading(pass, ui, "Print unit", false);
+        let chosen = pass.panels.print_unit;
+        for unit in Unit::ALL {
+            item(pass, ui, Control::PrintUnit(unit), unit == chosen);
+        }
+    }
+    if CoordinateFormat::Geographic.offered(answers) {
+        heading(pass, ui, "Latitude and longitude", false);
+        let chosen = pass.panels.geographic_format;
+        for format in GeographicFormat::ALL {
+            item(pass, ui, Control::Geographic(format), format == chosen);
+        }
+    }
+
+    heading(pass, ui, "Pixel value", false);
+    let chosen = pass.panels.pixel_format;
+    for format in PixelFormat::ALL {
+        item(pass, ui, Control::Format(format), format == chosen);
+    }
 }
 
 /// A menu of items under a name — the name of the button that opened it, so
@@ -427,11 +494,9 @@ pub(super) fn titled(
 /// set apart, the two ways the sort can run, the one in force lit.
 pub(super) fn sort_cells(pass: &mut Pass, ui: &mut Ui, order: Order) {
     titled(pass, ui, &Control::Sorting.label(), |pass, ui| {
+        // Each with the key that does the same while the menu is open.
         let item = |pass: &mut Pass, ui: &mut Ui, control: Control, active: bool| {
-            let response = ui.add(Button::new(control.label()).selected(active));
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
+            if keyed_item(pass, ui, &control.label(), control, active, true).clicked() {
                 ui.close();
             }
         };
@@ -464,15 +529,7 @@ pub(super) fn copy_items(pass: &mut Pass, ui: &mut Ui) {
                 Copies::Image if pass.input.selection.region().is_some() => "Region",
                 _ => copies.label(),
             };
-            let mut button = Button::new(label);
-            if let Some(key) = pass.namer.shortcut(control) {
-                button = button.shortcut_text(key);
-            }
-            let response = ui.add(button);
-            let response = pass.tooltip(response, Tip::Control(control));
-            if response.clicked() {
-                pass.press(control);
-            }
+            keyed_item(pass, ui, label, control, false, true);
         }
     });
 }
@@ -548,7 +605,7 @@ pub(super) fn file_items(pass: &mut Pass, ui: &mut Ui) {
             ),
         ]);
         for (control, label) in items {
-            menu_item(pass, ui, control, label, true);
+            keyed_item(pass, ui, &label, control, false, true);
         }
         // The configuration file's commands, after a rule, a command with
         // variants a submenu of them.
@@ -590,19 +647,30 @@ fn command_item(pass: &mut Pass, ui: &mut Ui, item: &crate::ui::commands::Item) 
         true => format!("{}\u{2026}", item.label),
         false => item.label.clone(),
     };
-    menu_item(
+    keyed_item(
         pass,
         ui,
+        &label,
         Control::RunCommand(item.slot),
-        label,
+        false,
         item.enabled,
     );
 }
 
-/// One item of the file menu, `label` on it and its key beside it; drawn
-/// dead where `enabled` is not, its tooltip saying why.
-fn menu_item(pass: &mut Pass, ui: &mut Ui, control: Control, label: String, enabled: bool) {
-    let mut button = Button::new(label);
+/// One item of a menu: `label`, with the key that does the same beside
+/// it, lit where it is `active` and dead where it is not `enabled`, its
+/// tooltip `control`'s, and `control` pressed when it is clicked. Whether
+/// the click also closes the menu is the caller's: an item that sets
+/// something does, one that does something need not.
+fn keyed_item(
+    pass: &mut Pass,
+    ui: &mut Ui,
+    label: &str,
+    control: Control,
+    active: bool,
+    enabled: bool,
+) -> egui::Response {
+    let mut button = Button::new(label).selected(active);
     if let Some(key) = pass.namer.shortcut(control) {
         button = button.shortcut_text(key);
     }
@@ -611,6 +679,7 @@ fn menu_item(pass: &mut Pass, ui: &mut Ui, control: Control, label: String, enab
     if response.clicked() {
         pass.press(control);
     }
+    response
 }
 
 /// The menu of other programs: one item for each application the desktop
@@ -659,8 +728,9 @@ mod tests {
     fn section_of(choice: ZoomChoice) -> usize {
         match choice {
             ZoomChoice::Scale(_) => 0,
-            ZoomChoice::Fit(_) => 1,
-            ZoomChoice::Filter(_) => 2,
+            ZoomChoice::Print => 1,
+            ZoomChoice::Fit(_) => 2,
+            ZoomChoice::Filter(_) => 3,
         }
     }
 
@@ -671,19 +741,20 @@ mod tests {
     fn every_zoom_choice_lands_on_itself() {
         let image = [900.0, 600.0];
         let viewport = Viewport::whole(WINDOW);
+        let print = Some(1.37);
 
         for choice in ZOOM_CHOICES {
             let mut view = View::new();
-            choice.apply(&mut view, viewport.center(), image, viewport);
+            choice.apply(&mut view, viewport.center(), image, viewport, print);
             let (fit, zoom, upscale) = (view.fit(), view.zoom(image, viewport), view.upscale());
-            assert!(choice.active(fit, zoom, upscale), "{choice:?}");
+            assert!(choice.active(fit, zoom, upscale, print), "{choice:?}");
 
             for other in ZOOM_CHOICES {
                 if section_of(other) != section_of(choice) {
                     continue;
                 }
                 assert_eq!(
-                    other.active(fit, zoom, upscale),
+                    other.active(fit, zoom, upscale, print),
                     other == choice,
                     "{other:?} after {choice:?}"
                 );
@@ -692,6 +763,19 @@ mod tests {
                 assert!((view.zoom(image, viewport) - scale).abs() < 1e-4);
             }
         }
+    }
+
+    /// With no print size to go to, its cell leaves the view alone and is
+    /// never lit.
+    #[test]
+    fn no_print_size_is_no_zoom() {
+        let image = [900.0, 600.0];
+        let viewport = Viewport::whole(WINDOW);
+        let mut view = View::new();
+        ZoomChoice::Print.apply(&mut view, viewport.center(), image, viewport, None);
+        assert_eq!(view.fit(), View::new().fit());
+        let zoom = view.zoom(image, viewport);
+        assert!(!ZoomChoice::Print.active(view.fit(), zoom, view.upscale(), None));
     }
 
     /// The sections are [`ZOOM_CHOICES`] cut into three, and the cut has to
@@ -719,7 +803,7 @@ mod tests {
 
         // And the up-scaling section is exactly the filters on offer, in the
         // order the key cycles them.
-        let up_scaling = &ZOOM_CHOICES[ZOOM_CHOICES.len() - ZOOM_SECTIONS[2].1..];
+        let up_scaling = &ZOOM_CHOICES[ZOOM_CHOICES.len() - ZOOM_SECTIONS[3].1..];
         let filters: Vec<Upscale> = up_scaling
             .iter()
             .map(|choice| match choice {
@@ -741,7 +825,7 @@ mod tests {
             .iter()
             .filter_map(|choice| match choice {
                 ZoomChoice::Scale(scale) => Some(percent(*scale).len()),
-                ZoomChoice::Fit(_) | ZoomChoice::Filter(_) => None,
+                ZoomChoice::Print | ZoomChoice::Fit(_) | ZoomChoice::Filter(_) => None,
             })
             .max();
         assert_eq!(widest, Some("1600%".len()));

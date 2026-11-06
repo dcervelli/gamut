@@ -26,8 +26,9 @@ app/           the event loop's state and winit handlers
                  when egui wants painting again into the loop's deadline
   files.rs       Files: the file list, the read in flight, walks past broken files, the files taken
                  off it, and the order it is put in (pure, tested)
-  order.rs       the permutation an Order makes of the list — stable, the unknown last — and the
-                 sections it breaks it into (pure, tested)
+  order.rs       the permutation an Order makes of the list — the sort, the one before it, then
+                 folder and name, the unknown last — and the sections it breaks it into (pure,
+                 tested)
   arranging.rs   a list about to be opened — the command line's files under an order that needs
                  more than names, or the files the dialog chose — read for the order on a thread of
                  its own, and its first file in that order asked for once it is in
@@ -51,10 +52,16 @@ app/           the event loop's state and winit handlers
   measuring.rs   the picture measured again through its gain map's lift, on a thread of its own
                  that takes only the latest weight asked for; the base and the last weight
                  kept, so the switch between them measures nothing again
+  ground.rs      where a georeferenced file arriving lands beside another in its system: the
+                 ground in the middle of the window kept there, at the same ground to a screen
+                 pixel, where the part on screen overlaps it (pure, tested)
   kept.rs        what each file was left in — its view, its display, its turn, and its frame or page — so stepping back to it puts it back
   edits.rs       what is done to the file on disk — moved to the trash, renamed, replaced
                  by a command's output, or made by an export, a paste or a command — and
                  the stack that undoes it; the rename dialog's state while it is up
+  calibration.rs the print size's calibration while it is up — a monitor's size measured
+                 against a credit card — the sizes kept against each model, and the keys the
+                 dialog takes while it is up
   exporting.rs   the export dialog's state while it is up, the animation it holds still, the
                  picture as shown written to a new file on a thread of its own, and the file
                  taken into the list once it is
@@ -121,12 +128,19 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  and the developed picture's channels a pass draws, and its body draws both,
                  track.rs the band and its handles, slider.rs the exposure's slider, drawn
                  by ui/slider.rs
-  minimap.rs / grid.rs   one widget each, drawn with egui's painter
+  minimap.rs / grid.rs   one widget each, drawn with egui's painter; the grid is ruled in
+                 whatever ruler.rs measures, its lines where the measure reads round numbers,
+                 and numbered at the edges of the view by labels()
+  ruler.rs       Ruler: what the picture as shown is measured in along each axis — its
+                 pixels, a print's inches or millimeters at the file's density, or the file's
+                 own coordinates on the ground — as the readout's coordinate asks, falling
+                 back to the pixels; what the grid and a region's labels read
   loupe.rs       the loupe: place() puts its two circles beside the pointer inside the content
                  area, glass() is the magnified draw the image layer makes of it, show() the rings
   region_panel.rs  the panel up while a region is: its fit, copy and cross,
                  the aspect's box, menu and swap, and the boxes for its place
-                 and size, each handing over what is typed only when let go
+                 and size in what ruler.rs measures, each handing over what is
+                 typed, as the nearest pixel edge, only when let go
   region.rs      the region marked out on the picture: where its outline and
                  eight handles go, which handle the pointer is on, and the
                  words it wears while the pointer is on it — its size at its
@@ -149,10 +163,12 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
   commands.rs    a command as a frame draws it: Needs, Slot (what RunCommand carries),
                  Kind and Value (an input's grammar and what it holds), the menu's Item,
                  and the dialog, drawn with the rename dialog's pieces
-  pixel.rs       the pointer's readout: coordinate, swatch, and the pixel's
-                 value in whichever of `PixelFormat`'s three ways is in force
-  menu.rs        the popup menus' contents: the zoom menu's choices and cells, the
-                 pixel-format cells, and the menus of copies and of the file with each item's key beside it
+  pixel.rs       the pointer's readout: coordinate, in whichever of `CoordinateFormat`'s
+                 ways is in force, swatch, and the pixel's value in whichever of
+                 `PixelFormat`'s; the menu's id, and the menu hung from the corner with the
+                 bars hidden
+  menu.rs        the popup menus' contents: the zoom menu's choices and cells, and the
+                 pixel menu, the menus of copies and of the file with each item's key beside it
   scale.rs       the interface's scale on top of the monitor's: SCALES, the rungs the keys
                  step along, and RANGE, what the state file keeps
   rename.rs      the rename dialog: a modal with the name in a field, judge() saying what is
@@ -160,6 +176,10 @@ ui/            lays each frame's interface out with egui; no wgpu or winit impor
                  field, the line under it and the buttons both dialogs are drawn with
   slider.rs      the one slider the interface draws — the histogram's exposure, the export
                  dialog's quality — and handle(), the one handle every slider and the band draw
+  calibrate.rs   the print size's calibration: a modal with a credit card's outline drawn at
+                 the size the monitor is taken to be, two rules square in opposite corners of
+                 it (RULES), a slider that grows and shrinks it, the diagonal that makes, and
+                 OK and Cancel
   export.rs      the export dialog: the name, JPG or PNG and JPG's quality, warnings() saying
                  what the new file loses from the Facts the application hands over, and
                  Export and Cancel
@@ -232,10 +252,12 @@ trash/         the desktop's trash: mod.rs Refused and Unreplaced; freedesktop.r
                it became, restore() moves that entry back, replace() keeps a file there
                while another is renamed over it and restore_over() undoes that — and the
                tests' on both; macos.rs Finder's
-monitor/       what each monitor is, SDR or HDR and how large in logical pixels: mod.rs
-               Monitors, the table the platform fills, and key_of(), what it is keyed by;
-               wayland.rs the compositor's answer, over a Wayland connection of its own;
-               macos.rs NSScreen's, read on the main thread each time it is asked
+monitor/       what each monitor is, SDR or HDR, how large in logical pixels, and how many
+               of them to the millimeter: mod.rs Monitors, the table the platform fills,
+               key_of(), what it is keyed by, and density(), the check every size is
+               believed through; wayland.rs the compositor's answer, over a Wayland
+               connection of its own; macos.rs NSScreen's and Core Graphics', read on the
+               main thread each time it is asked
 clipboard/     putting text or a file: URI on the clipboard, and reading a pasted picture
                off it: mod.rs the types, IMAGE_TYPES and the thread that watches for a
                picture; wayland.rs the selection, held by a process that outlives the window;
@@ -254,6 +276,8 @@ openers/       what else on the desktop can open the file on screen, and startin
                found through the desktop's own index and the user's associations;
                macos.rs Launch Services' applications, through NSWorkspace; and browse(),
                a web address opened in the browser, for the map of where a picture was taken
+measurement.rs whether the user measures paper in inches or millimeters: the locale's
+               territory on Linux, NSLocale on a Mac
 media.rs       MIME_TYPES: what the desktop calls each extension the decoders read
 clock.rs       a moment as a date and time — UTC, or the zone the system's own
                compiled zone file says it is in
@@ -291,6 +315,8 @@ image/         the data model, nothing GPU
                  one is given, through Region::held
   aspect.rs      Aspect: what a region is held to — free, the picture's own
                  shape, or a ratio — its presets, and a ratio typed
+  density.rs     Density: the pixels to the inch the file says — the EXIF block's, else a PNG's
+                 pHYs or a JPEG's JFIF header — and the print size and sheet that makes
   orient.rs      the turn an orientation tag asks for, applied to any layout and to the
                  gain map beside it; Turn, the quarter turns the user asks for, which are
                  read through rather than applied
@@ -365,10 +391,15 @@ render/        the GPU
                  image.wgsl and reduce.wgsl both
 packaging/     what the packages are built from: the Arch PKGBUILD, the Homebrew
                formula (gamut.rb), the Mac bundle's Info.plist, the .desktop entry,
-               the icon, and hand-written shell completions
+               the icon — the desktop entry's, and macos-icon.svg, the same scene on
+               Apple's grid — and hand-written shell completions
 bin/           release, pkgbuild-sha which points the PKGBUILD and the formula at a
                published tag, bundle which wraps a built binary in Gamut.app, and
                icon, which draws packaging/'s icon from a model of its scene's light
+vendor/        crates built from a copy here rather than from crates.io, each through
+               Cargo.toml's [patch.crates-io], which says why and until when, and
+               each with a VENDORED.md saying where it came from and what changed:
+               tiff, on weezl 0.2
 REUSE.toml     which file in the tree is under what license; LICENSES/ holds the
                texts it names, and `reuse lint` checks the two agree
 about.toml     which licenses a dependency may arrive under; packaging/about.hbs
@@ -394,8 +425,11 @@ still agrees with both, so renaming either is editing the constant —
 | A status-bar segment | `ui/status.rs`; the pointer's pixel readout is `ui/pixel.rs` |
 | What the loupe magnifies, or where it goes | `ui/loupe.rs`: `GLASS_RADIUS` and `MAGNIFICATIONS` for the circles, `place` for where the glass sits, `glass` for the draw, `step` for what the wheel does through `Command::Magnify` and `App::magnify`, `cycle` for what `Shift+L` does; `App::loupe` for when it is up, from the toggle or `Pointer::secondary`, which `Command::Secondary` sets from the picture's response in `Pass::picture`; the cut and the replacing draw are `image_layer`'s loupe slot and `shaders/image.wgsl`'s `clip` |
 | What a file is left in when you step off it, and what comes back when you step on to it | `app/kept.rs`, and the arrival in `App::apply`, which trades the outgoing file's settings for the incoming one's by what `Arrival` the file is — read again at its size or at another, another file beside one of the same size, or one arriving anew — as `arrival()` names it |
+| Where a georeferenced file lands beside another | `app/ground.rs::aligned` for the view — what overlapping is and what lines up — and `Georeference::shares_system` for which two systems are one; `App::on_the_same_ground` gathers the two placements in `App::apply`, where a step to another file takes its view ahead of `arriving_view`, and in `App::standin`, from the georeference the header pass put in `thumbnailer::Facts` |
 | What moves the moment a step is asked for, and what waits for the file | `Files::target` is the file last asked for, which the count, the file list's highlight, the bar's name (`FrameInput::arriving`) and the title read, and `App::send` owes the frame for; `App::arriving` is what makes the controls acting on the file dead meanwhile (`Reasons::arriving`), what clears the bars' words about the file (the top bar's facts, `status::state_words`, the camera switch), and what makes the transport bar the arriving file's (`App::arriving_transport`). `files::SLOW_READ` is when the picture leaves the screen — `App::replacing` — for `App::standin` and the panels' `FrameInput::waiting`; `App::predicted_slow`, from `App::read_rates`, announces a read at once; `App::arrived_in` notes the rate and asks for the neighbors' thumbnails |
 | Whether a change to the view is a move or a cut | `App::animate` around the change, in `app/input.rs`, makes it a move; a change the hand is on — a drag, a single pixel's step, a trackpad's scroll — goes to `App::view` directly. Whatever reads what is on screen reads `App::shown_view`, not `view`; how long a move takes is `motion::DURATION`. The drag and the wheel themselves arrive from `ui::show` as `Command::Drag` and `Command::Wheel`, off the picture's own response in `Pass::picture` |
+| The print size: the zoom at which the file's inch is an inch on the monitor | `App::print_zoom` for the zoom, from `Exif::density` and `App::surface_density`; `monitor::density` for which monitor sizes are believed, filled by `monitor/wayland.rs` and `monitor/macos.rs`; `ZoomChoice::Print` for the cell, its dead reasons in `ui/tooltip.rs::disabled` from `Conditions::{density, monitor_size}`; `zoom.print` and `zoom.print.calibrate` for the keys. A monitor measured by hand is `app/calibration.rs` — `App::screen_size` puts the calibration ahead of the reported size, kept in `settings::State::displays` by `Screen::model` — and its dialog `ui/calibrate.rs`, put up by `Control::Calibrate` from `menu::calibrate_cell` |
+| What the grid is ruled in, or what a region's labels are written in | `ui/ruler.rs`: `Ruler::of` for which measure the readout's coordinate gives, `Ruler::write` and `suffix` for how a reading is written; `ui/grid.rs` for `step`, `Along::lines` and `label`; `ui/region.rs::words` for the labels. The print's unit is `Panels::print_unit`, kept in `settings::State::print_unit`, which the info panel's print size reads too |
 | What a pixel reads as under the pointer | `image/mod.rs::sample` for what the file holds, `image/display/mod.rs::map` for what the screen shows, `ui/pixel.rs::PixelFormat` for which of the two the bar writes out and how |
 | Where the pointer's pixel is on the ground, for a georeferenced file | `image/geo.rs::Georeference` for the placement and the lift to latitude and longitude, read in `image/exif.rs` beside the panel's rows and carried on `Exif::georeference`; `ui/pixel.rs` for `CoordinateFormat`, `GeographicFormat` and how each is written, `CoordinateFormat::offered` being the one reading of what a file can answer that the menu, the key and the `When` conditions share |
 | What the window says about something that just happened | `ui/toast.rs` for how long it stays and how it is drawn, `App::toast` to raise one, and `App::poll_copies` for the copies that only know how they went once their thread is done |
@@ -403,7 +437,7 @@ still agrees with both, so renaming either is editing the constant —
 | A button's icon | `ui/icon.rs`: one `&[Mark]` on the 24-unit grid, and one `icon::paint` call where the button is drawn, in a square from `icon::square`. The caller sets aside a budget; whether the mark comes out sharp is `icon::Grid`'s business and whether its spacing stays even is `icon::fit`'s |
 | A panel or overlay | a new `ui/<name>.rs` with a `show(pass, ui, ..)` that opens `panel::area` at the rectangle its own `panel()` works out through `panel::fit` from `pass.content`, and one call in `Pass::overlays`; the picture is `pass.current`, the device's grid `pass.grid`. An area that is `interactable` takes the pointer from the picture under it; `Order` is the height in the stack. A new color role goes in `theme/mod.rs` and, if a stock widget wears it, `ui/style.rs`. A panel that is part of the chrome instead — one the picture is fitted beside, as the file list and the side panel are — is a field of `chrome::Parts`, a rectangle `Chrome::new` works out, and an `egui::Panel` in `Pass::bars` given exactly that size |
 | The side panel: what it holds, when it is up, how wide it is | `ui/side.rs` for `Side` and `WIDTH`; `Panels::side` for what is asked for, `Panels::choose` for what the histogram's and the information's buttons do to it and `Panels::lit` for which is lit; `App::side_showing` for whether it is on screen — asked for, with room (`ui::room`, from `chrome::side_room`), and something open; `Pass::side_panel` lays it out, inside the right strip, and `chrome::side_width` is what it gets of its width |
-| What the info panel says about a file | `ui/info.rs` for the layout, and `contents` there for the order of the sections; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, its georeference in `image/geo.rs`, and its depth map's section in `ui/info.rs::depth_facts` from the picture's `DepthMap` — never `Current::image`'s, which is the map itself while it is shown. A section of the metadata is an `exif::Group` — a new one is a variant, in reading order, with its heading in `Group::name` and its mark and head in the match in `contents` in `ui/info.rs`, which is exhaustive, so a section cannot arrive without a face. A field written in words is a `Described` entry in `image/exif.rs`, naming its EXIF tag and its XMP property; a region the metadata marks out is a `MetadataRegion` in `image/metadata_region.rs`, made by a constructor per source — `mwg` from what `image/xmp.rs::read_regions` read, `microsoft` from `read_people`, `subject_area` from the EXIF tags — gathered on `Exif::regions` and written out against the turn in force by `Exif::regions`, which `contents` in `ui/info.rs` places before the georeference, `regions_section` lays out as a table and `mark_regions` draws on the picture under the pointer; a container's XMP packet is found in `image/xmp.rs::packet`. Which way the camera faced is `Exif::attitude`, read by `image/attitude.rs` — a new source is a constructor there that puts gravity in the picture's stored axes, or for one that writes angles, a reader in `image/level.rs` checked against ExifTool's reading of real files — and its section is `orientation_section` and `orientation_facts` in `ui/info.rs`, drawn by `ui/attitude.rs`. A raw's color temperature, and the camera and exposure of one whose EXIF says nothing, are what LibRaw read, handed over by `Decoder::facts` as rows `Exif::fill` puts in place; a container whose packet only its own library reaches hands that over by `Decoder::xmp`; a raw container's EXIF block is found by `image/enclosed.rs` |
+| What the info panel says about a file | `ui/info.rs` for the layout, and `contents` there for the order of the sections; the file's own facts are gathered in `app/mod.rs::file_facts`, its metadata in `image/exif.rs`, its density and print size in `image/density.rs`, its georeference in `image/geo.rs`, and its depth map's section in `ui/info.rs::depth_facts` from the picture's `DepthMap` — never `Current::image`'s, which is the map itself while it is shown. A section of the metadata is an `exif::Group` — a new one is a variant, in reading order, with its heading in `Group::name` and its mark and head in the match in `contents` in `ui/info.rs`, which is exhaustive, so a section cannot arrive without a face. A field written in words is a `Described` entry in `image/exif.rs`, naming its EXIF tag and its XMP property; a region the metadata marks out is a `MetadataRegion` in `image/metadata_region.rs`, made by a constructor per source — `mwg` from what `image/xmp.rs::read_regions` read, `microsoft` from `read_people`, `subject_area` from the EXIF tags — gathered on `Exif::regions` and written out against the turn in force by `Exif::regions`, which `contents` in `ui/info.rs` places before the georeference, `regions_section` lays out as a table and `mark_regions` draws on the picture under the pointer; a container's XMP packet is found in `image/xmp.rs::packet`. Which way the camera faced is `Exif::attitude`, read by `image/attitude.rs` — a new source is a constructor there that puts gravity in the picture's stored axes, or for one that writes angles, a reader in `image/level.rs` checked against ExifTool's reading of real files — and its section is `orientation_section` and `orientation_facts` in `ui/info.rs`, drawn by `ui/attitude.rs`. A raw's color temperature, and the camera and exposure of one whose EXIF says nothing, are what LibRaw read, handed over by `Decoder::facts` as rows `Exif::fill` puts in place; a container whose packet only its own library reaches hands that over by `Decoder::xmp`; a raw container's EXIF block is found by `image/enclosed.rs` |
 | Which of a raw's two pictures is shown — the developed frame or the camera's JPEG | `image/decode/mod.rs`'s `Rendering` and `CameraJpeg`, answered by `Decoder::preview` and `Decoder::camera_jpeg` in `decode/raw.rs`; `loader::decode_rendering` for which is read; `App::rendering` for the preference, kept in `settings::State::camera_jpeg`, `App::toggle_camera_jpeg` and `App::follow_rendering` for the switch, and `Arrival::Rerendered` with `View::rescale` for what carries across; `Pass::camera_switch` for the button, drawn only while `Current::camera_jpeg` is `Present`; `loader::undeveloped` for the JPEG shown as `CameraJpeg::Only` when the developed picture will not develop |
 | A thumbnail's source | `Decoder::preview` for a format that carries a smaller picture of itself, which the thumbnailer asks for before it decodes anything; `thumbnail::SIDE` is the size it has to reach to be used |
 | A popup menu | a function in `ui/menu.rs` that lays its cells out, each pushing `Command::Press` of a typed `Control` — `ZoomTo`, `Format`, `Copies`, or `Opener`, which is a place in a list the application built rather than a choice named in the source — and a `Pass::menu_button` in `ui/chrome.rs`, aligned below, above or beside it with `RectAlign`. The popup opens, closes and takes the pointer by itself; `App::close_menus` is how a key closes one. An item that does something rather than setting something is performed in `App::press`, as the menu of copies is, and prints its key beside it from `Naming::shortcut` |
@@ -411,7 +445,7 @@ still agrees with both, so renaming either is editing the constant —
 | The Mac's menu bar: what is in it, what an item is called or shows | `app/menubar.rs`: `menus` and its three helpers lay the bar out, each item a `Builder::action` (an `Action`, its key shown), `Builder::button` (a `Control`, showing the key `input::action_of` names for the button) or `Builder::control` (a `Control` with the key given, or none); `App::alive`, `App::checked` and `App::retitled` for how it is shown now. Its key is always the keymap's — never a chord of its own — since the menu hands every key it catches on to the key table; see `docs/macos.md`. `menubar.rs` only when AppKit's side needs something new: a `Node`, a `Standard` item |
 | A CLI flag | `cli.rs`, and the `Options` / `Startup` / `Overrides` field it sets; a flag for something the configuration file also sets writes into `Options::config` after the file is read |
 | A mouse gesture | `gestures.rs`: a behavior is a `WORDS` entry and a variant, with its arm in `Pass::picture` / `Pass::region_gestures` (drags, clicks, holds) or `App::wheel` (the wheel) and `App::pinch` (a pinch); a default is a line of `Gestures::table`, and of `Gestures::mac` where a Mac's differs. What the primary button does from a region's handle, with a region asked for, or with the fit key held is fixed ahead of any slot, in `Pass::region_gestures` |
-| What the configuration file sets, or what is remembered between runs | `settings/mod.rs`: a `Config` field for what the user chooses ahead of time — its default in `Config::default`, its name, words, `get` and `set` in `SETTINGS`, as a `Plain` of the shape TOML writes it in — the tests hold these and `--print-config`'s template to each other; a `keys.` line is `Keymap::bind` and a `gesture.` line `Gestures::set`, both read in `Config::parse` — where it lands in `App::new`, and `user-docs/SETTINGS.md`. A key's name or a gesture's slot is a dotted TOML key, so none may be the start of another (`zoom.100` and `zoom.100.toggle` cannot both be), which the template's test catches; a name renamed is an entry in `settings/legacy.rs::RENAMED` too; a `State` field for what was left where it was set by hand — `State::parse` and `State::render`, read in `App::new` and gathered in `App::exiting`. The tests build `App` from `StateFile::none()` and a `Config` of their own, so neither file is ever touched by them |
+| What the configuration file sets, or what is remembered between runs | `settings/mod.rs`: a `Config` field for what the user chooses ahead of time — its default in `Config::default`, its name, words, `get` and `set` in `SETTINGS`, as a `Plain` of the shape TOML writes it in — the tests hold these and `--print-config`'s template to each other; a `keys.` line is `Keymap::bind` and a `gesture.` line `Gestures::set`, both read in `Config::parse` — where it lands in `App::new`, and `user-docs/SETTINGS.md`. A key's name or a gesture's slot is a dotted TOML key, so none may be the start of another (`zoom.100` and `zoom.100.toggle` cannot both be), which the template's test catches; a name renamed is an entry in `settings/legacy.rs::RENAMED` too; a `State` field for what was left where it was set by hand — `State::parse` and `State::render`, read in `App::new` and gathered in `App::exiting`. The tests build `App` from `StateFile::holding` — `kept()` in `app/tests.rs` unless a test needs other state — and a `Config` of their own, so neither file is ever touched by them |
 | What the empty window offers, or what the file dialog asks for | `ui/empty.rs` for the buttons and where they go; `portal/freedesktop.rs::choose` for the dialog's filters and options, `Pick::title` for its title, `Pick` for which kind; `App::pick` puts it up and `App::picked` takes the answer, `App::open_named` opens what was chosen as a command line naming it beside the rest would — a directory walked by `App::start_tree`, the first images found gone to, and files through `Files::append`, the newcomers at the end of the list and the first of them asked for as a walk. The folder dialog's box for subfolders is `portal::SUBFOLDERS`, the portal's `choices` option in `freedesktop.rs` and an accessory view in `macos.rs`, coming back as `Picked::subfolders` and kept in `settings::State::include_subfolders`. `App::is_empty` is what puts the buttons up, `App::leave_picture` is how the last deleted picture comes down into it, and `App::size_to_next` is what has the next picture size the window; `App::from_command_line` is whether nothing showing means leaving |
 | Another call to the desktop over D-Bus | `dbus.rs`: `Connection::call` for a method, `add_match` and `wait_signal` for a signal, `Value::dict` for an `a{sv}` of options; a new basic type is an arm of `Value` and of the writer and reader alike |
 | A picture in the README or `user-docs/` | not kept here: the pictures, and the scripts that take them, one per picture, are in the `gamut-scripting` repository beside this one, in its `screenshots/`, and the README links to them there by absolute URL. Run the picture's script again after the interface changes rather than retouching the picture, and push it in that repository |

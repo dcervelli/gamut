@@ -7,6 +7,7 @@
 //! frame can be built and driven with no application behind it.
 
 pub mod attitude;
+pub mod calibrate;
 pub mod chooser;
 pub mod chrome;
 pub mod commands;
@@ -39,6 +40,7 @@ pub mod pixel;
 mod rect;
 pub mod region;
 pub mod region_panel;
+pub mod ruler;
 mod status;
 pub mod style;
 
@@ -545,9 +547,10 @@ pub struct Panels {
     /// also asks whether there is anything off screen for it to point out —
     /// see [`FrameInput::minimap_on_screen`].
     pub show_minimap: bool,
-    /// Whether the grid is laid over the image. How far apart its lines are
-    /// is not held: it follows the zoom, and is worked out afresh each frame
-    /// by [`grid::step`].
+    /// Whether the grid is laid over the image. What it is measured in
+    /// follows the coordinate the readout writes — see [`ruler::Ruler::of`]
+    /// — and how far apart its lines are is not held: it follows the zoom,
+    /// and is worked out afresh each frame by [`grid::step`].
     pub show_grid: bool,
     /// Whether the horizon grid is drawn over the picture — the horizon,
     /// the uprights round the camera and the two lines through the pointer
@@ -571,10 +574,15 @@ pub struct Panels {
     /// is about the reading and not about the rendering: nothing on screen
     /// changes with it but the words in the bar.
     pub pixel_format: PixelFormat,
-    /// How it writes out where that pixel is, for a file that says where its
-    /// pixels are on the ground; every other file's is the pixel's, whatever
-    /// this says — see [`CoordinateFormat::shown`].
+    /// How it writes out where that pixel is, for a file that can say more
+    /// of it than its column and row; every other file's is the pixel's,
+    /// whatever this says — see [`CoordinateFormat::shown`]. What the grid
+    /// and the region's labels measure in follows it.
     pub coordinate_format: CoordinateFormat,
+    /// What a print is measured in: the print coordinate, the grid and the
+    /// region's labels while they measure one, and the info panel's print
+    /// size.
+    pub print_unit: crate::image::density::Unit,
     /// And how a latitude and a longitude are written, where they are.
     pub geographic_format: GeographicFormat,
     /// Which tab the information panel is on. Not a flag, and not kept
@@ -662,6 +670,9 @@ pub struct FrameInput {
     /// moment it is asked for, which the bar names in place of the file on
     /// screen: the name is where the key has gone, not what the pixels are.
     pub arriving: Option<String>,
+    /// The directory the file the bar names sits in, written for after the
+    /// name; empty with no file.
+    pub directory: String,
     /// Whether the file the picture came from is no longer there. The picture
     /// stays up — its pixels are as good as they ever were, and there is
     /// nothing to put in its place — so the bar is where this is said.
@@ -731,6 +742,9 @@ pub struct FrameInput {
     /// not — which is what decides whether the panel is there, and so
     /// where the picture starts.
     pub filmstrip: Option<filmstrip::Input>,
+    /// The order the list is in, which the menu of sorts is lit against
+    /// whether or not the list is up.
+    pub order: filmstrip::Order,
     /// The side panel, on every frame it is up, and `None` while it is not:
     /// asked for, with room for what it holds, and something open.
     pub side: Option<side::Side>,
@@ -788,6 +802,15 @@ pub struct FrameInput {
     /// panels about the file on screen stop saying it, since it is on its
     /// way out, and wait for the file coming in.
     pub waiting: bool,
+    /// The zoom that shows the picture at the size the file says it prints
+    /// on the monitor the window is on, where the file says its density and
+    /// the monitor its size: what the zoom menu's print size goes to.
+    pub print_zoom: Option<f32>,
+    /// The print size's calibration, while it is up; and whether the
+    /// button that puts it up is alive, the window's monitor being one
+    /// that can be told apart from another.
+    pub calibrate: Option<calibrate::Input>,
+    pub calibratable: bool,
 }
 
 /// One pass of the interface: the chrome and everything on it, laid out in
@@ -856,6 +879,15 @@ pub fn show(
     if let Some(chooser) = &input.chooser {
         chooser::show(&mut pass, ui, chooser);
     }
+    // The menu of sorts with no bars to hang from, at the corner of the
+    // picture the list's head would be beside.
+    if !panels.show_ui {
+        let corner = egui::pos2(pass.content.x + PADDING, pass.content.y + PADDING);
+        filmstrip::loose_sort_menu(&mut pass, ui, corner.into(), 0.0);
+        // And the pixel menu, at the corner the dot would be above.
+        let corner = egui::pos2(pass.content.x + PADDING, pass.content.bottom() - PADDING);
+        pixel::loose_menu(&mut pass, ui, corner.into());
+    }
     // And the keys, which are the same whatever is on screen.
     help::show(&mut pass, ui);
     // Over all of it: a rename is a question, and nothing else answers
@@ -868,6 +900,9 @@ pub fn show(
     }
     if let Some(command) = &input.command {
         commands::show(&mut pass, ui, command);
+    }
+    if let Some(calibrate) = &input.calibrate {
+        calibrate::show(&mut pass, ui, calibrate);
     }
     pass.commands
 }
@@ -1159,6 +1194,7 @@ impl Pass<'_> {
         // a stand-in for another file is not.
         let picture = self.input.standin.is_none();
         if self.panels.show_grid && picture {
+            let ruler = self.ruler(current);
             let thumbnail = self
                 .input
                 .minimap_on_screen
@@ -1179,11 +1215,14 @@ impl Pass<'_> {
                     minimap: thumbnail,
                     glass,
                 },
-                grid::step(zoom, self.input.scale),
+                self.input.pointer,
+                &ruler,
+                grid::step(&ruler, zoom, self.input.scale),
                 self.theme,
+                &egui::TextStyle::Small.resolve(ui.style()),
             );
         }
-        // The horizon grid, over the pixel grid and under the region, and
+        // The horizon grid, over the grid and under the region, and
         // the two lines through the pointer — but not under the loupe,
         // whose glass is what the hand is reading then. A file that gives
         // its heading and not its tilt has only the ring at the middle.
@@ -1231,10 +1270,16 @@ impl Pass<'_> {
 }
 
 /// What the grid toggle reads out while the grid is on: how far apart its
-/// lines are at `zoom`, on a display of `scale` physical pixels to the
-/// logical one. `None` while it is off, there being no spacing in force then.
-pub fn grid_spacing(show_grid: bool, zoom: f32, scale: f32) -> Option<String> {
-    show_grid.then(|| grid::label(grid::step(zoom, scale)))
+/// lines are in what `ruler` measures at `zoom`, on a display of `scale`
+/// physical pixels to the logical one. `None` while it is off, there being
+/// no spacing in force then.
+pub fn grid_spacing(
+    show_grid: bool,
+    ruler: &ruler::Ruler,
+    zoom: f32,
+    scale: f32,
+) -> Option<String> {
+    show_grid.then(|| grid::label(grid::step(ruler, zoom, scale), ruler))
 }
 
 /// The room the side panel needs for both of what it holds, across between
@@ -1334,6 +1379,34 @@ fn outline(
     thickness: f32,
     color: egui::Color32,
 ) {
+    outline_sides(painter, grid, rect, thickness, color, Sides::default());
+}
+
+/// Which of a rectangle's four edges: what [`outline_sides`] dashes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Sides {
+    top: bool,
+    bottom: bool,
+    left: bool,
+    right: bool,
+}
+
+/// How long each dash of a dashed edge is, and the gap after it, in logical
+/// pixels.
+const OUTLINE_DASH: f32 = 4.0;
+const OUTLINE_GAP: f32 = 3.0;
+
+/// [`outline`], with the edges `dashed` names drawn as dashes rather than a
+/// line: each dash snapped to the device's grid as the solid edges are, so
+/// it is as sharp and as heavy as they are.
+fn outline_sides(
+    painter: &egui::Painter,
+    grid: icon::Grid,
+    rect: Rect,
+    thickness: f32,
+    color: egui::Color32,
+    dashed: Sides,
+) {
     if rect.width <= 0.0 || rect.height <= 0.0 {
         return;
     }
@@ -1354,10 +1427,48 @@ fn outline(
             color,
         );
     };
-    fill(Rect::new(rect.x, rect.y, rect.width, edge));
-    fill(Rect::new(rect.x, rect.bottom() - edge, rect.width, edge));
-    fill(Rect::new(rect.x, rect.y + edge, edge, middle));
-    fill(Rect::new(rect.right() - edge, rect.y + edge, edge, middle));
+    // One edge, `piece`, running along x or down y; dashed, a dash at a time
+    // from its start, the last cut short at its end.
+    let side = |piece: Rect, along_x: bool, dashed: bool| {
+        if !dashed {
+            return fill(piece);
+        }
+        let (start, length) = if along_x {
+            (piece.x, piece.width)
+        } else {
+            (piece.y, piece.height)
+        };
+        let mut at = 0.0;
+        while at < length {
+            let run = OUTLINE_DASH.min(length - at);
+            fill(if along_x {
+                Rect::new(start + at, piece.y, run, piece.height)
+            } else {
+                Rect::new(piece.x, start + at, piece.width, run)
+            });
+            at += OUTLINE_DASH + OUTLINE_GAP;
+        }
+    };
+    side(
+        Rect::new(rect.x, rect.y, rect.width, edge),
+        true,
+        dashed.top,
+    );
+    side(
+        Rect::new(rect.x, rect.bottom() - edge, rect.width, edge),
+        true,
+        dashed.bottom,
+    );
+    side(
+        Rect::new(rect.x, rect.y + edge, edge, middle),
+        false,
+        dashed.left,
+    );
+    side(
+        Rect::new(rect.right() - edge, rect.y + edge, edge, middle),
+        false,
+        dashed.right,
+    );
 }
 
 /// What the compositor paints behind the image: the panel color, with the

@@ -851,6 +851,19 @@ const FIXTURES: &[Fixture] = &[
         ..PLAIN
     },
     Fixture {
+        file: "tiff-lzw-padded.tif",
+        covers: "TIFF LZW in tiles wider than the picture, a stream ending in the padding",
+        channels: Channels::Rgb,
+        kind: Kind::U8,
+        color: SRGB,
+        alpha: AlphaMode::Opaque,
+        tone: Tone::Color,
+        coverage: Coverage::Opaque,
+        nodata: None,
+        tolerance: EXACT,
+        ..PLAIN
+    },
+    Fixture {
         file: "tiff-strips.tif",
         covers: "TIFF in five strips, the last one short, read across threads",
         channels: Channels::Rgb,

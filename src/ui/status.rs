@@ -11,7 +11,10 @@ use super::chrome::{BAR_PADDING, BUTTON_SIZE, Corners, Pass, STEP_SEAM, measure}
 use super::control::Control;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
-use super::{COUNTER_GAP, Current, TEXT_SIZE, capitalized, fonts, histogram, icon, menu};
+use super::{
+    COUNTER_GAP, Current, MENU_OFFSET, TEXT_SIZE, capitalized, filmstrip, fonts, histogram, icon,
+    menu,
+};
 
 /// Between one segment of a bar and the next. A thin gap: the middot already
 /// parts them, and the bars are short of room before they are short of air.
@@ -107,6 +110,38 @@ pub(super) fn top_words(pass: &mut Pass, ui: &mut egui::Ui, current: &Current) {
     };
     let response = ui.add(Label::new(text).truncate());
     pass.tooltip(response, Tip::Name);
+    folder_words(pass, ui);
+}
+
+/// Less room than this and the folder is left out, rather than cut to a
+/// few characters either side of an ellipsis that say nothing of where.
+const FOLDER_MIN: f32 = 64.0;
+
+/// The directory the file sits in, after its name and in the bar's dim ink:
+/// whatever the name and the facts at the far end leave, cut in its middle
+/// so that its last directory, the one nearest the file, stays whole while
+/// there is room for it, and gone when there is too little for any of it.
+/// The facts are the picture's and go on being read across files, so the
+/// folder yields to them; the name's tooltip says the path in full, and is
+/// this one's too.
+fn folder_words(pass: &mut Pass, ui: &mut egui::Ui) {
+    let folder = &pass.input.directory;
+    let room = ui.available_width();
+    if folder.is_empty() || room < FOLDER_MIN {
+        return;
+    }
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let last = folder
+        .rsplit(std::path::MAIN_SEPARATOR)
+        .next()
+        .map_or(0, |last| last.chars().count() + 1);
+    let words = filmstrip::cut_middle(ui, SEPARATOR, folder, last, &body, room);
+    if measure(ui, &words) > room {
+        return;
+    }
+    let ink: egui::Color32 = pass.theme.text_dim.into();
+    let response = ui.add(Label::new(RichText::new(words).color(ink)));
+    pass.tooltip(response, Tip::Name);
 }
 
 /// The head of the top bar: the file list's toggle, and the pair that steps
@@ -122,7 +157,7 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
     if let Some(counter) = counter(pass.input.index, pass.input.count) {
         // Before the pair: the list they step through, laid out down the
         // side of the window, and this the toggle that puts it there.
-        pass.toggle(
+        let toggle = pass.toggle(
             ui,
             icon::PANEL_LEFT,
             Control::Filmstrip,
@@ -130,6 +165,12 @@ pub(super) fn list_buttons(pass: &mut Pass, ui: &mut egui::Ui) {
             true,
             Corners::All,
         );
+        // The menu of sorts, while the list whose head it hangs from is
+        // down: from the toggle that would put the list up, as the menu
+        // that list would wear.
+        if pass.parts.filmstrip.is_none() {
+            filmstrip::loose_sort_menu(pass, ui, (&toggle).into(), MENU_OFFSET);
+        }
         ui.add_space(COUNTER_GAP);
         pass.toggle(
             ui,

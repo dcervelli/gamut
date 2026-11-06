@@ -12,12 +12,12 @@ fn hint(action: Action) -> Option<String> {
 
 /// What a key asks for with no region selected, at the default keys.
 fn action_for(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
-    Keymap::table().action_for(key, position, mods, false)
+    Keymap::table().action_for(key, position, mods, &[])
 }
 
 /// The same with a region selected.
 fn with_region(key: &Key, position: PhysicalKey, mods: Mods) -> Option<Action> {
-    Keymap::table().action_for(key, position, mods, true)
+    Keymap::table().action_for(key, position, mods, &[Context::Region])
 }
 
 /// The camera's switch says which picture is up, and under it the one a
@@ -35,6 +35,7 @@ fn the_camera_switch_says_what_a_press_brings_up() {
         gestures: Rc::new(Gestures::table()),
         camera,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions,
     };
     let lines = |namer: Namer| {
@@ -80,6 +81,7 @@ fn the_gain_map_toggle_on_a_profile_says_where_the_map_comes_from() {
         gestures: Rc::new(Gestures::table()),
         camera: None,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions,
     };
     let title = |conditions| {
@@ -127,10 +129,7 @@ fn a_button_is_named_by_the_key_that_does_the_same_job() {
         named(Control::Histogram).as_deref(),
         Some("Toggle the histogram (h)")
     );
-    assert_eq!(
-        named(Control::Grid).as_deref(),
-        Some("Toggle the pixel grid (g)")
-    );
+    assert_eq!(named(Control::Grid).as_deref(), Some("Toggle the grid (g)"));
     assert_eq!(
         named(Control::Output).as_deref(),
         Some("Toggle HDR output, when monitor is capable (o)")
@@ -189,13 +188,16 @@ fn a_button_is_named_by_the_key_that_does_the_same_job() {
         named(Control::Filmstrip).as_deref(),
         Some("Toggle the file list (Tab)")
     );
-    // The menu at its head names itself, no key opening it; a cell of
-    // it says what it puts the list in.
-    let sorting = named(Control::Sorting).expect("the button names itself");
-    assert!(!sorting.contains('('), "{sorting}");
+    // The menu at its head, by the key that opens it too; a cell of it
+    // says what it puts the list in, and the key that does it while the
+    // menu is open.
+    assert_eq!(
+        named(Control::Sorting),
+        Some(format!("Sort the list ({})", spelled_here("Shift+O")))
+    );
     assert_eq!(
         named(Control::SortBy(ui::filmstrip::Sort::Area)).as_deref(),
-        Some("Sort by total pixels")
+        Some("Sort by total pixels (a)")
     );
     let file = named(Control::FileMenu).expect("the button names itself");
     assert!(!file.contains('('), "{file}");
@@ -229,6 +231,8 @@ fn every_chrome_button_has_something_to_say() {
                 | Control::TagRow(_)
                 | Control::RenameTo
                 | Control::CancelRename
+                | Control::CalibrateOk
+                | Control::CancelCalibrate
                 | Control::ExportAs(_)
                 | Control::ExportTo
                 | Control::CancelExport
@@ -283,6 +287,7 @@ fn the_open_buttons_name_the_keys_that_open_the_dialog() {
         gestures: Rc::new(Gestures::table()),
         camera: None,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     assert_eq!(
@@ -328,6 +333,7 @@ fn the_open_buttons_name_the_keys_that_open_the_dialog() {
         gestures: Rc::new(Gestures::table()),
         camera: None,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions: Conditions {
             picking: true,
             ..Conditions::ALIVE
@@ -723,6 +729,7 @@ fn the_handles_say_which_keys_step_them() {
         gestures: Rc::new(Gestures::table()),
         camera: None,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions: Conditions {
             openable: false,
             data: false,
@@ -762,23 +769,22 @@ fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
         gestures: Rc::new(Gestures::table()),
         camera: None,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     let tooltip = namer
         .tooltip(Tip::Control(Control::PixelFormat))
         .expect("named");
-    assert_eq!(tooltip.title, ["Pixel options"]);
+    assert_eq!(tooltip.title, ["Pixel options (.)"]);
     assert_eq!(
         tooltip.hints,
         [
-            spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
             spelled_here("Copy pixel value under pointer (Ctrl+.)"),
             spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
         ]
     );
 
-    // A map brings the coordinate's key, and one that can be a latitude
-    // the key that writes it, each after the format's own.
+    // A map brings the coordinate's key, ahead of the copies.
     let map = Namer {
         conditions: Conditions {
             coordinates: true,
@@ -793,9 +799,7 @@ fn the_pixel_readout_names_its_key_and_the_copies_that_have_none() {
     assert_eq!(
         tooltip.hints,
         [
-            spelled_here("Cycle pixel format: hex, decimal, mapped, depth (.)"),
-            spelled_here("Cycle coordinate: pixel, projected, geographic, direction (,)"),
-            spelled_here("Switch latitude and longitude: decimal, DMS (<)"),
+            spelled_here("Cycle coordinate: pixel, print, projected, geographic, direction (,)"),
             spelled_here("Copy pixel value under pointer (Ctrl+.)"),
             spelled_here("Copy coordinate of pixel under pointer (Ctrl+>)"),
         ]
@@ -837,6 +841,7 @@ fn a_copy_cell_is_named_by_its_words_and_its_key() {
         gestures: Rc::new(Gestures::table()),
         camera: None,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     assert_eq!(
@@ -847,6 +852,33 @@ fn a_copy_cell_is_named_by_its_words_and_its_key() {
         namer.shortcut(Control::Copies(Copies::Image)).as_deref(),
         Some(spelled_here("Ctrl+C").as_str())
     );
+
+    // The key that reverses the sort sits beside the way it would go, and
+    // moves when the sort does.
+    use ui::filmstrip::Direction;
+    let reversed = |direction| Namer {
+        order: ui::filmstrip::Order {
+            direction,
+            ..Default::default()
+        },
+        path: String::new(),
+        state: Vec::new(),
+        keys: Rc::new(Keymap::table()),
+        gestures: Rc::new(Gestures::table()),
+        blocked: Vec::new(),
+        ..namer
+    };
+    for (running, other) in [
+        (Direction::Ascending, Direction::Descending),
+        (Direction::Descending, Direction::Ascending),
+    ] {
+        let namer = reversed(running);
+        assert_eq!(namer.shortcut(Control::SortDirection(running)), None);
+        assert_eq!(
+            namer.shortcut(Control::SortDirection(other)).as_deref(),
+            Some(spelled_here("Shift+R").as_str())
+        );
+    }
 
     // And the button it hangs from says what the menu is of, no one key
     // doing that job.
@@ -871,21 +903,37 @@ fn every_copy_on_the_menu_is_bound_to_a_key() {
     }
 }
 
-/// A cell of the pixel menu is named by what it answers rather than by
-/// what it is called — the cell is already wearing the name — with the key
-/// that steps through them after it.
+/// An item of the pixel menu is named by what it answers rather than by
+/// what it is called — the item is already wearing the name — with the
+/// key that chooses it while the menu is open after it; the two items of a
+/// pair that switches share the one key.
 #[test]
-fn a_pixel_format_cell_says_which_question_it_answers() {
-    for format in ui::PixelFormat::ALL {
+fn a_pixel_menu_item_says_which_question_it_answers() {
+    let keys = ["(h)", "(d)", "(m)", "(z)"];
+    for (format, key) in ui::PixelFormat::ALL.into_iter().zip(keys) {
         let words = names(Tip::Control(Control::Format(format)))
             .unwrap_or_else(|| panic!("{format:?} is named"));
-        assert!(words.ends_with("(.)"), "{words}");
+        assert!(words.ends_with(key), "{words}");
+    }
+    let keys = ["(x)", "(p)", "(e)", "(g)", "(a)"];
+    for (format, key) in ui::CoordinateFormat::ALL.into_iter().zip(keys) {
+        let words = names(Tip::Control(Control::Coordinates(format)))
+            .unwrap_or_else(|| panic!("{format:?} is named"));
+        assert!(words.ends_with(key), "{words}");
+    }
+    for unit in crate::image::density::Unit::ALL {
+        let words = names(Tip::Control(Control::PrintUnit(unit))).expect("named");
+        assert!(words.ends_with("(u)"), "{words}");
+    }
+    for format in ui::GeographicFormat::ALL {
+        let words = names(Tip::Control(Control::Geographic(format))).expect("named");
+        assert!(words.ends_with("(s)"), "{words}");
     }
 }
 
 /// The full stop is three bindings, told apart by what is held with it:
-/// alone it steps the readout on, and with Ctrl the two of them copy what
-/// it is showing. Shift is part of the character, so the shifted copy
+/// alone it opens the readout's menu, and with Ctrl the two of them copy
+/// what it is showing. Shift is part of the character, so the shifted copy
 /// arrives as `>` with it held.
 #[test]
 fn the_full_stop_reads_out_a_pixel_three_ways() {
@@ -893,7 +941,7 @@ fn the_full_stop_reads_out_a_pixel_three_ways() {
     let stop = Key::Character(SmolStr::new("."));
     let greater = Key::Character(SmolStr::new(">"));
 
-    assert_eq!(action_for(&stop, ELSEWHERE, PLAIN), Some(CyclePixelFormat));
+    assert_eq!(action_for(&stop, ELSEWHERE, PLAIN), Some(OpenPixelMenu));
     assert_eq!(action_for(&stop, ELSEWHERE, CTRL), Some(CopyPixelValue));
     assert_eq!(
         action_for(&greater, ELSEWHERE, CTRL | SHIFT),
@@ -928,6 +976,7 @@ fn the_count_says_where_it_is_and_what_a_press_on_it_opens() {
         gestures: Rc::new(Gestures::table()),
         camera: None,
         blocked: Vec::new(),
+        order: Default::default(),
         conditions: Conditions::ALIVE,
     };
     let tooltip = namer
@@ -1144,6 +1193,100 @@ fn the_arrows_step_files_and_pan_by_what_is_held_with_them() {
         action_for(&Key::Named(NamedKey::Escape), ELSEWHERE, SHIFT),
         None
     );
+}
+
+/// While the menu of sorts is open, a letter is one of its items, ahead of
+/// the plain names, and beside a region's, which take none of them; closed,
+/// the letters are their own, and the keys that open it and turn the order round are there
+/// either way.
+#[test]
+fn the_sort_menu_takes_its_letters_while_it_is_open() {
+    use ui::filmstrip::Sort;
+    use winit::keyboard::SmolStr;
+    let letter = |text: &str| Key::Character(SmolStr::new(text));
+    let open = |key: &Key, mods, holding: &[Context]| {
+        Keymap::table().action_for(key, ELSEWHERE, mods, holding)
+    };
+    let menu = [Context::SortMenu];
+    for (text, sort) in [
+        ("n", Sort::Name),
+        ("p", Sort::Path),
+        ("e", Sort::Type),
+        ("m", Sort::Modified),
+        ("t", Sort::Taken),
+        ("s", Sort::Size),
+        ("w", Sort::Width),
+        ("h", Sort::Height),
+        ("a", Sort::Area),
+    ] {
+        assert_eq!(
+            open(&letter(text), PLAIN, &menu),
+            Some(SortBy(sort)),
+            "{text}"
+        );
+        assert_ne!(
+            open(&letter(text), PLAIN, &[]),
+            Some(SortBy(sort)),
+            "{text}"
+        );
+    }
+    assert_eq!(
+        open(&letter("a"), PLAIN, &[Context::SortMenu, Context::Region]),
+        Some(SortBy(Sort::Area))
+    );
+    // A region's arrows go on moving it under the menu, which has none.
+    let left = Key::Named(NamedKey::ArrowLeft);
+    assert_eq!(
+        open(&left, PLAIN, &[Context::SortMenu, Context::Region]),
+        Some(MoveRegion(Left))
+    );
+    for holding in [&menu[..], &[]] {
+        assert_eq!(open(&letter("O"), SHIFT, holding), Some(OpenSortMenu));
+        assert_eq!(open(&letter("R"), SHIFT, holding), Some(ReverseSort));
+    }
+    assert_eq!(
+        open(&Key::Named(NamedKey::Escape), PLAIN, &menu),
+        Some(Dismiss)
+    );
+}
+
+/// While the pixel menu is open a letter is one of its items, as the sort
+/// menu's are; closed, the letters are their own, the full stop opens it
+/// either way, and the comma steps the coordinate on outside it.
+#[test]
+fn the_pixel_menu_takes_its_letters_while_it_is_open() {
+    use ui::{CoordinateFormat, PixelFormat};
+    use winit::keyboard::SmolStr;
+    let letter = |text: &str| Key::Character(SmolStr::new(text));
+    let open =
+        |key: &Key, holding: &[Context]| Keymap::table().action_for(key, ELSEWHERE, PLAIN, holding);
+    let menu = [Context::PixelMenu];
+    let items = [
+        ("h", ShowValue(PixelFormat::Hex)),
+        ("d", ShowValue(PixelFormat::Decimal)),
+        ("m", ShowValue(PixelFormat::Mapped)),
+        ("z", ShowValue(PixelFormat::Depth)),
+        ("x", ShowCoordinates(CoordinateFormat::Pixel)),
+        ("p", ShowCoordinates(CoordinateFormat::Print)),
+        ("e", ShowCoordinates(CoordinateFormat::Projected)),
+        ("g", ShowCoordinates(CoordinateFormat::Geographic)),
+        ("a", ShowCoordinates(CoordinateFormat::Direction)),
+        ("u", TogglePrintUnit),
+        ("s", CycleGeographicFormat),
+    ];
+    for (text, action) in items {
+        assert_eq!(open(&letter(text), &menu), Some(action), "{text}");
+        assert_ne!(open(&letter(text), &[]), Some(action), "{text}");
+    }
+    // A region selected takes none of them.
+    assert_eq!(
+        open(&letter("x"), &[Context::Region, Context::PixelMenu]),
+        Some(ShowCoordinates(CoordinateFormat::Pixel))
+    );
+    for holding in [&menu[..], &[]] {
+        assert_eq!(open(&letter("."), holding), Some(OpenPixelMenu));
+        assert_eq!(open(&letter(","), holding), Some(CycleCoordinates));
+    }
 }
 
 /// The number row answers to where it is rather than to what it types, so

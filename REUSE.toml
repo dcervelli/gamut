@@ -68,3 +68,20 @@ path = "THIRD-PARTY-NOTICES"
 precedence = "override"
 SPDX-FileCopyrightText = "the authors of the crates listed in the file"
 SPDX-License-Identifier = "MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND Unicode-3.0"
+
+# The `tiff` crate, vendored at 0.11.3 so that its LZW can run on weezl 0.2
+# before a release of it does — see `vendor/tiff/VENDORED.md`, and the
+# `[patch.crates-io]` entry in `Cargo.toml` for why and until when. It is
+# image-rs's work under MIT, its own `LICENSE` beside it; the note saying
+# where it came from is gamut's, and comes after so as to win.
+[[annotations]]
+path = "vendor/tiff/**"
+precedence = "override"
+SPDX-FileCopyrightText = ["2018 PistonDevelopers", "The image-rs Developers"]
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "vendor/tiff/VENDORED.md"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Dan Cervelli"
+SPDX-License-Identifier = "MIT OR Apache-2.0"

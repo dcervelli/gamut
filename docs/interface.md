@@ -107,12 +107,72 @@ loupe's rings would sit off its glass, and the picture would be fitted to a
 content area the panels do not leave. `redraw` checks in debug builds that
 egui's figure and the application's agree.
 
-`device_scale` is read in three places only. `app/window.rs` sizes the window
+`device_scale` is read in four places only. `app/window.rs` sizes the window
 in the monitor's logical pixels, where the interface's scale is a
 multiplier on the chrome (`window::Chrome`) and not a unit. The checkerboard
 behind a transparent picture is drawn at the device scale (`Scene::scale`),
-since it is the picture's backdrop rather than part of the interface. And
-egui is told the native scale by egui-winit itself.
+since it is the picture's backdrop rather than part of the interface.
+`App::surface_density` turns a monitor's size into the window's pixels to
+the millimeter, below. And egui is told the native scale by egui-winit
+itself.
+
+### The print size
+
+`App::print_zoom` is the zoom at which the file's inch is an inch on the
+glass: the window's physical pixels to the millimeter over the image's. The
+monitor's side is `monitor::Monitors::density`, keyed by `monitor::key_of` of
+`window.current_monitor()` — on a Mac the screen holding most of the window,
+on Wayland whichever output winit last saw the surface enter — and is kept in
+*logical* pixels to the millimeter, the platform's logical size over the
+size in millimeters its EDID gives (`wl_output`'s geometry,
+`CGDisplayScreenSize`). `App::surface_density` multiplies that by
+`device_scale`, not by the monitor's own device-over-logical ratio, because
+the zoom is in the window's buffer pixels: under a compositor running 1.6
+without the fractional-scale protocol, the window draws at 2 and is shrunk,
+and only the window's own scale accounts for that. On a Mac in a scaled
+"looks like" mode the same holds — the backing scale is 2 and the panel is
+not 2× the points — which is why the panel's native resolution is never
+read.
+
+EDID sizes are wrong often enough to check. `monitor::density` turns the
+size to stand as the pixels do (Core Graphics does not say whether it turns
+it with the display), refuses a zero side, pixels that come out more than
+`SQUARE_WITHIN` from square and a density outside `DENSITY_RANGE` — which
+catches the panels that put their aspect ratio, 16 by 9, where their size
+belongs. A Mac with no EDID makes a size up at 72 to the inch;
+`monitor/macos.rs` recognizes that and says nothing instead.
+
+The file's density is of its pixels as stored, so it is read through the
+orientation tag and `Current::turn` onto the monitor's axes, and a map shown
+in the picture's place is scaled by its size against the picture's. The two
+axes could ask for two zooms; `print_zoom` takes their geometric mean, and
+they differ only for a file whose pixels are not square. It is a zoom, not a
+fit: the view keeps it when the window moves to another monitor.
+
+A size measured by hand — `app/calibration.rs`, the dialog `ui/calibrate.rs` —
+is kept in the state file as millimeters, not as pixels to the millimeter: a
+scale changed later changes the second and not the first, so millimeters stay
+true across a change of the Mac's "looks like" mode or the compositor's scale.
+It is kept against `Screen::model`, the make and model the EDID gives (on a
+Mac, Core Graphics' vendor and model numbers), rather than against
+`monitor::key_of`, because the connector's name belongs to the port: a
+monitor moved to another port keeps its calibration, and two of the same model
+share one, which is right, since they are the same size. `App::screen_size`
+reads the calibration ahead of the reported size, so it also gives a monitor
+that reports none a print size.
+
+The dialog's slider is in stops of the card's size from the reported size (or,
+for a monitor that reports none, from 96 logical pixels to the inch), so its
+mark and the start of its fill stand at what the monitor says; OK with the
+slider on that mark lets the calibration go rather than keeping a copy of the
+reported size. The reset (`App::reset_calibration`) puts it there and centers
+the run on it as well, since a calibration kept far from the reported size
+opens with the mark outside the run. It runs `calibration::RANGE` either side of where the dialog
+opened, which keeps the card's room — the card at the far end of the run, so
+that the dialog does not resize under the hand — small enough to fit a window.
+The dialog has no text field, so keys never reach egui while it is up:
+`App::handle_key` hands every one to `App::calibration_key` instead, and the
+keys bound to the picture wait.
 
 The interface's scale is kept in the state file and not set in the
 configuration: it is set by hand, with the picture on screen, as the file
@@ -277,8 +337,31 @@ under a directory that is being written to.
 `]` and `[` keep the pan and zoom of the picture on screen when the file they
 land on is one they have not opened before and is the same size — a directory
 of frames or of exposures is a set to be compared, and the comparison only
-works if the same detail stays under the same pixels. A file of another size
-that has not been seen is a different picture, and is fitted.
+works if the same detail stays under the same pixels. A file of the same shape
+at another size — the same ground mapped at two resolutions, a picture beside
+its reduced copy — is the same comparison at another scale, so the view is
+rescaled to it (`Arrival::Matched`, through `View::rescale`): the detail at the
+center of the window stays there, at the size it was on screen. A file of
+another shape that has not been seen is a different picture, and is fitted.
+
+Two georeferenced files in the same coordinate system are compared by place
+rather than by pixel. Stepping from one to another whose raster lies under
+any of the part of the first on screen (`app/ground.rs::aligned`) keeps the
+ground at the middle of the window there, and as much ground to a screen
+pixel, whatever their sizes, resolutions and turns — ahead of the same-size
+and same-shape rules above and of the view the file was left in, since the
+pixels of two rasters say nothing about each other until the ground does.
+The two are one system only where both are filed under the same registered
+code (`Georeference::shares_system`): a system a file spells out for itself
+is never taken to be another's. The overlap is judged by the box around the
+part on screen as the arriving raster's pixels see it, which is exact for two
+rasters whose rows run the same way and generous where one is rotated. The
+pan is held to its usual limit, so where the middle of the window is off the
+arriving raster the view stops at the limit, and the ground lines up only as
+far as that allows. The stand-in thumbnail shown during a slow read is placed
+the same way, from the georeference the thumbnailer's header pass read
+(`thumbnailer::Facts::georeference`, through `exif::taken_and_placed`), so it
+lands where the picture will rather than jumping when the pixels arrive.
 
 Every display control is also a start-up flag — `--colormap viridis`,
 `--tone-map neutral`, `--window full`, `--exposure -1.5`, `--output hdr`,
@@ -316,10 +399,10 @@ marked-out part under the hand. It comes back from the pass as
 `View::center_on` moves the pan there — clamped as any pan is, so a press by
 an edge stops with the edge as far inside the window's as a drag goes, and
 an axis the image is well short of stays centered. The marker is the
-viewport's rectangle, not clamped to the thumbnail, so a view past the
-image's edge has it hang off the thumbnail's side by as much, over the
-picture; it is cut off at the content area rather than drawn over the
-chrome, and the wash stays on the thumbnail. Not animated, on the rule the rest of the view
+viewport's rectangle cut to the thumbnail, so a view past the image's edge
+has it stop at the thumbnail's edge, and that edge of it is drawn dashed
+(`outline_sides`) to say the view goes on past it; the marker never leaves
+the thumbnail for the picture around it. Not animated, on the rule the rest of the view
 follows: this is the hand on the view, as a drag on the picture is, and it
 lands where it is put. The press is read with `is_pointer_button_down_on`
 rather than `clicked` or `dragged`, both of which wait — the one for the
@@ -1513,7 +1596,7 @@ which one is up, the full one only ever meaning the horizon itself.
 That line and what goes with it are the horizon grid (`attitude::paint`),
 which the section previews while the pointer is anywhere on it and the
 compass toggle in the bottom bar keeps up (`Panels::horizon_grid`), drawn
-from `Pass::overlays` over the pixel grid and under the region. Everything in
+from `Pass::overlays` over the grid and under the region. Everything in
 it is one map between a way round the camera and a pixel. The ground's axes
 in the picture's are gravity, ahead — the lens's axis with gravity's share
 taken out — and right, `g × ahead`; the way `azimuth` round and `elevation`
@@ -1611,10 +1694,77 @@ user-defined, or named by a code the table lacks, or whose code has an inverse
 the crate does not implement, has no lift and offers only its own
 coordinates; one in latitude and longitude already offers only those, read
 straight or lifted from its own datum. `CoordinateFormat::offered` is the one
-reading of that — the menu's rows, the key's step and the `When::Georeferenced`
-and `When::Geographic` conditions all ask it — and `CoordinateFormat::shown`
-is what makes the pixel the fallback without forgetting the choice, which is
-held in `Panels` like the pixel format beside it.
+reading of that — the menu's dead items, the key's step, the `Conditions`
+that refuse a press and the `When` conditions all ask it, through
+`pixel::Answers` — and `CoordinateFormat::shown` is what makes the pixel the
+fallback without forgetting the choice, which is held in `Panels` like the
+pixel format beside it. The print's coordinate is offered the same way, for
+a file with a density: `ruler::density` lays the file's pixels to the inch
+along the picture as shown — the orientation tag, the turn, and the size of
+whichever of the file's images is on screen — as `App::print_zoom` does.
+
+What the grid is ruled in and what a region's labels are written in follow
+the coordinate, through `ui/ruler.rs`. A `Ruler` is the picture as shown
+measured along each axis by one straight function — where it reads at the
+near edge and how far it goes per pixel — which is all a grid of straight
+lines can draw and all a region's edges need. The pixel's and the print's are
+that by construction; the ground's is too for a raster whose matrix has no
+rotation (`Georeference::aligned`), worked out through `Turn::stored_point`
+so that a turned map rules its northings across. A latitude is not — on a
+projected raster its lines curve, which is why the user asks for the ground
+when they ask for a latitude — and a slanted raster's coordinates are not
+either, so both fall back: a latitude to the file's own coordinates, a slant
+to the pixel. The grid's lines go where the measure reads a whole number of
+spacings rather than a whole number of spacings in from the edge, so a map's
+fall on round eastings and two maps on one system share them, which is what
+lining them up on the ground (`app/ground.rs::aligned`) is for; `grid::ON_EDGE` keeps a raster cut on
+a round coordinate from drawing a line along its own edge after the large
+numbers come back from the arithmetic a hair off it. The spacing is chosen
+along the axis the lines fall closer together on, so a print or a raster
+whose pixels are not square keeps squares of its own unit.
+
+The region panel's boxes read the same `Ruler` (`region_panel::Field::of`
+and `read`). A region stays whole pixels, so a typed reading goes to the
+nearest pixel edge and the box then says where that is. The box hands what
+was typed over only where it differs from what it said: a reading written
+to the places a pixel is worth goes back to its pixel, except on a tie — a
+pixel exactly a power of ten across, on a raster whose corners fall half a
+unit off a round coordinate — where a box let go of unchanged would have
+moved the region by one. A box is kept in egui's memory under its measure
+as well as its name, so text half typed when the measure changes is thrown
+away rather than read in another unit. A held ratio is in the measure's
+units too, which on pixels that are not square is another shape in them:
+`Aspect::ratio` takes the pixels' `Ruler::shape`, and `Aspect::in_pixels`
+is what `Marking` holds a region to.
+
+The pixel under the pointer has two lines of its own in the accent, through
+its middle so that an overzoomed pixel is bisected, each edged in a physical
+pixel of black to be seen on any picture; both edges are drawn before either
+line, so that neither cuts the other where they cross. `grid::pointer_labels`
+numbers them in the rows the other labels were given, on a ground of the
+accent over them, on a Foreground layer of their own because the minimap is
+an area over the picture. Those two are moved back inside the content area
+rather than dropped, and read `Ruler::pixel_reading`, what the readout says, rather
+than the round reading of a line. They read `FrameInput::pointer`, which a
+move across a pixel owes a frame for already.
+
+The lines are numbered by `grid::labels`, which is geometry only and is
+tested with a stand-in for the font. A label goes beside the picture where
+the content area has room past the picture's edge — the near side first,
+then the far — since that covers nothing and is where a printed map numbers
+its graticule; with no room it goes over the picture just inside the
+content area, on the menus' ground so it reads against anything. How many
+lines are numbered is `labeled_every`: the widest label any line would wear
+sets the room one needs, and the interval is every line or every other line
+if that gives the room, and otherwise the first of the ruler's own 1-2-5
+marks that is a whole number of spacings and does, so the numbered lines stay
+round where a bare multiple of the spacing would number a grid in fives by
+twenty-fives. Every other line comes first because a grid in twos would
+otherwise go straight from every line to every fifth. The words are the bare reading in the
+toggle's unit — kilometers where it says kilometers — to as many places as
+the interval needs. The left edge is laid out before the top, its labels
+being short and each one wanted, and a top label that would touch one, or
+the minimap, or the loupe's glass, is the one left out.
 
 Two kinds of raster need one more step to be read at all, and both take the
 same one. A BigTIFF — the same tags and types with eight-byte offsets, which
@@ -1695,17 +1845,34 @@ tooltip on it is named from the key table by the same `action_of` that names
 a button: a numbered cell by the key that goes to that zoom, a fit by the key
 that toggles the fit, a copy by the very line that describes the copy.
 
-The zoom menu holds three kinds of thing, and says so: **Zoom**, eight
-percentages four to a row; **Fit**, the two fits as arrows; and
+The zoom menu holds four kinds of thing, and says so: **Zoom**, eight
+percentages four to a row; **Physical**, the print size, a scale like the
+others but not one the menu knows — `ZoomChoice::Print` carries no number, and
+`App::print_zoom` hands it to `ZoomChoice::apply` and `active` as `print`;
+**Fit**, the two fits as arrows; and
 **Up-scaling**, the magnification filter as the two words `Nearest` and
 `Bicubic`. Undivided, those last two read as a third fit — and there is no
 picture of "bicubic" a reader arrives at unaided, so theirs are the one pair
 of cells cut wider than the rest, by exactly what the words need.
-`ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into three and a test holds the two in
+`ZOOM_SECTIONS` is `ZOOM_CHOICES` cut into four and a test holds the two in
 step, since a choice in no section could never be pressed. The menu of copies
 is a list rather than a grid, each item with its key printed beside it: the
 items are things done rather than states to be in, and what a reader wants
 from one is the key that would have done it without the menu.
+
+The pixel menu is a list too, sectioned — the coordinate, where the file
+can give them the print's unit and a latitude's degrees, and then the value,
+the order the readout writes them in —
+because each of its items has a letter while it is open, as the sort menu's
+have: `When::PixelMenuOpen` is a context (`keymap::Context::PixelMenu`), so
+the letters are tried ahead of the plain names only while
+`App::pixel_menu_open` says egui has the popup up, and `Naming::shortcut`
+prints each beside its item. That is why the coordinates a file cannot give
+are drawn dead rather than left out: a letter that moved from file to file
+would have to be read off the menu every time. A dead item's letter does
+nothing and leaves the menu up (`App::choose`), as a click on it does. With
+the bars hidden, `.` hangs it from the corner of the picture the dot would
+be above, through `pixel::loose_menu`, under the same `pixel::menu_id`.
 
 The menu of other applications is the one whose contents this program does not
 know: what is on it is whatever the desktop has installed, so an item is asked

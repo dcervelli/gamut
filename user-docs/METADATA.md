@@ -56,6 +56,8 @@ is shown in its place. Its heading wears a *Showing* pill while the picture is o
 | Rendering | *camera JPEG* while a raw's embedded JPEG is shown instead of the developed picture. |
 | Orientation | The turn the file's EXIF orientation asks for, which has already been applied. |
 | Compression | TIFF only: how its pixels are compressed. |
+| Density | How many pixels the file says go to an inch, taken as written: many cameras write 72 dpi, which means nothing about printing. Absent for a camera raw. |
+| Print size | The size the picture prints at at that density. Where it is a standard sheet — A0 to A6, Letter, Legal, Tabloid — the sheet is named and the size given in its own unit; otherwise in millimeters, or in inches where the system's region measures in them. |
 | Samples | Bits per sample and the channel layout: *8-bit RGB*, *32-bit float gray*. |
 | Precision | Only when the GPU could not hold the picture at full precision, and why; it is then shown as half float. |
 | Color space | The color space the numbers are in, by its common name where it has one: *sRGB*, *Display P3*. |
@@ -221,6 +223,7 @@ site.
 | Pixel size | How much ground one pixel covers, in the coordinates' unit. |
 | Origin | The coordinates of the top left corner. |
 | Min easting, Max easting, Min northing, Max northing | The ground the raster covers. For geographic coordinates these are longitude and latitude. |
+| Extent, easting; Extent, northing | How far the raster reaches along each axis, in the coordinates' unit: the distance from the least to the greatest. |
 | Orientation | Only where the raster is rotated against the map's axes. |
 | No data | The value that marks a pixel with no data. |
 

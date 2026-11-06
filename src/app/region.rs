@@ -131,21 +131,23 @@ impl Marking {
     }
 
     /// Holds the region to `aspect` from now on, on a picture `image`
-    /// pixels across and down: the region on screen takes that shape about
-    /// its middle.
-    pub fn hold_to(&mut self, aspect: Aspect, image: [u32; 2]) {
+    /// pixels across and down whose pixels are `shape` as wide as they are
+    /// tall: the region on screen takes that shape about its middle.
+    pub fn hold_to(&mut self, aspect: Aspect, image: [u32; 2], shape: f64) {
         self.aspect = aspect;
-        if let (Selection::Shown(region), Some(ratio)) = (self.selection, aspect.ratio(image)) {
+        if let (Selection::Shown(region), Some(ratio)) =
+            (self.selection, aspect.in_pixels(image, shape))
+        {
             self.select(region.shaped(ratio, image));
         }
     }
 
     /// Turns the aspect, and the region on screen, the other way up about
     /// its middle. A free region is turned all the same.
-    pub fn swap(&mut self, image: [u32; 2]) {
+    pub fn swap(&mut self, image: [u32; 2], shape: f64) {
         self.aspect = self.aspect.swapped();
         if let Selection::Shown(region) = self.selection {
-            let swapped = match self.aspect.ratio(image) {
+            let swapped = match self.aspect.in_pixels(image, shape) {
                 Some(ratio) => region.shaped(ratio, image),
                 None => region.swapped(image),
             };
@@ -153,10 +155,11 @@ impl Marking {
         }
     }
 
-    /// The ratio of width to height the region is held to on a picture
-    /// `image` pixels across and down, if any.
-    pub fn ratio(&self, image: [u32; 2]) -> Option<f64> {
-        self.aspect.ratio(image)
+    /// The ratio of width to height in pixels the region is held to on a
+    /// picture `image` pixels across and down whose pixels are `shape` as
+    /// wide as they are tall, if any.
+    pub fn ratio(&self, image: [u32; 2], shape: f64) -> Option<f64> {
+        self.aspect.in_pixels(image, shape)
     }
 
     /// Takes the region off, and the mode with it. The aspect stays.
@@ -207,14 +210,14 @@ impl Marking {
     }
 
     /// The hand is at `to`, in image pixels, on an image `image` pixels
-    /// across: the region — or the box to zoom to — is what the hold makes
+    /// across whose pixels are `shape` as wide as they are tall: the region — or the box to zoom to — is what the hold makes
     /// of that. A new region, or a box, that has not yet enclosed a pixel —
     /// the hand still off the picture — leaves things as they were.
-    pub fn pull(&mut self, to: [f32; 2], image: [u32; 2]) {
+    pub fn pull(&mut self, to: [f32; 2], image: [u32; 2], shape: f64) {
         let Some(Grabbing { grab, origin, from }) = self.grabbing else {
             return;
         };
-        let ratio = self.ratio(image);
+        let ratio = self.ratio(image, shape);
         let region = match (grab, origin) {
             // The box is drawn as a new region is, but is not the
             // selection: it is kept apart, and taken by the release.
@@ -265,6 +268,27 @@ mod tests {
 
     const IMAGE: [u32; 2] = [40, 30];
 
+    /// A ratio is held in what the picture is measured in: on pixels twice
+    /// as wide as they are tall, a square is twice as many pixels down as
+    /// across, to the nearest pixel, and swapped it is still a square.
+    #[test]
+    fn a_held_ratio_is_in_the_measures_units() {
+        let mut marking = Marking::default();
+        marking.select(Region {
+            x: 10,
+            y: 5,
+            width: 8,
+            height: 8,
+        });
+        marking.hold_to(Aspect::Ratio(1.0, 1.0), IMAGE, 2.0);
+        let square = |region: Region| region.height.abs_diff(2 * region.width) <= 1;
+        let held = marking.selection.region().expect("a region");
+        assert!(square(held), "{held:?}");
+        marking.swap(IMAGE, 2.0);
+        let swapped = marking.selection.region().expect("a region");
+        assert!(square(swapped), "{swapped:?}");
+    }
+
     /// A drag from nothing draws a region, corner to corner, and the
     /// arrows then have the middle of it; the hand counts as on it while
     /// it has hold, and is off it once it lets go.
@@ -276,7 +300,7 @@ mod tests {
         };
         marking.grab(Grab::New, [2.0, 3.0]);
         assert!(!marking.over(), "nothing drawn yet");
-        marking.pull([10.0, 8.0], IMAGE);
+        marking.pull([10.0, 8.0], IMAGE, 1.0);
         let drawn = marking.selection.region().expect("drawn");
         assert_eq!((drawn.x, drawn.y), (2, 3));
         assert!(drawn.width >= 7 && drawn.height >= 4, "{drawn:?}");
@@ -302,7 +326,7 @@ mod tests {
         marking.select(region);
         marking.grab(Grab::Handle(Grip::Edge(Side::Right)), [14.0, 9.0]);
         assert_eq!(marking.handle, Grip::Edge(Side::Right));
-        marking.pull([20.0, 9.0], IMAGE);
+        marking.pull([20.0, 9.0], IMAGE, 1.0);
         let pulled = marking.selection.region().expect("still there");
         assert_eq!((pulled.x, pulled.y, pulled.height), (4, 4, 10));
         assert!(pulled.width > 10, "{pulled:?}");
@@ -310,7 +334,7 @@ mod tests {
 
         marking.grab(Grab::Handle(Grip::Inside), [8.0, 8.0]);
         assert_eq!(marking.handle, Grip::Edge(Side::Right), "left as it was");
-        marking.pull([11.0, 10.0], IMAGE);
+        marking.pull([11.0, 10.0], IMAGE, 1.0);
         let moved = marking.selection.region().expect("still there");
         assert_eq!((moved.x, moved.y), (7, 6));
         assert_eq!((moved.width, moved.height), (pulled.width, pulled.height));
@@ -331,7 +355,7 @@ mod tests {
         };
         marking.select(region);
         marking.grab(Grab::Zoom, [10.0, 10.0]);
-        marking.pull([20.0, 25.0], IMAGE);
+        marking.pull([20.0, 25.0], IMAGE, 1.0);
         assert_eq!(marking.selection.region(), Some(region), "left alone");
         let boxed = marking.zoom_box().expect("a box is being drawn");
         assert_eq!((boxed.x, boxed.y), (10, 10));
@@ -339,7 +363,7 @@ mod tests {
         assert_eq!(marking.zoom_box(), None);
 
         marking.grab(Grab::Zoom, [10.0, 10.0]);
-        marking.pull([20.0, 25.0], IMAGE);
+        marking.pull([20.0, 25.0], IMAGE, 1.0);
         assert!(marking.drop_box());
         assert!(!marking.drop_box());
         assert_eq!(marking.release(), None);

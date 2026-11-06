@@ -34,7 +34,6 @@ settings are:
 | --- | --- | --- |
 | `show_ui` | `true` | The panels around the picture, which `` ` `` hides and shows |
 | `show_minimap` | `true` | The minimap, while the picture is larger than the window |
-| `show_filmstrip` | `true` | The file list, while there is more than one file |
 | `show_histogram` | `false` | The histogram, in the panel down the right; it wins over `show_info` when both are on |
 | `show_info` | `false` | The file information, in the panel down the right |
 | `browse_folder` | `true` | A single file opened by itself steps on through the other images in its folder |
@@ -61,9 +60,11 @@ quotes. If `gamut` finds that file and no `config.toml`, it
 writes `config.toml` from it, with the same settings, keys, gestures and
 commands, and your comments where you left them, and says so as the window
 opens. From then on it reads only `config.toml`; the old file is left as it
-was, for you to delete. Two key names changed with it, because TOML cannot
+was, for you to delete. Five key names changed with it, because TOML cannot
 hold a name and a longer name that starts with it: `zoom.100.toggle` is now
-`zoom.toggle`, and `files.map.bounds` is now `files.map-bounds`.
+`zoom.toggle`, `zoom.print.calibrate` is now `zoom.print-calibrate`,
+`files.map.bounds` is now `files.map-bounds`, `files.sort` is now
+`files.sort.menu`, and `interface.readout` is now `interface.readout.menu`.
 
 If `config.toml` cannot be written there, `gamut` reads the old file as it
 would have rewritten it, every time it starts, and says so.
@@ -689,11 +690,13 @@ them, and `browse_folder` and `max_files` wait for the next start.
 
 `~/.local/state/gamut/state` (under `$XDG_STATE_HOME` if you set it), or
 `~/Library/Application Support/gamut/state` on a Mac, is where
-`gamut` remembers settings you change by hand: how wide you dragged the file
-list, what the list is sorted by and which way, how far the loupe
+`gamut` remembers settings you change by hand: whether the file list was open,
+how wide you dragged it, what the list is sorted by and which way, how far the loupe
 magnifies, how large you made the interface, whether a raw opens as the camera's JPEG,
 whether the folder dialog's *Include subfolders* box was left ticked, and how the pixel
 under the pointer is read out: its value, and for a map its place and how a
-latitude is written. It is written when the window closes and read when the next window
+latitude is written. It also keeps the size of each display you have
+calibrated for the print size, one `display.` line per make and model of
+display. It is written when the window closes and read when the next window
 opens. You never need to edit it, and deleting it resets them all to their
 defaults.

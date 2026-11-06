@@ -18,6 +18,7 @@ use super::Rect;
 
 use super::control::{Command, Control, Naming};
 use super::icon::{self, Mark};
+use super::ruler::Ruler;
 use super::style::TOGGLE_RADIUS;
 use super::tooltip::Tip;
 use super::{
@@ -614,7 +615,12 @@ impl Pass<'_> {
             return;
         };
         let zoom = self.view.zoom(current.size(), self.input.viewport);
-        let spacing = super::grid_spacing(self.panels.show_grid, zoom, self.input.scale);
+        let spacing = super::grid_spacing(
+            self.panels.show_grid,
+            &self.ruler(current),
+            zoom,
+            self.input.scale,
+        );
 
         ui.horizontal_centered(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -759,7 +765,7 @@ impl Pass<'_> {
         self.reading_toggle(ui, icon::GRID_3X3, Control::Grid, spacing, true);
     }
 
-    /// The horizon grid's toggle, after the pixel grid's: the other grid
+    /// The horizon grid's toggle, after the grid's: the other grid
     /// laid over the picture, and so beside it. While it is on, the spacing
     /// of its uprights is written after the mark, as the grid's is; a file
     /// that gives only its heading has no uprights, and the toggle is lit
@@ -939,25 +945,18 @@ impl Pass<'_> {
     }
 
     /// The dot at the head of the pixel readout, which opens the menu of ways
-    /// to write a pixel's value. Lit while that menu is open.
+    /// to write a pixel's value and its place. Lit while that menu is open.
+    /// From the bottom bar, so it stands over its button rather than hanging
+    /// off the foot of the window.
     fn pixel_dot(&mut self, ui: &mut Ui) {
-        let id = egui::Id::new("pixel menu");
-        let open = egui::Popup::is_id_open(ui.ctx(), id);
-        let response = self.icon_button(
+        self.menu_button(
             ui,
             icon::CIRCLE_DOT,
             Control::PixelFormat,
-            open,
+            egui::RectAlign::TOP_START,
             true,
-            Corners::All,
+            menu::pixel_items,
         );
-        // From the bottom bar, so it stands over its button rather than
-        // hanging off the foot of the window.
-        egui::Popup::from_toggle_button_response(&response)
-            .id(id)
-            .align(egui::RectAlign::TOP_START)
-            .gap(MENU_OFFSET)
-            .show(|ui| menu::pixel_cells(self, ui));
     }
 
     /// The button that opens the menu of everything else that can open this
@@ -1187,6 +1186,21 @@ impl Pass<'_> {
         response
     }
 
+    /// What `current` is measured in by the grid and the region's labels:
+    /// the readout's coordinate, as [`Ruler::of`] reads it.
+    pub fn ruler(&self, current: &Current) -> Ruler {
+        Ruler::of(
+            current,
+            self.panels.coordinate_format,
+            self.panels.print_unit,
+        )
+    }
+
+    /// The id the menu `control` opens is open under.
+    pub fn menu_id(control: Control) -> egui::Id {
+        egui::Id::new(("menu", control.label()))
+    }
+
     /// A button that opens a menu: [`Pass::icon_button`] lit while the menu
     /// is open, as a toggle is while it is on, with the menu hung `align`
     /// to it under an id of the control's own. The menu opens, closes and
@@ -1201,7 +1215,7 @@ impl Pass<'_> {
         enabled: bool,
         contents: impl FnOnce(&mut Pass, &mut Ui),
     ) {
-        let id = egui::Id::new(("menu", control.label()));
+        let id = Self::menu_id(control);
         let open = egui::Popup::is_id_open(ui.ctx(), id);
         let button = self.icon_button(ui, marks, control, open, enabled, Corners::All);
         egui::Popup::menu(&button)
@@ -1209,6 +1223,34 @@ impl Pass<'_> {
             .align(align)
             .gap(MENU_OFFSET)
             .show(|ui| contents(self, ui));
+    }
+
+    /// The menu `control` opens, while its button is not on screen to hang
+    /// it from, which only a key opens: hung `align` to `anchor`, `gap` from
+    /// it, under the id the button would open it under, and drawn on every
+    /// frame it is open, as a popup not drawn is a popup egui closes.
+    pub fn loose_menu(
+        &mut self,
+        ui: &Ui,
+        control: Control,
+        anchor: egui::PopupAnchor,
+        align: egui::RectAlign,
+        gap: f32,
+        contents: impl FnOnce(&mut Pass, &mut Ui),
+    ) {
+        egui::Popup::new(
+            Self::menu_id(control),
+            ui.ctx().clone(),
+            anchor,
+            ui.layer_id(),
+        )
+        .open_memory(None)
+        .kind(egui::PopupKind::Menu)
+        .layout(Layout::top_down_justified(Align::Min))
+        .style(egui::containers::menu::menu_style)
+        .align(align)
+        .gap(gap)
+        .show(|ui| contents(self, ui));
     }
 
     /// Hangs words the frame itself holds off `response`, laid out as a

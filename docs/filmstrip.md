@@ -43,15 +43,26 @@ few minutes of one, a stale fix saying more about the receiver than the
 zone — and last a date with no zone at all, read in this machine's zone
 as LibRaw reads a raw's. That last is wrong by the difference for a
 camera set elsewhere, and nothing in such a file can correct it. The
-sort is `slice::sort_by` on indices, which is stable, and the list is
-sorted in place from wherever it stands, so files one key cannot tell
-apart keep the order the last key put them in: sorting by size and then by
-type leaves each type in size order, as sorting a spreadsheet twice does.
-That is also why a file a directory gains goes in at the end of the list,
-through `Files::add`, and is put in its place by applying the order again
-rather than by the directory's own order: the stable sort places the
-newcomer where its key has it and leaves every other file as it stands, so
-a file arriving never undoes a sort.
+order has three keys, each breaking the ties of the one before: the sort
+in force, `Order::then` — the sort that was in force before it, in the
+direction it ran — and last the folder and the name, ascending whichever
+way the others run, which tell any two files apart. Sorting by size and
+then by type leaves each type in size order, as sorting a spreadsheet twice
+does, and goes on doing so: `then` is kept in the state file beside the
+sort, and a file a directory gains, which `Files::add` puts at the end of
+the list, is put in its place by applying the order again, its place being
+a matter of its keys alone.
+
+`Order::sorted_by` is what a press in the menu makes: the sort pressed
+takes the direction in force, the sort it replaces goes under it, and the
+one already under it pressed trades places with it, each keeping its own
+direction. The direction rows turn the sort in force alone. Two keys are
+all there is — a third sort in a row pushes the first out — and the button
+at the head of the strip says both in its tooltip, being the only place
+the one under is on screen. A sort by path ranks by the folder alone,
+compared a component at a time so that `maps/fences` follows `maps` rather
+than `maps-old`: a folder's files keep together, and within it go by the
+key under it.
 
 The order is remembered between runs in `State`, and a list about to be
 opened is put in it before the first of it is chosen, so that the first

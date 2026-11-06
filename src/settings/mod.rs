@@ -32,6 +32,7 @@
 pub(crate) mod document;
 mod legacy;
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
@@ -42,6 +43,7 @@ use crate::app::input::Action;
 use crate::app::keymap::{Chord, Keymap};
 use crate::commands::{self, Command, Program};
 use crate::gestures::{Behavior, Gestures, Slot};
+use crate::image::density;
 use crate::image::geo::Corners;
 use crate::ui::{CoordinateFormat, GeographicFormat, PixelFormat};
 use crate::ui::{attitude, filmstrip, loupe, scale};
@@ -55,7 +57,6 @@ use document::{Lines, Value, shown};
 pub struct Config {
     pub show_ui: bool,
     pub show_minimap: bool,
-    pub show_filmstrip: bool,
     pub show_histogram: bool,
     pub show_info: bool,
     /// Whether a single file named on the command line steps on through
@@ -105,7 +106,6 @@ impl Default for Config {
         let mut config = Self {
             show_ui: true,
             show_minimap: true,
-            show_filmstrip: true,
             show_histogram: false,
             show_info: false,
             browse_folder: true,
@@ -158,7 +158,7 @@ impl Plain {
 /// Every setting the configuration file takes, in the order the template
 /// lists them. [`Config::template`] writes each one's value, and
 /// [`Config::parse`] reads it back.
-const SETTINGS: [Setting; 10] = [
+const SETTINGS: [Setting; 9] = [
     Setting {
         name: "show_ui",
         words: "The panels around the picture.",
@@ -170,12 +170,6 @@ const SETTINGS: [Setting; 10] = [
         words: "The minimap, while the picture is larger than the window.",
         get: |config| Plain::Flag(config.show_minimap),
         set: |config, value| flag(&mut config.show_minimap, value),
-    },
-    Setting {
-        name: "show_filmstrip",
-        words: "The file list down the left, while there is more than one file.",
-        get: |config| Plain::Flag(config.show_filmstrip),
-        set: |config, value| flag(&mut config.show_filmstrip, value),
     },
     Setting {
         name: "show_histogram",
@@ -314,22 +308,29 @@ pub fn map_bounds_link(link: &str, corners: Corners) -> String {
 }
 
 /// Settings the configuration file once took: how the pointer's pixel and
-/// place are written, which the state file keeps now, chosen by hand from
-/// the readout's menu and remembered where they were left, like everything
-/// else set there; and the histogram's logarithmic counts, which its one
-/// scale down the column has taken the place of. A line naming one is
-/// passed over.
-const RETIRED: [&str; 4] = [
+/// place are written, and whether the file list is up, which the state file
+/// keeps now, set by hand and remembered where they were left, like
+/// everything else set there; and the histogram's logarithmic counts, which
+/// its one scale down the column has taken the place of. A line naming one
+/// is passed over.
+const RETIRED: [&str; 5] = [
     "pixel_format",
     "coordinate_format",
     "geographic_format",
+    "show_filmstrip",
     "log_counts",
 ];
 
 /// Key names the table once had: the histogram's logarithmic counts, which
-/// its one scale down the column has taken the place of. A `keys.` line
-/// naming one is passed over.
-const RETIRED_KEYS: [&str; 1] = ["interface.log-counts"];
+/// its one scale down the column has taken the place of; and the keys that
+/// stepped the pixel readout's value and switched a latitude's degrees,
+/// which the readout's menu and its letters have. A `keys.` line naming one
+/// is passed over.
+const RETIRED_KEYS: [&str; 3] = [
+    "interface.log-counts",
+    "interface.pixel-format",
+    "interface.geographic-format",
+];
 
 impl Config {
     /// The configuration as a file: every setting at its default, commented
@@ -673,8 +674,10 @@ pub(crate) fn top_level(name: &str) -> bool {
 }
 
 /// What the program keeps for itself from one run to the next.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct State {
+    /// Whether the file list is up, while there is more than one file.
+    pub show_filmstrip: bool,
     /// The width each of the file list's thumbnails is fitted into, in
     /// logical pixels, which the panel's own width is made from.
     pub filmstrip_width: f32,
@@ -695,17 +698,27 @@ pub struct State {
     pub profile: bool,
     /// How the pointer's pixel was last written.
     pub pixel_format: PixelFormat,
-    /// How its place was last written, in a georeferenced file.
+    /// How its place was last written, in a file that can say more than its
+    /// column and row.
     pub coordinate_format: CoordinateFormat,
+    /// What a print was last measured in, where it was chosen against the
+    /// locale: nothing while it is the locale's own unit, which then
+    /// follows the locale.
+    pub print_unit: Option<density::Unit>,
     /// And a latitude and longitude, where it was one.
     pub geographic_format: GeographicFormat,
     /// Whether the folder dialog's box for subfolders was last left ticked.
     pub include_subfolders: bool,
+    /// The size each model of monitor was measured at by hand, in
+    /// millimeters across and down, by the word `monitor::Screen::model`
+    /// makes of it: one `display.<model> = <across>x<down>` line each.
+    pub displays: BTreeMap<String, [f64; 2]>,
 }
 
 impl Default for State {
     fn default() -> Self {
         Self {
+            show_filmstrip: true,
             filmstrip_width: filmstrip::SLOT_DEFAULT,
             loupe_magnification: loupe::DEFAULT_MAGNIFICATION,
             horizon_step: attitude::DEFAULT_STEP,
@@ -716,27 +729,59 @@ impl Default for State {
             include_subfolders: false,
             pixel_format: PixelFormat::default(),
             coordinate_format: CoordinateFormat::default(),
+            print_unit: None,
             geographic_format: GeographicFormat::default(),
+            displays: BTreeMap::new(),
         }
     }
+}
+
+/// What starts a line of the state file that gives a monitor's size: the
+/// rest of its name is the model.
+const DISPLAY: &str = "display.";
+
+/// The largest side a monitor measured by hand is believed at, in
+/// millimeters: a wall a projector lights, and then some.
+const DISPLAY_MAX_MM: f64 = 10_000.0;
+
+/// A monitor's size as its line writes it: `597.3x336`.
+fn display_size(value: &str) -> Option<[f64; 2]> {
+    let (across, down) = value.split_once('x')?;
+    let mm = [
+        across.trim().parse::<f64>().ok()?,
+        down.trim().parse::<f64>().ok()?,
+    ];
+    mm.iter()
+        .all(|side| side.is_finite() && *side > 0.0 && *side <= DISPLAY_MAX_MM)
+        .then_some(mm)
 }
 
 /// One line of the state file: its name, and the field it is, written as
 /// the file has it and read back from it.
 struct Kept {
     name: &'static str,
-    /// The value as the file writes it.
-    get: fn(&State) -> String,
+    /// The value as the file writes it, or nothing where the field has no
+    /// value of its own and the line is left out.
+    get: fn(&State) -> Option<String>,
     /// Sets the field from the file's value, where the value is one it can
     /// be; a value that is not is left alone, the field keeping its default.
     set: fn(&mut State, &str),
 }
 
 /// Every line of the state file, in the order it is written.
-const KEPT: [Kept; 12] = [
+const KEPT: [Kept; 16] = [
+    Kept {
+        name: "show_filmstrip",
+        get: |state| Some(state.show_filmstrip.to_string()),
+        set: |state, value| {
+            if let Some(on) = on(value) {
+                state.show_filmstrip = on;
+            }
+        },
+    },
     Kept {
         name: "filmstrip_width",
-        get: |state| state.filmstrip_width.to_string(),
+        get: |state| Some(state.filmstrip_width.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && (filmstrip::SLOT_MIN..=filmstrip::SLOT_MAX).contains(&number)
@@ -747,7 +792,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "loupe_magnification",
-        get: |state| state.loupe_magnification.to_string(),
+        get: |state| Some(state.loupe_magnification.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && loupe::MAGNIFICATIONS.contains(&number)
@@ -758,7 +803,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "horizon_step",
-        get: |state| state.horizon_step.to_string(),
+        get: |state| Some(state.horizon_step.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && attitude::STEPS.contains(&number)
@@ -769,7 +814,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "ui_scale",
-        get: |state| state.ui_scale.to_string(),
+        get: |state| Some(state.ui_scale.to_string()),
         set: |state, value| {
             if let Ok(number) = value.parse::<f32>()
                 && number.is_finite()
@@ -781,7 +826,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "sort",
-        get: |state| state.order.sort.word().to_string(),
+        get: |state| Some(state.order.sort.word().to_string()),
         set: |state, value| {
             if let Some(sort) = filmstrip::Sort::read(value) {
                 state.order.sort = sort;
@@ -790,7 +835,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "sort_direction",
-        get: |state| state.order.direction.word().to_string(),
+        get: |state| Some(state.order.direction.word().to_string()),
         set: |state, value| {
             if let Some(direction) = filmstrip::Direction::read(value) {
                 state.order.direction = direction;
@@ -798,8 +843,26 @@ const KEPT: [Kept; 12] = [
         },
     },
     Kept {
+        name: "sort_then",
+        get: |state| Some(state.order.then.sort.word().to_string()),
+        set: |state, value| {
+            if let Some(sort) = filmstrip::Sort::read(value) {
+                state.order.then.sort = sort;
+            }
+        },
+    },
+    Kept {
+        name: "sort_then_direction",
+        get: |state| Some(state.order.then.direction.word().to_string()),
+        set: |state, value| {
+            if let Some(direction) = filmstrip::Direction::read(value) {
+                state.order.then.direction = direction;
+            }
+        },
+    },
+    Kept {
         name: "camera_jpeg",
-        get: |state| state.camera_jpeg.to_string(),
+        get: |state| Some(state.camera_jpeg.to_string()),
         set: |state, value| {
             if let Some(on) = on(value) {
                 state.camera_jpeg = on;
@@ -808,7 +871,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "include_subfolders",
-        get: |state| state.include_subfolders.to_string(),
+        get: |state| Some(state.include_subfolders.to_string()),
         set: |state, value| {
             if let Some(on) = on(value) {
                 state.include_subfolders = on;
@@ -817,7 +880,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "profile",
-        get: |state| state.profile.to_string(),
+        get: |state| Some(state.profile.to_string()),
         set: |state, value| {
             if let Some(on) = on(value) {
                 state.profile = on;
@@ -826,7 +889,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "pixel_format",
-        get: |state| state.pixel_format.label().to_ascii_lowercase(),
+        get: |state| Some(state.pixel_format.label().to_ascii_lowercase()),
         set: |state, value| {
             if let Some(format) = PixelFormat::parse(value) {
                 state.pixel_format = format;
@@ -835,7 +898,7 @@ const KEPT: [Kept; 12] = [
     },
     Kept {
         name: "coordinate_format",
-        get: |state| state.coordinate_format.word().to_string(),
+        get: |state| Some(state.coordinate_format.word().to_string()),
         set: |state, value| {
             if let Some(format) = CoordinateFormat::parse(value) {
                 state.coordinate_format = format;
@@ -843,8 +906,17 @@ const KEPT: [Kept; 12] = [
         },
     },
     Kept {
+        name: "print_unit",
+        get: |state| state.print_unit.map(|unit| unit.word().to_string()),
+        set: |state, value| {
+            if let Some(unit) = density::Unit::parse(value) {
+                state.print_unit = Some(unit);
+            }
+        },
+    },
+    Kept {
         name: "geographic_format",
-        get: |state| state.geographic_format.label().to_ascii_lowercase(),
+        get: |state| Some(state.geographic_format.label().to_ascii_lowercase()),
         set: |state, value| {
             if let Some(format) = GeographicFormat::parse(value) {
                 state.geographic_format = format;
@@ -866,6 +938,12 @@ impl State {
             if let Some(kept) = KEPT.iter().find(|kept| kept.name == name) {
                 (kept.set)(&mut state, value);
             }
+            if let Some(model) = name.strip_prefix(DISPLAY)
+                && !model.is_empty()
+                && let Some(mm) = display_size(value)
+            {
+                state.displays.insert(model.to_string(), mm);
+            }
         }
         state
     }
@@ -876,7 +954,12 @@ impl State {
              # Deleting this file starts it afresh.\n"
         );
         for kept in &KEPT {
-            text.push_str(&format!("{} = {}\n", kept.name, (kept.get)(self)));
+            if let Some(value) = (kept.get)(self) {
+                text.push_str(&format!("{} = {value}\n", kept.name));
+            }
+        }
+        for (model, [across, down]) in &self.displays {
+            text.push_str(&format!("{DISPLAY}{model} = {across:.2}x{down:.2}\n"));
         }
         text
     }
@@ -903,18 +986,8 @@ impl StateFile {
         Self { path, loaded }
     }
 
-    /// No file at all: every default, and nothing ever written. What the
-    /// tests start from, so that none of them reads or writes the user's.
-    #[cfg(test)]
-    pub fn none() -> Self {
-        Self {
-            path: None,
-            loaded: State::default(),
-        }
-    }
-
-    /// No file, and `state` as if one had been read: for a test that wants
-    /// the program to start from something other than the defaults.
+    /// No file, and `state` as if one had been read: what the tests start
+    /// from, so that none of them reads or writes the user's.
     #[cfg(test)]
     pub fn holding(state: State) -> Self {
         Self {
@@ -924,7 +997,7 @@ impl StateFile {
     }
 
     pub fn state(&self) -> State {
-        self.loaded
+        self.loaded.clone()
     }
 
     /// Writes `state` back where it was read from, where it differs from
@@ -1117,9 +1190,11 @@ mod tests {
              show_minimap=false   # it gets in the way\n\
              show_histogram = true\n\
              log_counts = true\n\
-             keys.interface.log-counts = \"y\"\n",
+             keys.interface.log-counts = \"y\"\n\
+             keys.interface.pixel-format = \".\"\n\
+             keys.interface.geographic-format = \"<\"\n",
         );
-        // `log_counts` and its key are retired, and passed over rather than
+        // `log_counts` and the keys are retired, and passed over rather than
         // called mistakes.
         assert_eq!(problems, Vec::new());
         assert_eq!(
@@ -1139,7 +1214,7 @@ mod tests {
             "show_info = \"yes\"\n\
              show_ui = 3\n\
              show_grid = true\n\
-             show_filmstrip\n\
+             show_minimap\n\
              show_histogram = true\n\
              max_files = 0\n\
              exiftool = false\n",
@@ -1200,7 +1275,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("gesture."))
             .count();
-        assert_eq!(keys, 107, "{uncommented}");
+        assert_eq!(keys, 130, "{uncommented}");
         // A Mac's three more: the scroll, the scroll with Command, and the
         // pinch.
         let slots = if cfg!(target_os = "macos") { 13 } else { 10 };
@@ -1326,7 +1401,6 @@ mod tests {
         let changed = Config {
             show_ui: !defaults.show_ui,
             show_minimap: !defaults.show_minimap,
-            show_filmstrip: !defaults.show_filmstrip,
             show_histogram: !defaults.show_histogram,
             show_info: !defaults.show_info,
             browse_folder: !defaults.browse_folder,
@@ -1443,6 +1517,7 @@ mod tests {
     #[test]
     fn the_state_reads_back_what_it_writes() {
         let state = State {
+            show_filmstrip: false,
             filmstrip_width: 212.0,
             loupe_magnification: 8.0,
             horizon_step: 15.0,
@@ -1450,19 +1525,54 @@ mod tests {
             order: filmstrip::Order {
                 sort: filmstrip::Sort::Modified,
                 direction: filmstrip::Direction::Descending,
+                then: filmstrip::By {
+                    sort: filmstrip::Sort::Type,
+                    direction: filmstrip::Direction::Descending,
+                },
             },
             camera_jpeg: true,
             profile: false,
             include_subfolders: true,
             pixel_format: PixelFormat::Depth,
             coordinate_format: CoordinateFormat::Geographic,
+            print_unit: Some(density::Unit::Millimeters),
             geographic_format: GeographicFormat::Dms,
+            displays: BTreeMap::from([
+                ("Dell-Inc.-DELL-U2720Q".to_string(), [596.74, 335.66]),
+                ("display-0610-a050".to_string(), [326.6, 211.4]),
+            ]),
         };
         assert_eq!(State::parse(&state.render()), state);
     }
 
-    /// The readout's formats were settings of the configuration once, and
-    /// are the state's now: a line an older configuration has for one is
+    /// A print unit that was never chosen against the locale has no line,
+    /// and a file without one reads back as none.
+    #[test]
+    fn an_unchosen_print_unit_is_left_out() {
+        let text = State::default().render();
+        assert!(!text.contains("print_unit"), "{text}");
+        assert_eq!(State::parse(&text).print_unit, None);
+    }
+
+    /// A monitor's line that is not a size, or names no model, is passed
+    /// over.
+    #[test]
+    fn a_display_line_that_is_not_a_size_is_passed_over() {
+        let state = State::parse(
+            "display.a = 0x10\n\
+             display.b = 10\n\
+             display. = 10x10\n\
+             display.c = 20000x10\n\
+             display.d = 300 x 200\n",
+        );
+        assert_eq!(
+            state.displays,
+            BTreeMap::from([("d".to_string(), [300.0, 200.0])])
+        );
+    }
+
+    /// The readout's formats and the file list's toggle were settings of
+    /// the configuration once, and are the state's now: a line an older configuration has for one is
     /// passed over, not reported, whatever it says.
     #[test]
     fn a_retired_setting_is_passed_over() {
@@ -1470,6 +1580,7 @@ mod tests {
             "pixel_format = \"decimal\"\n\
              coordinate_format = \"geographic\"\n\
              geographic_format = 3\n\
+             show_filmstrip = false\n\
              show_info = true\n",
         );
         assert_eq!(problems, Vec::new());
@@ -1486,11 +1597,20 @@ mod tests {
     fn every_order_reads_back() {
         for sort in filmstrip::Sort::ALL {
             for direction in filmstrip::Direction::ALL {
-                let state = State {
-                    order: filmstrip::Order { sort, direction },
-                    ..State::default()
-                };
-                assert_eq!(State::parse(&state.render()), state);
+                for then in filmstrip::Sort::ALL {
+                    let state = State {
+                        order: filmstrip::Order {
+                            sort,
+                            direction,
+                            then: filmstrip::By {
+                                sort: then,
+                                direction,
+                            },
+                        },
+                        ..State::default()
+                    };
+                    assert_eq!(State::parse(&state.render()), state);
+                }
             }
         }
     }
@@ -1498,7 +1618,8 @@ mod tests {
     #[test]
     fn a_state_out_of_range_is_the_default() {
         let state = State::parse(
-            "filmstrip_width = 100000\n\
+            "show_filmstrip = sometimes\n\
+             filmstrip_width = 100000\n\
              loupe_magnification = 3\n\
              horizon_step = 7\n\
              ui_scale = 9\n\

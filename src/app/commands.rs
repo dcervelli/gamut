@@ -602,6 +602,7 @@ impl App {
             || self.renaming.is_some()
             || self.exporting.is_some()
             || self.commands.asking.is_some()
+            || self.calibrating.is_some()
         {
             return Effect::Nothing;
         }
