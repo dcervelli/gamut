@@ -73,7 +73,7 @@ distribution is under, and `reuse lint` reports none of them unused.
 ## What a Mac release carries
 
 A Mac release links two C libraries into the binary, statically, where the
-Linux package and the Homebrew formula link the system's copies instead:
+Linux package links the system's copies instead:
 LibRaw, under the LGPL 2.1 or the CDDL 1.0 at the distributor's choice, and
 libjpeg-turbo, under the IJG, BSD-3-Clause and zlib licenses. `bin/macos-deps`
 keeps each library's own texts beside the archives it builds, and

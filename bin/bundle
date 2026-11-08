@@ -5,8 +5,8 @@
 # The bundle holds the binary, and beside it in Contents/Resources what a
 # package would install elsewhere: the command that runs the program from
 # the path (bin/gamut), the manual page and the shell completions, and the
-# licenses of everything linked into the binary. A cask links those out of
-# the bundle; the formula installs its own copies.
+# licenses of everything linked into the binary. The cask links those out
+# of the bundle.
 #
 #   bin/bundle [--dev] [--sign IDENTITY] [BINARY [DIRECTORY]]
 #
@@ -24,8 +24,7 @@
 #
 # Without --sign the bundle is signed ad hoc and holds the binary as it is,
 # linked against the libraries it was built with, so it runs where it was
-# built: the bundle the Homebrew formula installs, and the one to try a
-# change in.
+# built: the one to try a change in.
 #
 # Everything used is part of macOS: sips draws the icon from the Mac's SVG,
 # iconutil packs it, plutil stamps the version, otool reads what the binary

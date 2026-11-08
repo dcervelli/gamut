@@ -1108,39 +1108,56 @@ mod tests {
         }
     }
 
-    /// The Homebrew formula builds the release the PKGBUILD does: the same
-    /// tarball, at the version `Cargo.toml` says, under the same checksum.
-    /// `bin/release` and `bin/pkgbuild-sha` move the two together, and this is
-    /// what notices when one was edited by hand without the other.
+    /// The Homebrew cask installs the release `Cargo.toml` names, and links
+    /// out of the bundle what `bin/bundle` puts in it: the command, the
+    /// manual page and each of the completions, at the paths the script
+    /// writes them to. `bin/release` sets the version, and this is what
+    /// notices a cask or a bundle edited without the other.
     #[test]
-    fn the_formula_and_the_pkgbuild_name_the_same_release() {
-        let formula = std::fs::read_to_string(packaging().join(format!("{PROGRAM}.rb")))
-            .expect("the formula reads");
-        let pkgbuild =
-            std::fs::read_to_string(packaging().join("PKGBUILD")).expect("the PKGBUILD reads");
+    fn the_cask_installs_what_the_bundle_holds() {
+        let cask = std::fs::read_to_string(packaging().join("cask.rb")).expect("the cask reads");
+        let bundle = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bin/bundle"),
+        )
+        .expect("bin/bundle reads");
         let version = env!("CARGO_PKG_VERSION");
         assert!(
-            formula.contains(&format!("/archive/refs/tags/v{version}.tar.gz\"")),
-            "the formula names the v{version} tarball"
+            cask.contains(&format!("  version \"{version}\"\n")),
+            "the cask installs v{version}"
         );
-        let checksum = pkgbuild
-            .lines()
-            .find_map(|line| line.strip_prefix("sha256sums=('"))
-            .and_then(|rest| rest.split('\'').next())
-            .expect("the PKGBUILD has a checksum");
-        assert!(
-            formula.contains(&format!("sha256 \"{checksum}\"")),
-            "the formula carries the PKGBUILD's checksum, {checksum}"
-        );
-        for completion in [
-            format!("packaging/completions/{PROGRAM}.bash"),
-            format!("packaging/completions/_{PROGRAM}"),
-            format!("packaging/completions/{PROGRAM}.fish"),
+        let resources = "#{appdir}/Gamut.app/Contents/Resources/";
+        for (stanza, path, written) in [
+            (
+                "binary",
+                format!("bin/{PROGRAM}"),
+                format!("$RES/bin/{PROGRAM}"),
+            ),
+            (
+                "manpage",
+                format!("man/man1/{PROGRAM}.1"),
+                format!("$RES/man/man1/{PROGRAM}.1"),
+            ),
+            (
+                "bash_completion",
+                format!("completions/{PROGRAM}.bash"),
+                format!("completions/{PROGRAM}.bash"),
+            ),
+            (
+                "zsh_completion",
+                format!("completions/_{PROGRAM}"),
+                format!("completions/_{PROGRAM}"),
+            ),
+            (
+                "fish_completion",
+                format!("completions/{PROGRAM}.fish"),
+                format!("completions/{PROGRAM}.fish"),
+            ),
         ] {
             assert!(
-                formula.contains(&completion),
-                "the formula installs {completion}"
+                cask.contains(&format!("  {stanza} \"{resources}{path}\"")),
+                "the cask's {stanza} links {path} out of the bundle"
             );
+            assert!(bundle.contains(&written), "bin/bundle writes {written}");
         }
     }
 }

@@ -157,8 +157,8 @@ of it.
 
 A bundle is one of two kinds. Without `--sign` it is signed ad hoc and keeps
 the binary linked against the libraries it was built with, Homebrew's
-LibRaw among them: it is for the Mac it was built on, which is how the
-Homebrew formula uses it and how a change is tried. With `--sign` it is
+LibRaw among them: it is for the Mac it was built on, which is how a change
+is tried. With `--sign` it is
 for any Mac on macOS 15 or later: signed with a Developer ID under the
 hardened runtime with a secure timestamp, as notarization asks, and the
 binary has to link nothing outside `/usr/lib` and `/System`, which
@@ -191,8 +191,7 @@ identity — the menu bar's name, the Dock's icon, `APP_ID` as its bundle
 identifier — only when the executable it was started from is inside the
 bundle; started through a symlink it finds the bundle but has no identifier.
 The bundle's own `bin/gamut` resolves the link a cask makes to it with
-`realpath`, so it finds the bundle wherever it was installed; the formula
-writes a script of its own that names the bundle's place in the keg.
+`realpath`, so it finds the bundle wherever it was installed.
 
 ## Keys and gestures
 
