@@ -175,7 +175,7 @@ MACOSX_DEPLOYMENT_TARGET=15.0 GAMUT_LIBRAW_PREFIX=$PWD/target/macos-deps \
     cargo build --release
 bin/bundle --sign "Developer ID Application: Daniel Cervelli (7732KLZN92)" \
     target/release/gamut dist
-NOTARY_PROFILE=gamut bin/notarize dist/Gamut.app dist/Gamut.zip
+NOTARY_PROFILE=gamut bin/notarize dist/Gamut.app dist/Gamut.zip   # dist/ is ignored
 ```
 
 ## What guards it
