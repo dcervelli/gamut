@@ -4,6 +4,17 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- On a Mac, Homebrew installs the signed and notarized `Gamut.app` into
+  `/Applications` as a cask, in place of the formula that built it from
+  source: `brew install --cask dcervelli/gamut/gamut`. The formula is gone
+  from the tap, so an installed one stops receiving updates; switch with
+  `brew uninstall gamut && brew install --cask dcervelli/gamut/gamut`. Your
+  settings are kept.
+
 ## 0.14.0 - 2026-11-09
 
 ### Added

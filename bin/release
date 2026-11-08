@@ -63,8 +63,8 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && {
 # Cargo.toml and the packages are put back if anything below fails, so a failed
 # release leaves no half-bumped tree behind.
 restore() {
-    git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD packaging/gamut.rb \
-        packaging/cask.rb THIRD-PARTY-NOTICES 2>/dev/null || true
+    git checkout -- Cargo.toml Cargo.lock packaging/PKGBUILD packaging/cask.rb \
+        THIRD-PARTY-NOTICES 2>/dev/null || true
 }
 trap restore EXIT
 
@@ -78,13 +78,6 @@ awk -v v="$VERSION" '
     /^pkgrel=/ { print "pkgrel=1"; next }
     { print }
 ' packaging/PKGBUILD >packaging/PKGBUILD.new && mv packaging/PKGBUILD.new packaging/PKGBUILD
-
-# The formula names the tarball by its tag. Its checksum, like the PKGBUILD's,
-# is the previous release's until `bin/pkgbuild-sha` runs.
-awk -v v="$VERSION" '
-    /^  url "/ { sub(/\/v[^\/]*\.tar\.gz"/, "/v" v ".tar.gz\"") }
-    { print }
-' packaging/gamut.rb >packaging/gamut.rb.new && mv packaging/gamut.rb.new packaging/gamut.rb
 
 # The cask names the release's zip by its version. Its checksum, like the
 # others, is the previous release's until `bin/pkgbuild-sha` runs, which can
@@ -141,14 +134,14 @@ BUILT=$(./target/debug/"$NAME" --version)
 
 trap - EXIT
 
-git add Cargo.toml Cargo.lock packaging/PKGBUILD packaging/gamut.rb packaging/cask.rb \
-    THIRD-PARTY-NOTICES
+git add Cargo.toml Cargo.lock packaging/PKGBUILD packaging/cask.rb THIRD-PARTY-NOTICES
 git commit -m "Release $TAG"
 git tag "$TAG"
 
 echo
 echo "Committed and tagged $TAG. To publish it:"
 echo "    git push && git push origin $TAG"
-echo "Then, once the release exists, update the PKGBUILD's and the formula's checksum,"
-echo "which copies the formula into the tap too:"
+echo "Then, once the release exists, update the PKGBUILD's checksum:"
 echo "    bin/pkgbuild-sha $TAG"
+echo "and once the release workflow has attached the Mac application, run it again"
+echo "for the cask's, which copies the cask into the tap too."

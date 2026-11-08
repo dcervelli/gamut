@@ -1,9 +1,9 @@
 #!/bin/sh
-# Point the PKGBUILD and the Homebrew formula at a published release and
-# record its checksum, which is the same tarball's in both; then copy the
-# formula into the tap, the homebrew-gamut repository beside this one, or
-# wherever GAMUT_TAP names. And once the release workflow has attached the
-# signed Mac application to the release, point the cask at it the same way.
+# Point the PKGBUILD at a published release and record its tarball's
+# checksum. And once the release workflow has attached the signed Mac
+# application to the release, record the zip's checksum in the Homebrew
+# cask and copy the cask into the tap, the homebrew-gamut repository beside
+# this one, or wherever GAMUT_TAP names.
 #
 # Separate from `bin/release` because it can only run once the tag has been
 # pushed and the release workflow has produced the source tarball. GitHub can
@@ -67,22 +67,7 @@ awk -v v="$VERSION" -v sha="$SHA" -v q="'" '
 bash -n packaging/PKGBUILD
 echo "packaging/PKGBUILD now points at $TAG"
 
-awk -v v="$VERSION" -v sha="$SHA" '
-    /^  url "/ { sub(/\/v[^\/]*\.tar\.gz"/, "/v" v ".tar.gz\"") }
-    /^  sha256 "/ { sub(/"[0-9a-f]*"/, "\"" sha "\"") }
-    { print }
-' packaging/gamut.rb >packaging/gamut.rb.new && mv packaging/gamut.rb.new packaging/gamut.rb
-echo "packaging/gamut.rb now points at $TAG"
-
-# The tap is what Homebrew reads, and it holds a copy. Copied whole: a bottle
-# block the tap's workflow added is for the previous version, and goes.
 TAP=${GAMUT_TAP:-../homebrew-gamut}
-if [ -d "$TAP/Formula" ]; then
-    cp packaging/gamut.rb "$TAP/Formula/gamut.rb"
-    echo "copied into $TAP/Formula/gamut.rb; commit and push it there"
-else
-    echo "no tap at $TAP: copy packaging/gamut.rb into its Formula/ by hand" >&2
-fi
 
 # The cask names the Mac application the release workflow signs, notarizes
 # and attaches to the release, which takes some minutes after the tag:

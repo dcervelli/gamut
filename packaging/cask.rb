@@ -20,11 +20,11 @@ cask "gamut" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :sequoia"
-  depends_on arch: :arm64
-  # The formula installs the same program from source, the command on the
-  # path and the bundle with it.
+  # The formula the tap once held installed the same command, and one still
+  # installed stands in its way: `brew uninstall gamut` first.
   conflicts_with formula: "gamut"
+  depends_on arch: :arm64
+  depends_on macos: :sequoia
 
   app "Gamut.app"
   # The command is a script inside the bundle that runs the program there:

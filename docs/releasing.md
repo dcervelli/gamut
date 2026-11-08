@@ -7,11 +7,10 @@ turns the tag into a GitHub release with generated notes, and attaches one
 thing to it: the Mac application, signed and notarized (see
 [The Mac application](#the-mac-application)). The rest of what the release
 is for is its source tarball, which is what
-[`packaging/PKGBUILD`](../packaging/PKGBUILD) names in `source=`, and
-[`packaging/gamut.rb`](../packaging/gamut.rb), the Homebrew formula, in
-`url`. Omarchy builds the package from that tarball in an Arch container
-and signs the result itself, and the formula builds from the same tarball
-on the Mac it installs to.
+[`packaging/PKGBUILD`](../packaging/PKGBUILD) names in `source=`. Omarchy
+builds the package from that tarball in an Arch container and signs the
+result itself; a Mac installs the application through the Homebrew cask,
+[`packaging/cask.rb`](../packaging/cask.rb), which names the zip.
 
 ## Before
 
@@ -48,7 +47,7 @@ The script, in order:
 1. Refuses a dirty tree, a version that is not three numbers, and a tag
    that already exists.
 2. Writes the version into `Cargo.toml`, into the PKGBUILD's `pkgver`, and
-   into the formula's `url`, and resets `pkgrel=1` — a new upstream
+   into the cask's `version`, and resets `pkgrel=1` — a new upstream
    version is always release 1 of the package.
 3. `cargo build`, which is what refreshes `Cargo.lock`'s own record of the
    version, then rewrites `THIRD-PARTY-NOTICES` from that lock, stamped
@@ -61,7 +60,7 @@ The script, in order:
 5. Checks that the binary it just built reports `gamut X.Y.Z` — the
    version a user sees comes from `Cargo.toml` at compile time, and this
    is the proof the bump reached it.
-6. Commits `Cargo.toml`, `Cargo.lock`, the PKGBUILD, the formula and the
+6. Commits `Cargo.toml`, `Cargo.lock`, the PKGBUILD, the cask and the
    notices as
    `Release vX.Y.Z`, and tags that commit `vX.Y.Z`.
 
@@ -94,7 +93,7 @@ release is fixed in the next patch version.
 
 ```sh
 bin/pkgbuild-sha vX.Y.Z
-git commit -am "Update PKGBUILD and formula"
+git commit -am "Update PKGBUILD"
 git push
 ```
 
@@ -113,19 +112,17 @@ GitHub can take a few seconds to serve a tarball for a tag it has just
 been given; checks that it unpacks into `gamut-X.Y.Z/`, the directory the
 PKGBUILD's functions `cd` into; and writes the checksum into the first
 entry of `sha256sums=`, which is the tarball's — any entries after it
-belong to other sources and are left alone. The formula names the same
-tarball, so the same checksum goes into its `sha256`.
+belong to other sources and are left alone.
 
 ## The tap
 
-Homebrew reads a formula or a cask from a tap, a repository of its own
-that `brew install dcervelli/gamut/gamut` finds by name: `dcervelli/gamut`
-is short for `github.com/dcervelli/homebrew-gamut`. The cask is kept and
-copied the same way as the formula below, into the tap's `Casks/`. The formula is edited here,
-beside the PKGBUILD, where the release scripts and the tests reach it, and
-the tap holds a copy. `bin/pkgbuild-sha` makes the copy, into
-`../homebrew-gamut` or wherever `GAMUT_TAP` names, once the formula points at
-the release; it is committed and pushed from there:
+Homebrew reads a cask from a tap, a repository of its own that
+`brew install --cask dcervelli/gamut/gamut` finds by name: `dcervelli/gamut`
+is short for `github.com/dcervelli/homebrew-gamut`. The cask is edited
+here, beside the PKGBUILD, where the release scripts and the tests reach it,
+and the tap holds a copy in `Casks/gamut.rb`, which `bin/pkgbuild-sha`
+makes once the cask points at the release's zip (below). It is committed
+and pushed from there:
 
 ```sh
 cd ../homebrew-gamut
@@ -133,10 +130,10 @@ git commit -am "gamut X.Y.Z"
 git push
 ```
 
-The copy replaces the tap's file whole, so a bottle block the tap's
-`brew pr-pull` workflow added for the previous version goes with it, as it
-should: a bottle is for one version. The tap's README says how bottles are
-built and published.
+The tap holds no formula. A formula and a cask of one name make
+`brew install gamut` ambiguous; and a formula's bundle lives in a keg whose
+path changes with every version, which Launch Services loses track of, so
+Finder's "Open With" ends up naming a bundle an upgrade deleted.
 
 ## The Mac application
 
@@ -163,7 +160,7 @@ pointed at it by running `bin/pkgbuild-sha vX.Y.Z` again once the job is
 done: it fills in the zip's checksum in
 [`packaging/cask.rb`](../packaging/cask.rb), whose version `bin/release`
 already set, and copies the cask into the tap as `Casks/gamut.rb`. A run
-before the zip exists points the formula and says the cask is still to do.
+before the zip exists points the PKGBUILD and says the cask is still to do.
 
 A signed bundle is tried before a tag by building and signing it locally,
 with the certificate in the login keychain and the notary's key saved as a
@@ -186,9 +183,10 @@ checks that matter run before the tag:
 - `cli.rs`'s tests and the CI step beside them assert that the PKGBUILD's
   `pkgver` is `Cargo.toml`'s `version`, that it packages `PROGRAM`, and
   that it installs the desktop entry and the icon under `APP_ID`; and that
-  the formula names the same tarball under the same checksum. A
-  PKGBUILD kept in the tree can fall behind the program it packages
-  without anyone noticing; this is what notices.
+  the cask installs the version `Cargo.toml` says and links out of the
+  bundle the paths `bin/bundle` writes. A package kept in the tree can fall
+  behind the program it packages without anyone noticing; this is what
+  notices.
 - CI compares the lock stamp in `THIRD-PARTY-NOTICES` with `Cargo.lock`,
   so a dependency added without the notices being regenerated is caught on
   the push, not by the next release.
