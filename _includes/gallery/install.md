@@ -33,21 +33,20 @@ Folders still open in your file manager; `gamut <folder>` from a terminal views 
 
 ### macOS
 
-gamut is packaged for Homebrew. The formula builds the latest release:
+A gamut build is packaged for Homebrew.
 
 ```sh
-brew install dcervelli/gamut/gamut
+brew install --cask dcervelli/gamut/gamut
 ```
 
-Note: it takes a few minutes to build.
+This installs Gamut.app and the CLI. You can then use Finder to send images to gamut or associate certain file types with gamut.`
 
-This installs the `gamut` command and `Gamut.app`. To launch it from Finder or Spotlight, link the app into `/Applications`:
+Note: if you installed an earlier version (< 0.14.0) of gamut via the Homebrew Formula, you should remove it first:
 
 ```sh
-ln -sf "$(brew --prefix gamut)/Gamut.app" /Applications/Gamut.app
+brew uninstall gamut
+rm -f /Applications/Gamut.app   # if you made the previously suggested link
 ```
-
-Note: you currently won't be able to send files to gamut from Finder's "Open With". We'll fix this once we start doing proper app bundle builds.
 
 ### Optional: exiftool
 
