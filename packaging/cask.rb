@@ -20,9 +20,6 @@ cask "gamut" do
     strategy :github_latest
   end
 
-  # The formula the tap once held installed the same command, and one still
-  # installed stands in its way: `brew uninstall gamut` first.
-  conflicts_with formula: "gamut"
   depends_on arch: :arm64
   depends_on macos: :sequoia
 
