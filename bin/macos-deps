@@ -1,0 +1,135 @@
+#!/bin/sh
+# Build the C libraries a Mac release links statically, from pinned and
+# checksummed sources: LibRaw, which develops camera raw files, and
+# libjpeg-turbo, which LibRaw reads a lossy DNG's tiles through. Everything
+# else the program needs on a Mac is the system's own — HEIF is ImageIO's,
+# zlib and the C++ library are in /usr/lib — so a binary linked against
+# these runs on any Mac of the target, with nothing from Homebrew.
+#
+# LibRaw is built without OpenMP, which Apple's compiler does not have, and
+# without Little CMS, whose profiles it would apply only to output this
+# program never asks it for.
+#
+#   bin/macos-deps            into target/macos-deps
+#   bin/macos-deps PREFIX     into PREFIX
+#
+# Their license texts are kept in PREFIX/share/licenses, for the bundle.
+# Then build with the prefix named, and `build.rs` links from it:
+#
+#   GAMUT_LIBRAW_PREFIX=target/macos-deps cargo build --release
+#
+# Needs curl, shasum, make and cmake. A prefix already built from these
+# same versions is left as it is.
+
+set -eu
+
+TARGET=15.0
+ARCH=arm64
+
+LIBRAW_VERSION=0.22.3
+LIBRAW_URL=https://www.libraw.org/data/LibRaw-$LIBRAW_VERSION.tar.gz
+LIBRAW_SHA=789f3c33466210a1a0907f747a97c715d21bbf4af712f257fcbbd90111b227e4
+
+JPEG_VERSION=3.2.1
+JPEG_URL=https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/$JPEG_VERSION/libjpeg-turbo-$JPEG_VERSION.tar.gz
+JPEG_SHA=c27ad72a68da151177929aa969ae773a2da5ac2af9ce946079314fdac8cece7f
+
+[ $# -le 1 ] || { echo "usage: bin/macos-deps [PREFIX]" >&2; exit 2; }
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PREFIX=${1:-$ROOT/target/macos-deps}
+mkdir -p "$PREFIX"
+PREFIX=$(cd "$PREFIX" && pwd)
+
+for tool in curl shasum make cmake; do
+    command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
+done
+
+STAMP="$PREFIX/built"
+WANT="libraw $LIBRAW_VERSION, libjpeg-turbo $JPEG_VERSION, macOS $TARGET $ARCH"
+if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ]; then
+    echo "$PREFIX already holds $WANT"
+    exit 0
+fi
+
+SRC="$PREFIX/src"
+rm -rf "$SRC"
+mkdir -p "$SRC"
+
+# Downloaded into a directory of its own and checked before it is opened.
+fetch() {
+    url=$1 sha=$2 out=$SRC/$(basename "$1")
+    curl -fsSL --retry 3 -o "$out" "$url"
+    have=$(shasum -a 256 "$out" | cut -d' ' -f1)
+    [ "$have" = "$sha" ] || {
+        echo "$url: sha256 $have, expected $sha" >&2
+        exit 1
+    }
+    tar -xzf "$out" -C "$SRC"
+}
+
+# Each step's output goes to a log, shown only where the step fails: the
+# libraries' own compiler warnings are not this tree's to read.
+LOG="$PREFIX/build.log"
+: >"$LOG"
+quietly() {
+    "$@" >>"$LOG" 2>&1 || {
+        tail -40 "$LOG" >&2
+        echo "failed: $*; the whole log is $LOG" >&2
+        exit 1
+    }
+}
+
+export MACOSX_DEPLOYMENT_TARGET=$TARGET
+FLAGS="-O2 -arch $ARCH -mmacosx-version-min=$TARGET"
+JOBS=$(sysctl -n hw.ncpu)
+
+fetch "$JPEG_URL" "$JPEG_SHA"
+quietly cmake -S "$SRC/libjpeg-turbo-$JPEG_VERSION" -B "$SRC/jpeg-build" \
+    -G "Unix Makefiles" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_OSX_ARCHITECTURES=$ARCH \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=$TARGET \
+    -DENABLE_SHARED=OFF \
+    -DENABLE_STATIC=ON \
+    -DWITH_TURBOJPEG=OFF \
+    -DWITH_TOOLS=OFF \
+    -DWITH_TESTS=OFF
+quietly cmake --build "$SRC/jpeg-build" -j "$JOBS"
+quietly cmake --install "$SRC/jpeg-build"
+
+fetch "$LIBRAW_URL" "$LIBRAW_SHA"
+cd "$SRC/LibRaw-$LIBRAW_VERSION"
+quietly ./configure \
+    --prefix="$PREFIX" \
+    --disable-shared \
+    --enable-static \
+    --disable-openmp \
+    --disable-lcms \
+    --disable-jasper \
+    --disable-examples \
+    --enable-jpeg \
+    --enable-zlib \
+    CFLAGS="$FLAGS" \
+    CXXFLAGS="$FLAGS" \
+    CPPFLAGS="-I$PREFIX/include" \
+    LDFLAGS="-arch $ARCH -L$PREFIX/lib" \
+    PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+quietly make -j "$JOBS"
+quietly make install
+cd "$ROOT"
+
+# The licenses the two arrive under, which travel with a binary they are
+# linked into: `bin/bundle` copies them into the application's resources.
+NOTICES="$PREFIX/share/licenses"
+mkdir -p "$NOTICES/libraw" "$NOTICES/libjpeg-turbo"
+cp "$SRC/LibRaw-$LIBRAW_VERSION/COPYRIGHT" "$SRC/LibRaw-$LIBRAW_VERSION/LICENSE.LGPL" \
+    "$SRC/LibRaw-$LIBRAW_VERSION/LICENSE.CDDL" "$NOTICES/libraw/"
+cp "$SRC/libjpeg-turbo-$JPEG_VERSION/LICENSE.md" "$SRC/libjpeg-turbo-$JPEG_VERSION/README.ijg" \
+    "$NOTICES/libjpeg-turbo/"
+
+rm -rf "$SRC" "$LOG"
+echo "$WANT" >"$STAMP"
+echo "$PREFIX now holds $WANT"

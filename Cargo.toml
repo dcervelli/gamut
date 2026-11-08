@@ -118,16 +118,6 @@ libc = "0.2"
 # thumbnailer at nice 10, and every JPEG XL the loader then decoded on it
 # would run at the thumbnailer's priority. Already linked under `jxl-oxide`.
 rayon-core = "1"
-# `v1_23` to match the security-limits struct of the libheif this links
-# against. `SecurityLimits::new()` copies the C library's global limits, which
-# carry that library's own `version` field (4 for libheif 1.23); a binding
-# older than the library then hands that version-4 struct back to
-# `heif_context_set_security_limits`, which reads the version-3/4 fields from
-# past the end of the shorter Rust struct — an out-of-bounds read across FFI.
-# The binding must therefore be at least as new as the library: an older
-# library than the binding fails cleanly at build time via `system-deps`,
-# which is the safe direction to err in.
-libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_23"] }
 # Camera raw files go to the system LibRaw, bound by hand in
 # `decode::raw::ffi` rather than through a crate: the two bindings on
 # crates.io were last published in 2015 and 2021, against libraries whose
@@ -191,6 +181,22 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging", "uns
 # which would be a runtime dependency on a package the user may not have.
 wl-clipboard-rs = "0.9.4"
 
+# HEIF everywhere but a Mac.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# HEIF, through the system `libheif` — see `decode/heif/libheif.rs`. A Mac
+# reads HEIF through ImageIO instead and builds this for its tests alone,
+# which hold the two readers to each other.
+# `v1_23` to match the security-limits struct of the libheif this links
+# against. `SecurityLimits::new()` copies the C library's global limits, which
+# carry that library's own `version` field (4 for libheif 1.23); a binding
+# older than the library then hands that version-4 struct back to
+# `heif_context_set_security_limits`, which reads the version-3/4 fields from
+# past the end of the shorter Rust struct — an out-of-bounds read across FFI.
+# The binding must therefore be at least as new as the library: an older
+# library than the binding fails cleanly at build time via `system-deps`,
+# which is the safe direction to err in.
+libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_23"] }
+
 # And what a Mac is spoken to through: its own frameworks, by their
 # Objective-C interfaces. The same family of bindings wgpu already links for
 # Metal, each framework's classes a feature, so only those named are built.
@@ -230,5 +236,10 @@ egui = { version = "0.36.2", default-features = false, features = ["default_font
 # skipped (image-rs/image-tiff#395, image-rs/weezl#68). `tiff-lzw-padded.tif`
 # fails without it. Remove `vendor/tiff` and this once a `tiff` release
 # depends on weezl 0.2.
+# The Mac's HEIF reader is held to `libheif`'s in `decode/heif/imageio.rs`,
+# so its tests link the library its builds leave out.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+libheif-rs = { version = "3.0.0", default-features = false, features = ["v1_23"] }
+
 [patch.crates-io]
 tiff = { path = "vendor/tiff" }

@@ -1,5 +1,9 @@
 /target
 
+# What a Mac bundle is signed and notarized into before a release, by hand:
+# bin/bundle --sign and bin/notarize, as docs/releasing.md has it.
+/dist
+
 # makepkg's leavings from building the package in packaging/
 /packaging/pkg/
 /packaging/src/

@@ -10,35 +10,29 @@
 //! beside Apple's own auxiliary image, and so does anything else that writes
 //! a standard gain map into a HEIC or an AVIF.
 //!
-//! `libheif` 1.23 knows nothing of the item, so it is found by walking the
-//! boxes: `meta`, and in it `iinf` for what the items are, `iref` for what
-//! the `tmap` refers to, and `iloc` for where its payload is, which for an
-//! item this small is in `meta`'s own `idat` box. The walk reads the file's
-//! structure only, as `libheif` does, and stops at the first `mdat`.
+//! `libheif` 1.23 knows nothing of the item, nor ImageIO of its metadata, so
+//! it is found through [`super::items`]: `iinf` for what the items are,
+//! `iref` for what the `tmap` refers to, and `iloc` for where its payload
+//! is, which for an item this small is in `meta`'s own `idat` box.
 
-use std::collections::HashMap;
-use std::io::SeekFrom;
-
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::Result;
 use ultrahdr_rs::GainMapMetadata;
 
+use super::items::Meta;
 use crate::image::decode::ReadSeek;
-use crate::image::isobmff::{self, Fields};
+use crate::image::isobmff::Fields;
 
 /// What a `tmap` item says.
 #[derive(Debug, Clone)]
 pub(super) struct ToneMap {
     /// The item id of the base picture.
     pub base: u32,
-    /// The item id of the gain map.
+    /// The item id of the gain map, which `libheif` decodes by; ImageIO
+    /// finds the map itself.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub gain_map: u32,
     pub metadata: GainMapMetadata,
 }
-
-/// The largest `meta` box that will be read: the item tables of a phone's
-/// photograph run to a few tens of kilobytes, and one claiming more than
-/// this is not carrying a gain map worth finding.
-const MAX_META: u64 = 16 << 20;
 
 /// The most a `tmap` item's payload may run to, over all its extents: the
 /// metadata is a few dozen bytes for one channel and under two hundred for
@@ -51,200 +45,30 @@ const MAX_TMAP: usize = 4096;
 /// something this reader does not follow — a payload kept somewhere it
 /// cannot reach, or a reference the file left out — since the picture
 /// without its gain map is still the picture.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(super) fn find(source: &mut dyn ReadSeek) -> Result<Option<ToneMap>> {
-    // The top-level `meta` box's body, the boxes before it skipped by their
-    // lengths and the search stopped at `mdat`, past which nothing but
-    // pixels lies.
-    let Some(meta) = isobmff::top_level(source, b"meta", Some(b"mdat"), MAX_META)? else {
+    let Some(meta) = Meta::read(source)? else {
         return Ok(None);
     };
-    let Some(found) = Meta::parse(&meta) else {
-        return Ok(None);
-    };
-    let Some(&(item, _)) = found.items.iter().find(|(_, kind)| kind == b"tmap") else {
-        return Ok(None);
-    };
-    let Some(refs) = found.references.get(&(item, *b"dimg")) else {
-        return Ok(None);
-    };
-    let [base, gain_map] = refs[..] else {
-        return Ok(None);
-    };
-    let Some(location) = found.locations.get(&item) else {
-        return Ok(None);
-    };
+    in_tables(&meta, source)
+}
 
-    let mut payload = Vec::new();
-    for &(offset, length) in &location.extents {
-        let length = usize::try_from(length).map_err(|_| anyhow!("tmap extent too long"))?;
-        let total = payload.len().saturating_add(length);
-        if total > MAX_TMAP {
-            bail!("tmap item claims {total} bytes");
-        }
-        match location.construction {
-            // In the file itself.
-            0 => {
-                source.seek(SeekFrom::Start(offset))?;
-                let mut extent = vec![0; length];
-                source
-                    .read_exact(&mut extent)
-                    .context("reading the tmap item")?;
-                payload.extend_from_slice(&extent);
-            }
-            // In `meta`'s own `idat`, where the offsets are from its start.
-            1 => {
-                let Some(idat) = found.idat else {
-                    return Ok(None);
-                };
-                let from = usize::try_from(offset)
-                    .ok()
-                    .and_then(|o| o.checked_add(idat.0));
-                let Some(extent) = from.and_then(|from| {
-                    let to = from.checked_add(length)?;
-                    (to <= idat.1).then(|| meta.get(from..to)).flatten()
-                }) else {
-                    return Ok(None);
-                };
-                payload.extend_from_slice(extent);
-            }
-            _ => return Ok(None),
-        }
-    }
+/// [`find`] in tables already read.
+pub(super) fn in_tables(meta: &Meta, source: &mut dyn ReadSeek) -> Result<Option<ToneMap>> {
+    let Some(item) = meta.items.iter().find(|item| &item.kind == b"tmap") else {
+        return Ok(None);
+    };
+    let [base, gain_map] = meta.references(item.id, b"dimg")[..] else {
+        return Ok(None);
+    };
+    let Some(payload) = meta.payload(source, item.id, MAX_TMAP)? else {
+        return Ok(None);
+    };
     Ok(metadata(&payload).map(|metadata| ToneMap {
         base,
         gain_map,
         metadata,
     }))
-}
-
-/// Where an item's payload is: which of the three ways the offsets are
-/// meant, and the extents.
-#[derive(Debug, Default)]
-struct Location {
-    /// 0 for file offsets, 1 for offsets into `idat`, 2 for offsets into
-    /// another item.
-    construction: u8,
-    extents: Vec<(u64, u64)>,
-}
-
-/// The items an item refers to, by the reference's type.
-type References = HashMap<(u32, [u8; 4]), Vec<u32>>;
-
-/// What the item tables say, as far as a `tmap` needs.
-#[derive(Debug, Default)]
-struct Meta {
-    /// Each item's id and type.
-    items: Vec<(u32, [u8; 4])>,
-    references: References,
-    locations: HashMap<u32, Location>,
-    /// The `idat` box's body, as a range of `meta`'s body.
-    idat: Option<(usize, usize)>,
-}
-
-impl Meta {
-    fn parse(body: &[u8]) -> Option<Self> {
-        let mut meta = Self::default();
-        // `meta` is a full box: version and flags before the children.
-        for (kind, start, end) in isobmff::boxes(body, 4, body.len()) {
-            let child = &body[start..end];
-            match &kind {
-                b"iinf" => meta.items = iinf(child)?,
-                b"iref" => meta.references = iref(child)?,
-                b"iloc" => meta.locations = iloc(child)?,
-                b"idat" => meta.idat = Some((start, end)),
-                _ => {}
-            }
-        }
-        Some(meta)
-    }
-}
-
-/// `iinf`: the item ids and their types, from the `infe` boxes inside.
-fn iinf(body: &[u8]) -> Option<Vec<(u32, [u8; 4])>> {
-    let mut fields = Fields::new(body);
-    let version = fields.u8()?;
-    fields.skip(3);
-    let count = if version == 0 {
-        fields.u16()? as usize
-    } else {
-        fields.u32()? as usize
-    };
-    let mut items = Vec::with_capacity(count.min(1024));
-    for (kind, start, end) in isobmff::boxes(body, fields.at(), body.len()) {
-        if &kind != b"infe" {
-            continue;
-        }
-        let mut fields = Fields::new(&body[start..end]);
-        let version = fields.u8()?;
-        fields.skip(3);
-        // Versions 0 and 1 name no type, and no item of theirs is a `tmap`.
-        if version < 2 {
-            continue;
-        }
-        let id = fields.id(version, 3)?;
-        fields.skip(2); // protection index
-        let kind: [u8; 4] = fields.bytes(4)?.try_into().ok()?;
-        items.push((id, kind));
-    }
-    Some(items)
-}
-
-/// `iref`: for each item, the items it refers to, by the reference's type.
-fn iref(body: &[u8]) -> Option<References> {
-    let mut references = HashMap::new();
-    let version = *body.first()?;
-    for (kind, start, end) in isobmff::boxes(body, 4, body.len()) {
-        let mut fields = Fields::new(&body[start..end]);
-        let from = fields.id(version, 1)?;
-        let count = fields.u16()?;
-        let mut to = Vec::with_capacity(usize::from(count).min(1024));
-        for _ in 0..count {
-            to.push(fields.id(version, 1)?);
-        }
-        references.insert((from, kind), to);
-    }
-    Some(references)
-}
-
-/// `iloc`: where each item's payload is.
-fn iloc(body: &[u8]) -> Option<HashMap<u32, Location>> {
-    let mut fields = Fields::new(body);
-    let version = fields.u8()?;
-    fields.skip(3);
-    let sizes = fields.u16()?;
-    let offset_size = (sizes >> 12) as u8;
-    let length_size = ((sizes >> 8) & 15) as u8;
-    let base_offset_size = ((sizes >> 4) & 15) as u8;
-    let index_size = if version >= 1 { (sizes & 15) as u8 } else { 0 };
-    let count = if version < 2 {
-        fields.u16()? as usize
-    } else {
-        fields.u32()? as usize
-    };
-    let mut locations = HashMap::new();
-    for _ in 0..count {
-        let id = fields.id(version, 2)?;
-        let construction = if version >= 1 {
-            (fields.u16()? & 15) as u8
-        } else {
-            0
-        };
-        fields.skip(2); // data reference index
-        let base = fields.sized(base_offset_size)?;
-        let extents = fields.u16()?;
-        let mut location = Location {
-            construction,
-            extents: Vec::with_capacity(usize::from(extents).min(1024)),
-        };
-        for _ in 0..extents {
-            let _index = fields.sized(index_size)?;
-            let offset = fields.sized(offset_size)?;
-            let length = fields.sized(length_size)?;
-            location.extents.push((base.checked_add(offset)?, length));
-        }
-        locations.insert(id, location);
-    }
-    Some(locations)
 }
 
 /// The `tmap` item's payload, read as ISO 21496-1's gain map metadata.

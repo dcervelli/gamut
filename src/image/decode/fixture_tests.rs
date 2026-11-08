@@ -1990,13 +1990,21 @@ fn directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images")
 }
 
+/// The fixtures this platform reads: every one but, on a Mac, the gray
+/// HEIC with an alpha plane, which ImageIO does not decode and the Mac
+/// refuses — `decode/heif/imageio.rs` holds it to refusing.
+fn readable() -> impl Iterator<Item = &'static Fixture> {
+    FIXTURES
+        .iter()
+        .filter(|fixture| !(cfg!(target_os = "macos") && fixture.file == "heic-gray-alpha8.heic"))
+}
+
 /// Every fixture decoded, once, in the table's order: what the tests that
 /// look at every fixture read, rather than each decoding the lot again.
 fn decoded() -> &'static [DecodedImage] {
     static DECODED: OnceLock<Vec<DecodedImage>> = OnceLock::new();
     DECODED.get_or_init(|| {
-        FIXTURES
-            .iter()
+        readable()
             .map(|fixture| {
                 load(&directory().join(fixture.file), Overrides::default())
                     .unwrap_or_else(|error| panic!("{}: {error:#}", fixture.file))
@@ -2007,7 +2015,7 @@ fn decoded() -> &'static [DecodedImage] {
 
 /// Each fixture beside its decoded picture.
 fn fixtures() -> impl Iterator<Item = (&'static Fixture, &'static DecodedImage)> {
-    FIXTURES.iter().zip(decoded())
+    readable().zip(decoded())
 }
 
 /// The animated fixtures, each with the still its first frame is.

@@ -113,9 +113,10 @@ this way, and QuickLook's is private.
 priority and throttles its reads together. `PRIO_PROCESS` is not used as on
 Linux: on Darwin it is the whole process.
 
-**LibRaw's pkg-config file names `stdc++`.** Homebrew's `libraw_r.pc` was
-written for GNU's C++ library, which a Mac does not have, so `build.rs` prints
-the link lines itself with `stdc++` read as `c++`.
+**LibRaw's pkg-config file names `stdc++`.** `libraw_r.pc` — Homebrew's, and
+the one `bin/macos-deps` builds — was written for GNU's C++ library, which a
+Mac does not have, so `build.rs` prints the link lines itself with `stdc++`
+read as `c++`.
 
 ## Files from Finder
 
@@ -145,11 +146,36 @@ It is drawn from `packaging/macos-icon.svg`, the scene of the desktop entry's
 icon laid on Apple's grid — a smaller tile, with continuous corners and a
 shadow in the margin — which `bin/icon` writes beside it, since a Linux theme's
 icons fill their canvas and a Mac's do not. Everything it uses ships with macOS, so it runs in
-Homebrew's build as well as by hand. The bundle is signed ad hoc and keeps
-the binary linked against the libraries it was built with: it is for the Mac
-it was built on, which is how the Homebrew formula uses it, and handing one
-to another Mac would need the libraries inside it and a Developer ID
-signature.
+Homebrew's build as well as by hand.
+
+Beside the binary, `Contents/Resources` holds what a package installs
+elsewhere — `bin/gamut`, the command for the path; the manual page, from
+the binary's own `--print-man`; the completions; and `licenses/`, the
+program's own, `THIRD-PARTY-NOTICES`, and those of any C library linked in
+— so that a cask, which only copies the bundle, can link each of them out
+of it.
+
+A bundle is one of two kinds. Without `--sign` it is signed ad hoc and keeps
+the binary linked against the libraries it was built with, Homebrew's
+LibRaw among them: it is for the Mac it was built on, which is how the
+Homebrew formula uses it and how a change is tried. With `--sign` it is
+for any Mac on macOS 15 or later: signed with a Developer ID under the
+hardened runtime with a secure timestamp, as notarization asks, and the
+binary has to link nothing outside `/usr/lib` and `/System`, which
+`bin/bundle` checks with `otool` before it signs. Such a binary is built
+with `GAMUT_LIBRAW_PREFIX` naming a prefix `bin/macos-deps` built: LibRaw
+and libjpeg-turbo from pinned sources, static, for arm64 and macOS 15, with
+neither OpenMP — which Apple's compiler lacks — nor Little CMS, whose
+profiles LibRaw would apply only to output this program never asks it for;
+`build.rs` then links each archive in that prefix into the binary and only
+the system's libraries, the C++ library and zlib, as they are. HEIF needs
+nothing of the kind, being ImageIO's — see [formats](formats.md#heif).
+
+`--dev` gives a bundle the identifier `com.dcervelli.gamut.dev` and the name
+Gamut Dev. Launch Services knows an application by identifier and path, and
+a bundle built to try something registers itself like any other; one
+carrying the installed program's identifier competes with it for "Open
+With" and for which application a double click opens.
 
 The Info.plist claims the image types by the identifiers macOS gives each
 extension, at `LSHandlerRank` `Alternate`, so Finder offers the program under
@@ -159,11 +185,14 @@ cannot be claimed, so the bundle declares a type for each as an imported
 declaration, which gives way to any other application's. `cli.rs`'s tests ask
 the system for every extension the decoders read and check the plist has it.
 
-The formula keeps the one copy of the binary inside the bundle and puts a
-script on the path that `exec`s it there. macOS gives a process its bundle's
+The command on the path is a script that `exec`s the binary inside the
+bundle, never a link to the binary. macOS gives a process its bundle's
 identity — the menu bar's name, the Dock's icon, `APP_ID` as its bundle
 identifier — only when the executable it was started from is inside the
 bundle; started through a symlink it finds the bundle but has no identifier.
+The bundle's own `bin/gamut` resolves the link a cask makes to it with
+`realpath`, so it finds the bundle wherever it was installed; the formula
+writes a script of its own that names the bundle's place in the keg.
 
 ## Keys and gestures
 

@@ -357,13 +357,21 @@ the file are applied, so a photograph taken sideways arrives upright.
 
 Caveats:
 
-- **This format needs support installed on the system.** HEIF decoding uses
-  the system HEIF library, version 1.23 or newer, and `gamut` will not
-  start without it: `libheif-dev` on Debian and Ubuntu, `libheif` on Arch,
-  `brew install libheif` on macOS. Which *codecs* work then depends on that
-  installation's plugins — HEIC needs libde265 or ffmpeg, AVIF needs dav1d or
-  aom. Both are standard on the systems above; on a stripped-down one, a file
-  can fail with a codec error where another HEIF opens fine.
+- **On Linux, this format needs support installed on the system.** HEIF
+  decoding uses the system HEIF library, version 1.23 or newer, and `gamut`
+  will not start without it: `libheif-dev` on Debian and Ubuntu, `libheif`
+  on Arch. Which *codecs* work then depends on that installation's plugins —
+  HEIC needs libde265 or ffmpeg, AVIF needs dav1d or aom. Both are standard
+  on the systems above; on a stripped-down one, a file can fail with a codec
+  error where another HEIF opens fine.
+- **On a Mac, HEIF is read by macOS itself**, so nothing needs installing,
+  and a file opens in `gamut` exactly when it opens in Preview. A few that
+  macOS cannot read — a gray picture with transparency, and the rare
+  photograph Preview shows blank — are reported as unreadable rather than
+  shown blank; the terminal says it was macOS that could not decode them.
+  A file that leaves its color conversion unstated may look a shade
+  different from the same file on Linux, since each system fills the gap
+  its own way.
 - **An iPhone's HDR photograph arrives as HDR.** The file carries a gain
   map beside the photograph, in the standard form from iOS 18 on and in
   Apple's own before, and either is read and applied as a JPEG's is — as
@@ -371,7 +379,9 @@ Caveats:
   `--no-gain-map` all working the same way. A gain map deeper than 8 bits,
   or one running the other way, is refused with a message that suggests
   `--no-gain-map`.
-- A file holding several images shows the primary one.
+- A file holding several images shows the primary one. On a Mac, macOS
+  chooses which that is, and in a rare file holding a still picture and an
+  image sequence it shows the sequence's first frame.
 
 ## ICO
 

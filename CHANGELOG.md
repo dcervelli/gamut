@@ -4,6 +4,18 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- On a Mac, HEIC and AVIF are read by macOS itself rather than by a HEIF
+  library installed beside `gamut`, so the build no longer needs `libheif`.
+  The pictures, their HDR gain maps, depth maps, color and metadata come out
+  the same as before; photographs open about 1.65 times as fast. A file
+  macOS cannot read — a gray picture with transparency, and the rare
+  photograph Preview shows blank — is reported as unreadable, as any file
+  that cannot be read is, rather than shown blank.
+
 ## 0.13.0 - 2026-11-06
 
 ### Added

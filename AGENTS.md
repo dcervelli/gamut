@@ -343,8 +343,11 @@ image/         the data model, nothing GPU
                  curves (the CPU twins of the compositor's) and Headroom, colormap.rs the
                  ramps the image layer writes its texture from
   decode/        Decoder trait + DECODERS registry in mod.rs; one file per format; limits.rs the size ceiling;
-                 dynamic.rs the shared DynamicImage bridge; heif/tmap.rs reads ISO 21496-1's gain-map item and
-                 heif/apple.rs Apple's maker note; raw/ffi.rs LibRaw's C interface by hand and raw/shim.c
+                 dynamic.rs the shared DynamicImage bridge; heif/ the HEIF family — libheif.rs through
+                 libheif everywhere but a Mac, macos.rs through ImageIO on one, items.rs the item tables
+                 walked for what neither library says, tmap.rs ISO 21496-1's gain-map item, apple.rs
+                 Apple's maker note, imageio.rs (macOS tests) the two readers held to each other,
+                 GAMUT_HEIF_CORPUS naming real files; raw/ffi.rs LibRaw's C interface by hand and raw/shim.c
                  the three accessors it lacks, compiled against the library's header by build.rs;
                  raw/linear.rs develops a Linear Raw DNG — an iPhone's ProRAW, from its JPEG XL or
                  lossless JPEG tiles decoded here, a thread to a tile, or from what LibRaw unpacks
@@ -368,12 +371,16 @@ render/        the GPU
                  loads it; texel.wgsl is the reading of one texel that mod.rs prepends to
                  image.wgsl and reduce.wgsl both
 packaging/     what the packages are built from: the Arch PKGBUILD, the Homebrew
-               formula (gamut.rb), the Mac bundle's Info.plist, the .desktop entry,
+               formula (gamut.rb) and cask (cask.rb), the Mac bundle's Info.plist, the .desktop entry,
                the icon — the desktop entry's, and macos-icon.svg, the same scene on
                Apple's grid — and hand-written shell completions
 bin/           release, pkgbuild-sha which points the PKGBUILD and the formula at a
-               published tag, bundle which wraps a built binary in Gamut.app, and
-               icon, which draws packaging/'s icon from a model of its scene's light
+               published tag, bundle which wraps a built binary in Gamut.app — ad hoc
+               for this Mac, --sign for any, --dev for one that never stands in for
+               the installed program — macos-deps, which builds the static LibRaw a
+               signed bundle's binary links (GAMUT_LIBRAW_PREFIX), notarize, which
+               has Apple notarize a signed bundle and zips it, and icon, which
+               draws packaging/'s icon from a model of its scene's light
 vendor/        crates built from a copy here rather than from crates.io, each through
                Cargo.toml's [patch.crates-io], which says why and until when, and
                each with a VENDORED.md saying where it came from and what changed:
@@ -445,6 +452,7 @@ still agrees with both, so renaming either is editing the constant —
 | The region panel, or the aspect a region is held to | `ui/region_panel.rs` for the panel — `panel()` for where it goes, `Field` for its boxes — and `ui/menu.rs::aspect_items` for the menu; `image/aspect.rs` for `Aspect`, `PRESETS` and what can be typed; `Marking::aspect`, `hold_to` and `swap` for what is held; the presses in `App::press` (`Control::{RegionClose, RegionCopy, RegionFit, RegionSwap, Aspect}`) and `App::type_region` for `Command::RegionField`; a held change to the rectangle goes through `Region::held` |
 | What deleting, renaming or removing a file does, or what undo puts back | `app/edits.rs`: `App::delete_shown` moves the file to the trash through `trash::put` and steps away, `App::rename_shown` renames through `no_replace::rename_no_replace`, `App::remove_shown` takes the file off the list through `Files::hide` and steps away, and each pushes an `Edit` that `App::undo` pops. The list's side is `app/files.rs`: a trashed or removed file is `condemn`ed and leaves in `shown` — or, the last on the list, in `remove_shown` at once — comes back by `reinstate`, and a renamed one is `rename`d in place; a removed one is remembered in `hidden`, which `add` leaves out and `append`, `adopt` and `unhide` take a file back out of. The dialog is `ui/rename.rs` — its words, and `judge` for what is wrong with a name — with `App::set_rename_name` asking the directory whether the name is taken. The menu is `menu::file_items`, hung off `status::file_button` |
 | What a paste accepts, or where it is written | `clipboard/mod.rs::IMAGE_TYPES` for the MIME types and the extensions they are saved under, `pasted.rs` for the directory and the name; `App::paste` starts it and `app/files.rs::adopt` puts it in the list. Whether the button for it is on screen is `FrameInput::paste`, which `App::frame_input_under` sets from what `clipboard::watch`'s thread last said — kept by `App::clipboard_changed` — and whether the interface is showing |
+| How a HEIF is read on a Mac, or where it may differ from Linux | `image/decode/heif/macos.rs` for the pixels ImageIO hands over, and `heif/items.rs` for the size, color, channels, EXIF and XMP read from the item tables; `heif/imageio.rs` compares the two readers — the fixtures always, `GAMUT_HEIF_CORPUS` for real files — and `docs/formats.md` says what it found. A fixture ImageIO cannot read is left out of `fixture_tests.rs::readable` on a Mac and its refusal pinned in `imageio.rs` |
 | A color-space source (a new tag a format carries) | `image/color/` |
 | Someone else's work brought into the tree | say where it came from beside the code that carries it, then one `[[annotations]]` entry in `REUSE.toml`; if its license is new to the tree, its text goes in `LICENSES/` named by SPDX identifier, and the PKGBUILD's `license=()` grows an entry |
 | Something a Mac does differently from Linux | the module's `macos.rs` beside its Linux file, re-exported under the same names from its `mod.rs` — `clipboard/`, `portal/`, `trash/`, `openers/`, `monitor/`, `ui/fonts/`, `theme/` — or a `cfg!` in the one place that differs; a crate only one platform needs goes under its `[target.'cfg(target_os = …)'.dependencies]`, and an AppKit or Foundation class is a feature of `objc2-app-kit` or `objc2-foundation` there. `docs/macos.md` says what each Mac half is and why |

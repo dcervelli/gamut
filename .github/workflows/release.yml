@@ -29,3 +29,84 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes
+
+  # The Mac application: built against the static LibRaw `bin/macos-deps`
+  # makes, signed with the Developer ID, notarized, and attached to the
+  # release the job above made, as the zip the cask in the tap names. See
+  # docs/releasing.md.
+  macos:
+    name: Sign and notarize the Mac app
+    needs: release
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      IDENTITY: "Developer ID Application: Daniel Cervelli (7732KLZN92)"
+      MACOSX_DEPLOYMENT_TARGET: "15.0"
+      GAMUT_LIBRAW_PREFIX: ${{ github.workspace }}/target/macos-deps
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The static libraries, built once for each version of the script
+        uses: actions/cache@v4
+        with:
+          path: target/macos-deps
+          key: macos-deps-${{ hashFiles('bin/macos-deps') }}
+
+      - name: Build the static libraries
+        run: |
+          command -v cmake >/dev/null || brew install cmake
+          bin/macos-deps
+
+      - name: Build the program
+        run: cargo build --release --locked
+
+      - name: Import the signing certificate into a keychain of its own
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode >"$RUNNER_TEMP/cert.p12"
+          # The intermediate that issued the certificate, which a runner may
+          # not have, without which the identity is not valid.
+          curl -fsSL -o "$RUNNER_TEMP/g2.cer" \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/g2.cer" -k "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Bundle and sign
+        run: bin/bundle --sign "$IDENTITY" target/release/gamut dist
+
+      - name: Notarize
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$ASC_KEY_P8" | base64 --decode >"$ASC_KEY_PATH"
+          bin/notarize dist/Gamut.app "dist/Gamut-${GITHUB_REF_NAME#v}-arm64.zip"
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/Gamut-*-arm64.zip --clobber
+
+      - name: Remove the keychain and the key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"

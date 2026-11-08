@@ -1,0 +1,64 @@
+#!/bin/sh
+# Notarize a signed Gamut.app, staple the ticket to it, and zip it for
+# release: the last step between `bin/bundle --sign` and a download that
+# Gatekeeper opens without a word.
+#
+#   bin/notarize APP ZIP
+#
+# Apple's notary service is asked with an App Store Connect API key, named
+# either by a profile `xcrun notarytool store-credentials` saved in the
+# keychain, or by the three values the release workflow has as secrets:
+#
+#   NOTARY_PROFILE=gamut bin/notarize dist/Gamut.app dist/Gamut.zip
+#   ASC_KEY_PATH=AuthKey.p8 ASC_KEY_ID=... ASC_ISSUER_ID=... bin/notarize ...
+#
+# The service is sent a zip of the bundle and its verdict is waited for; a
+# refusal prints Apple's log of why. An accepted bundle has its ticket
+# stapled, so that Gatekeeper need not ask Apple when it is opened, is
+# assessed as Gatekeeper will assess it, and is zipped again with the
+# ticket inside — a zip itself cannot carry one — into ZIP, whose checksum
+# is printed for the cask.
+
+set -eu
+
+[ $# -eq 2 ] || { echo "usage: bin/notarize APP ZIP" >&2; exit 2; }
+APP=$1
+ZIP=$2
+
+for tool in xcrun ditto codesign spctl shasum; do
+    command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
+done
+[ -d "$APP" ] || { echo "$APP is not a bundle" >&2; exit 1; }
+codesign --verify --strict "$APP" || { echo "$APP is not validly signed" >&2; exit 1; }
+
+if [ -n "${NOTARY_PROFILE:-}" ]; then
+    set -- --keychain-profile "$NOTARY_PROFILE"
+elif [ -n "${ASC_KEY_PATH:-}" ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
+    set -- --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID"
+else
+    echo "name the notary's credentials: NOTARY_PROFILE, or ASC_KEY_PATH, ASC_KEY_ID and ASC_ISSUER_ID" >&2
+    exit 1
+fi
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+ditto -c -k --keepParent "$APP" "$TMP/submission.zip"
+xcrun notarytool submit "$TMP/submission.zip" "$@" --wait --output-format plist \
+    >"$TMP/result.plist"
+status=$(/usr/libexec/PlistBuddy -c 'Print :status' "$TMP/result.plist")
+id=$(/usr/libexec/PlistBuddy -c 'Print :id' "$TMP/result.plist")
+if [ "$status" != "Accepted" ]; then
+    echo "the notary service says $status for submission $id:" >&2
+    xcrun notarytool log "$id" "$@" >&2 || true
+    exit 1
+fi
+echo "accepted as submission $id"
+
+xcrun stapler staple "$APP"
+xcrun stapler validate "$APP"
+spctl --assess --type execute --verbose=2 "$APP"
+
+rm -f "$ZIP"
+ditto -c -k --keepParent "$APP" "$ZIP"
+echo "$ZIP sha256 $(shasum -a 256 "$ZIP" | cut -d' ' -f1)"

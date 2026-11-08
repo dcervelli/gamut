@@ -69,3 +69,17 @@ in `THIRD-PARTY-NOTICES` with the rest.
 
 Between the three, `LICENSES/` ends up holding every license anything in the
 distribution is under, and `reuse lint` reports none of them unused.
+
+## What a Mac release carries
+
+A Mac release links two C libraries into the binary, statically, where the
+Linux package and the Homebrew formula link the system's copies instead:
+LibRaw, under the LGPL 2.1 or the CDDL 1.0 at the distributor's choice, and
+libjpeg-turbo, under the IJG, BSD-3-Clause and zlib licenses. `bin/macos-deps`
+keeps each library's own texts beside the archives it builds, and
+`bin/bundle --sign` copies them into `Contents/Resources/licenses` with the
+program's own and `THIRD-PARTY-NOTICES`. The LGPL's terms for a library
+linked statically — that whoever has the program can link it again against a
+changed library — are met by the program's source being this tree, which
+builds against any LibRaw 0.21 or newer. HEIF is decoded by macOS itself on a
+Mac, so no HEVC or AV1 codec travels with it.

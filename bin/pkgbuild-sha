@@ -2,7 +2,8 @@
 # Point the PKGBUILD and the Homebrew formula at a published release and
 # record its checksum, which is the same tarball's in both; then copy the
 # formula into the tap, the homebrew-gamut repository beside this one, or
-# wherever GAMUT_TAP names.
+# wherever GAMUT_TAP names. And once the release workflow has attached the
+# signed Mac application to the release, point the cask at it the same way.
 #
 # Separate from `bin/release` because it can only run once the tag has been
 # pushed and the release workflow has produced the source tarball. GitHub can
@@ -81,4 +82,30 @@ if [ -d "$TAP/Formula" ]; then
     echo "copied into $TAP/Formula/gamut.rb; commit and push it there"
 else
     echo "no tap at $TAP: copy packaging/gamut.rb into its Formula/ by hand" >&2
+fi
+
+# The cask names the Mac application the release workflow signs, notarizes
+# and attaches to the release, which takes some minutes after the tag:
+# where it is not there yet, the cask is left for a second run.
+ZIP_URL="$URL/releases/download/$TAG/Gamut-$VERSION-arm64.zip"
+echo "fetching $ZIP_URL"
+if curl -fsSL "$ZIP_URL" -o "$TMP/app.zip"; then
+    ZIP_SHA=$(sha256 "$TMP/app.zip")
+    echo "sha256 $ZIP_SHA"
+    awk -v v="$VERSION" -v sha="$ZIP_SHA" '
+        /^  version "/ { print "  version \"" v "\""; next }
+        /^  sha256 "/ { sub(/"[0-9a-f]*"/, "\"" sha "\"") }
+        { print }
+    ' packaging/cask.rb >packaging/cask.rb.new && mv packaging/cask.rb.new packaging/cask.rb
+    echo "packaging/cask.rb now points at $TAG"
+    if [ -d "$TAP" ]; then
+        mkdir -p "$TAP/Casks"
+        cp packaging/cask.rb "$TAP/Casks/gamut.rb"
+        echo "copied into $TAP/Casks/gamut.rb; commit and push it there"
+    else
+        echo "no tap at $TAP: copy packaging/cask.rb into its Casks/gamut.rb by hand" >&2
+    fi
+else
+    echo "the release has no Mac application yet: run this again once the" >&2
+    echo "release workflow's Mac job is done, to point the cask at it" >&2
 fi
