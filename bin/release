@@ -84,7 +84,7 @@ awk -v v="$VERSION" '
 awk -v v="$VERSION" '
     /^  url "/ { sub(/\/v[^\/]*\.tar\.gz"/, "/v" v ".tar.gz\"") }
     { print }
- packaging/gamut.rb >packaging/gamut.rb.new && mv packaging/gamut.rb.new packaging/gamut.rb
+' packaging/gamut.rb >packaging/gamut.rb.new && mv packaging/gamut.rb.new packaging/gamut.rb
 
 # The cask names the release's zip by its version. Its checksum, like the
 # others, is the previous release's until `bin/pkgbuild-sha` runs, which can
