@@ -67,7 +67,7 @@ brew install --cask dcervelli/gamut/gamut
 
 This installs the `gamut` command and `Gamut.app`. You can then use Finder to send images to gamut or associate certain file types with gamut.
 
-Note: if you installed an earlier version (< 0.14.0) of gamut via the Homebrew Forumla, you should remove it first:
+Note: if you installed an earlier version (< 0.14.0) of gamut via the Homebrew Formula, you should remove it first:
 
 ```sh
 brew uninstall gamut
