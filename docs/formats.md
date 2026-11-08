@@ -491,13 +491,19 @@ samples), it finds:
   apart on a Nokia file and seven to ten on some of Microsoft's AVIFs.
   Neither is wrong: the file does not say.
 - ImageIO crops correctly where `libheif` does not (above).
-- ImageIO decodes nothing, while reporting a complete image, for a gray
-  picture with an alpha plane (`heic-gray-alpha8.heic`), one iPhone
-  photograph of the 122 (an iPhone 15 on iOS 18.0.1), and two of Nokia's
-  files (C034, an image with EXIF; C046, a burst). `sips` fails on each of
-  them as well. The Mac refuses them, where a blank picture would say
-  nothing; `fixture_tests.rs` leaves the gray one out on a Mac for that
-  reason, and `imageio.rs` holds the Mac to refusing it.
+- ImageIO decodes nothing, while reporting a complete image, for one iPhone
+  photograph of the 122 (an iPhone 15 on iOS 18.0.1) and two of Nokia's
+  files (C034, an image with EXIF; C046, a burst), on a Mac on macOS 26.6.
+  `sips` fails on each of them there as well. The Mac refuses them, where a
+  blank picture would say nothing.
+- How ImageIO reads the edge cases is not the same on every Mac. On macOS
+  26.6 it decodes nothing of a gray picture with an alpha plane
+  (`heic-gray-alpha8.heic`), and reads the lossy `heic-icc-p3.heic` 5.7
+  codes from `libheif` on average; on GitHub's macOS 26.7 runner it reads
+  the first exactly as `libheif` does, and the second within a code — and
+  on one run there, the first not at all. So `fixture_tests.rs` leaves the
+  gray fixture out on a Mac, `imageio.rs` holds the Mac to refusing it or
+  reading it exactly, and the lossy one is allowed the difference.
 - In a file holding more than one picture, ImageIO's primary image is not
   always the file's: Nokia's C005 and C040 open at another image's size,
   and a Netflix AVIF carrying a still and a sequence opens on the sequence,

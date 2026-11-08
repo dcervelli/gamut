@@ -23,7 +23,7 @@
 //!   readout reads them as it does `libheif`'s.
 //!
 //! ImageIO decodes some files to nothing while reporting a complete image:
-//! a gray picture with an alpha plane, and a few others (see
+//! a gray picture with an alpha plane on some Macs, and a few others (see
 //! `docs/formats.md`). That arrives as a buffer it will not hand over, and
 //! is refused, saying that it was macOS that could not decode it, rather
 //! than shown as a blank picture.

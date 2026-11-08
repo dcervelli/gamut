@@ -1991,8 +1991,9 @@ fn directory() -> PathBuf {
 }
 
 /// The fixtures this platform reads: every one but, on a Mac, the gray
-/// HEIC with an alpha plane, which ImageIO does not decode and the Mac
-/// refuses — `decode/heif/imageio.rs` holds it to refusing.
+/// HEIC with an alpha plane, which ImageIO decodes on some Macs and not on
+/// others, where the Mac refuses it — `decode/heif/imageio.rs` holds it to
+/// refusing it or reading it as `libheif` does.
 fn readable() -> impl Iterator<Item = &'static Fixture> {
     FIXTURES
         .iter()

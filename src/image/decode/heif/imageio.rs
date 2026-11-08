@@ -478,10 +478,11 @@ fn corpus() -> Vec<PathBuf> {
 /// The fixtures, read both ways. Every one agrees exactly, but for two
 /// whose differences are known: `heic-icc-p3.heic`, the one fixture coded
 /// lossy at 4:2:0, whose chroma the readers reconstruct differently along
-/// its hard edges; and `heic-gray-alpha8.heic`, a gray picture with an
-/// alpha plane, which ImageIO does not decode at all — nor does `sips`,
-/// nor Preview — and which the Mac refuses. Should either change, this
-/// says so.
+/// its hard edges on some Macs and alike on others; and
+/// `heic-gray-alpha8.heic`, a gray picture with an alpha plane, which
+/// ImageIO decodes on some Macs and on others not at all — nor does `sips`
+/// there, nor Preview. Where it does not, the Mac must refuse it rather
+/// than show a blank; where it does, it must agree exactly.
 #[test]
 fn the_mac_reads_the_fixtures_as_libheif_does() {
     let comparisons: Vec<Comparison> = fixtures().iter().map(|path| compare(path)).collect();
@@ -493,11 +494,7 @@ fn the_mac_reads_the_fixtures_as_libheif_does() {
             0.0
         };
         let problems = c.judged(tolerance);
-        if c.name == "heic-gray-alpha8.heic" {
-            assert!(
-                problems.iter().any(|p| p.starts_with("refused")),
-                "ImageIO now decodes a gray HEIC with alpha: {problems:?}"
-            );
+        if c.name == "heic-gray-alpha8.heic" && problems.iter().any(|p| p.starts_with("refused")) {
             continue;
         }
         assert!(problems.is_empty(), "{}: {}", c.name, problems.join("; "));
