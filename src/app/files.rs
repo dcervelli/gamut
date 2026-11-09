@@ -88,6 +88,12 @@ pub(super) struct Files {
     /// and the list still has to say which file that is — and leaves the
     /// list in [`Files::shown`], the moment it does. `None` otherwise.
     leaving: Option<PathBuf>,
+    /// The file on screen once its directory has said it is gone — deleted
+    /// or renamed by something else — while it is still on screen. It
+    /// leaves the list as a trashed file does, in [`Files::shown`], since
+    /// the directory says so only the once; or stays after all, where the
+    /// directory says it has come back. `None` otherwise.
+    vanished: Option<PathBuf>,
     /// Files taken off the list this session with nothing done to them on
     /// disk. A directory read again would list each of them as before, and
     /// [`Files::add`] leaves them out; opening one by name again is what
@@ -141,6 +147,7 @@ impl Files {
             adopted: Vec::new(),
             index,
             leaving: None,
+            vanished: None,
             hidden: HashSet::new(),
             generation: 0,
             pending: None,
@@ -612,6 +619,13 @@ impl Files {
     /// A file taken off the list this session stays off it, however often
     /// a directory lists it; opening it by name is what puts it back.
     pub(super) fn add(&mut self, paths: Vec<PathBuf>) -> Vec<PathBuf> {
+        if self
+            .vanished
+            .as_ref()
+            .is_some_and(|vanished| paths.contains(vanished))
+        {
+            self.vanished = None;
+        }
         let mut seen = HashSet::new();
         let fresh: Vec<PathBuf> = paths
             .into_iter()
@@ -645,11 +659,12 @@ impl Files {
     /// directory no longer holds. Returns whether anything left.
     ///
     /// Two kinds of file stay whatever the directory says. The file on
-    /// screen: its pixels are up and correct, and dropping the path they
-    /// came from would leave the title, the bars and the information panel
-    /// describing a file that is not the one being shown. It keeps its
-    /// place among its neighbors, so that `]` lands on whatever has taken
-    /// its position rather than on a file already seen. And a file that was
+    /// screen, for as long as it is: its pixels are up and correct, and
+    /// dropping the path they came from would leave the title, the bars and
+    /// the information panel describing a file that is not the one being
+    /// shown. It keeps its place among its neighbors, so that `]` lands on
+    /// whatever has taken its position rather than on a file already seen,
+    /// and leaves once another file has the screen. And a file that was
     /// pasted, which no directory was ever going to list — it was written
     /// where pictures are kept — and which is no less a picture the user
     /// made this session for that.
@@ -659,6 +674,12 @@ impl Files {
     pub(super) fn remove(&mut self, gone: &HashSet<PathBuf>) -> bool {
         debug_assert!(self.is_idle(), "the list is changed between reads");
         let shown = self.shown_path().map(Path::to_path_buf);
+        if let Some(shown) = &shown
+            && gone.contains(shown)
+            && !self.adopted.contains(shown)
+        {
+            self.vanished = Some(shown.clone());
+        }
         let before = self.paths.len();
         let mut index = self.index;
         let mut at = 0;
@@ -729,6 +750,13 @@ impl Files {
                 self.leaving = Some(leaving);
             } else {
                 self.drop_path(&leaving);
+            }
+        }
+        if let Some(vanished) = self.vanished.take() {
+            if self.paths[index] == vanished {
+                self.vanished = Some(vanished);
+            } else {
+                self.drop_path(&vanished);
             }
         }
     }

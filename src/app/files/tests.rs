@@ -271,9 +271,9 @@ fn a_file_deleted_with_its_neighbors_keeps_its_place_among_the_survivors() {
     assert_eq!(files.path(1), Path::new("2.png"));
 }
 
-/// A file already deleted is said to be gone each time its directory
-/// changes again. It stays where it was put, and the changes around it go
-/// on as normal; and should it come back, it is not added a second time.
+/// The file on screen, deleted, stays where it was put while it is on
+/// screen, and the changes around it go on as normal; and should it come
+/// back, it is not added a second time.
 #[test]
 fn a_file_already_gone_keeps_its_place_through_later_changes() {
     let mut files = list(3);
@@ -291,6 +291,36 @@ fn a_file_already_gone_keeps_its_place_through_later_changes() {
         "no phantom beside it"
     );
     assert_eq!(files.len(), 4);
+}
+
+/// The file on screen, deleted or renamed by something else, leaves the
+/// list once another file has the screen: its directory says it is gone
+/// only the once. One the directory says has come back stays.
+#[test]
+fn a_file_gone_from_under_the_screen_leaves_once_stepped_off() {
+    let mut files = list(3);
+    files.shown(1);
+    assert!(!files.remove(&gone(&["1.png"])));
+    files.shown(1);
+    assert_eq!(files.len(), 3, "read again, it is still on screen");
+    let request = files.step(true).expect("somewhere to go");
+    files.accept(request.generation);
+    files.shown(request.index);
+    assert_eq!(
+        files.paths(),
+        &[PathBuf::from("0.png"), PathBuf::from("2.png")]
+    );
+    assert_eq!(files.shown_path(), Some(Path::new("2.png")));
+    assert_eq!(files.index(), 1);
+
+    let mut back = list(3);
+    back.shown(1);
+    back.remove(&gone(&["1.png"]));
+    back.add(named(&["1.png"]));
+    let request = back.step(true).expect("somewhere to go");
+    back.accept(request.generation);
+    back.shown(request.index);
+    assert_eq!(back.len(), 3, "it came back, and stays");
 }
 
 /// A pasted picture goes in beside the file on screen and is asked for
