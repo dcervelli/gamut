@@ -49,24 +49,17 @@ impl<'a> Container<'a> {
     /// a gain map after the photograph — Apple's, which states PQ — would
     /// otherwise be taken for the photograph's, or spliced into it.
     pub fn icc_profile(&self) -> Option<Vec<u8>> {
-        const NAME: &[u8] = b"ICC_PROFILE\0";
-        let mut chunks: Vec<(u8, &[u8])> = header(self.bytes)?
-            .segments
-            .into_iter()
-            .filter(|&(marker, _)| marker == APP2)
-            .filter_map(|(_, payload)| payload.strip_prefix(NAME))
+        // Each chunk is its sequence number, the count, then its bytes.
+        let mut chunks: Vec<(u8, &[u8])> = payloads(self.bytes, APP2, b"ICC_PROFILE\0")
             .filter_map(|chunk| Some((*chunk.first()?, chunk.get(2..)?)))
             .collect();
-        if chunks.is_empty() {
-            return None;
-        }
         chunks.sort_by_key(|&(sequence, _)| sequence);
-        Some(
-            chunks
-                .into_iter()
-                .flat_map(|(_, chunk)| chunk.to_vec())
-                .collect(),
-        )
+        let profile: Vec<u8> = chunks
+            .into_iter()
+            .flat_map(|(_, chunk)| chunk)
+            .copied()
+            .collect();
+        (!profile.is_empty()).then_some(profile)
     }
 
     /// The photograph with its gain map beside it, or `None` when this JPEG
@@ -93,11 +86,9 @@ impl<'a> Container<'a> {
         if !self.split_holds(base_jpeg, map_jpeg) {
             return Ok(None);
         }
-        // `is_ultrahdr` is also set for a plain multi-picture JPEG — a stereo
-        // pair, or a camera that stores two exposures — where the second
-        // image is not a gain map, and the crate's metadata is only read from
-        // an `hdrgm` block, so the second picture is a gain map only where
-        // one of the three says so.
+        // A plain multi-picture JPEG — a stereo pair, or a camera that
+        // stores two exposures — has a second picture too, so it is a gain
+        // map only where one of the three descriptions says so.
         let xmp = || {
             self.decoder
                 .metadata()
@@ -190,7 +181,7 @@ impl<'a> Container<'a> {
     }
 }
 
-/// The APP2 segment holding ICC profile chunks.
+const APP1: u8 = 0xE1;
 const APP2: u8 = 0xE2;
 
 /// A JPEG's header: the marker segments before its first scan, each its
@@ -229,18 +220,24 @@ fn header(bytes: &[u8]) -> Option<Header<'_>> {
     }
 }
 
+/// What follows `name` in each `marker` segment of the header of the JPEG
+/// `bytes` begins with that starts with it: the way an APP segment says
+/// what it holds.
+fn payloads<'a>(bytes: &'a [u8], marker: u8, name: &'a [u8]) -> impl Iterator<Item = &'a [u8]> {
+    header(bytes)
+        .into_iter()
+        .flat_map(|header| header.segments)
+        .filter(move |&(kind, _)| kind == marker)
+        .filter_map(move |(_, payload)| payload.strip_prefix(name))
+}
+
 /// The ISO 21496-1 metadata in the gain map's own APP2, where the
 /// standard puts it, under its name. The photograph may carry a block of
 /// its own that holds only the versions, which says a map follows and
 /// nothing about it, so the map's is the one read.
 fn iso_metadata(gain_map: &[u8]) -> Option<GainMapMetadata> {
-    const NAME: &[u8] = b"urn:iso:std:iso:ts:21496:-1\0";
-    header(gain_map)?
-        .segments
-        .into_iter()
-        .filter(|&(marker, _)| marker == APP2)
-        .find_map(|(_, payload)| payload.strip_prefix(NAME))
-        .and_then(crate::image::gain_map::iso_metadata)
+    payloads(gain_map, APP2, b"urn:iso:std:iso:ts:21496:-1\0")
+        .find_map(crate::image::gain_map::iso_metadata)
 }
 
 /// The headroom of Apple's gain map, where the second picture says in its
@@ -248,14 +245,8 @@ fn iso_metadata(gain_map: &[u8]) -> Option<GainMapMetadata> {
 /// where either is missing: a map whose headroom is not known cannot be
 /// applied.
 fn apple_headroom(base: &[u8], gain_map: &[u8]) -> Option<f32> {
-    const XMP: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
-    const APP1: u8 = 0xE1;
     let kind = APPLE_AUXILIARY.as_bytes();
-    let says_so = header(gain_map)?
-        .segments
-        .into_iter()
-        .filter(|&(marker, _)| marker == APP1)
-        .filter_map(|(_, payload)| payload.strip_prefix(XMP))
+    let says_so = payloads(gain_map, APP1, b"http://ns.adobe.com/xap/1.0/\0")
         .any(|packet| packet.windows(kind.len()).any(|window| window == kind));
     if !says_so {
         return None;
