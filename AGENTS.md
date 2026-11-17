@@ -282,7 +282,8 @@ image/         the data model, nothing GPU
                  stored; shown() the pitch and the horizon in the picture as shown
   level.rs       Level: a camera's electronic level from its maker note — Canon, Panasonic,
                  Pentax, Olympus — and a DJI drone's gimbal from the XMP, as a roll and a pitch
-  apple_note.rs  Apple's maker note: its signed rationals by tag
+  apple_note.rs  Apple's maker note: its signed rationals by tag, and headroom(), what a
+                 gain map beside the picture may lift it by
   metadata_region.rs  MetadataRegion: a region the metadata marks out on the picture —
                  EXIF's SubjectArea and SubjectLocation, the XMP's MWG regions and
                  Microsoft's people tags — as a label, words and a Shape
