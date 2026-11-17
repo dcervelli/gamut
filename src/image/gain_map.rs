@@ -42,6 +42,7 @@ use half::f16;
 
 use crate::image::color::{ColorSpace, Transfer};
 use crate::image::display::AutoWindow;
+use crate::image::isobmff::Fields;
 use crate::image::stats::{BINS, COLOR, Plot};
 use crate::image::{AlphaMode, Channels, DecodedImage, Referred, Samples};
 use ultrahdr_rs::GainMapMetadata;
@@ -103,6 +104,71 @@ pub enum Lift {
     /// was developed. Applied whole or not at all.
     Profile(Profile),
 }
+
+/// ISO 21496-1's gain map metadata in its binary form, from the minimum
+/// version on: what a JPEG's APP2 carries after the standard's name, and a
+/// HEIF's `tmap` item after its version byte. `None` for a payload cut
+/// short.
+pub fn iso_metadata(body: &[u8]) -> Option<GainMapMetadata> {
+    let mut fields = Fields::new(body);
+    let _minimum_version = fields.u16()?;
+    let _writer_version = fields.u16()?;
+    let flags = fields.u8()?;
+    let multichannel = flags & 0x80 != 0;
+    let use_base_color_space = flags & 0x40 != 0;
+    let mut ratio = |signed: bool| -> Option<f64> {
+        let numerator = if signed {
+            f64::from(fields.i32()?)
+        } else {
+            f64::from(fields.u32()?)
+        };
+        let denominator = f64::from(fields.u32()?);
+        (denominator != 0.0).then(|| numerator / denominator)
+    };
+    let base_hdr_headroom = ratio(false)?;
+    let alternate_hdr_headroom = ratio(false)?;
+    let channels = if multichannel { 3 } else { 1 };
+    let mut gain_map_min = [0.0; 3];
+    let mut gain_map_max = [0.0; 3];
+    let mut gamma = [1.0; 3];
+    let mut base_offset = [0.0; 3];
+    let mut alternate_offset = [0.0; 3];
+    for channel in 0..channels {
+        gain_map_min[channel] = ratio(true)?;
+        gain_map_max[channel] = ratio(true)?;
+        gamma[channel] = ratio(false)?;
+        base_offset[channel] = ratio(true)?;
+        alternate_offset[channel] = ratio(true)?;
+    }
+    if !multichannel {
+        for channel in 1..3 {
+            gain_map_min[channel] = gain_map_min[0];
+            gain_map_max[channel] = gain_map_max[0];
+            gamma[channel] = gamma[0];
+            base_offset[channel] = base_offset[0];
+            alternate_offset[channel] = alternate_offset[0];
+        }
+    }
+    // `GainMapMetadata` is non-exhaustive, so it is built by amending the
+    // defaults rather than by naming every field.
+    let mut metadata = GainMapMetadata::default();
+    metadata.gain_map_min = gain_map_min;
+    metadata.gain_map_max = gain_map_max;
+    metadata.gamma = gamma;
+    metadata.base_offset = base_offset;
+    metadata.alternate_offset = alternate_offset;
+    metadata.base_hdr_headroom = base_hdr_headroom;
+    metadata.alternate_hdr_headroom = alternate_hdr_headroom;
+    metadata.use_base_color_space = use_base_color_space;
+    // The standard has no flag for the direction: the base is the SDR
+    // rendition when its headroom is the smaller.
+    metadata.backward_direction = base_hdr_headroom > alternate_hdr_headroom;
+    Some(metadata)
+}
+
+/// The auxiliary type Apple gives its gain map: a HEIC's auxiliary image is
+/// found by it, and a JPEG's second picture says it in its XMP.
+pub const APPLE_AUXILIARY: &str = "urn:com:apple:photo:2020:aux:hdrgainmap";
 
 /// What a raw's profile said, kept for the panels that say it: the map
 /// itself is the ratios it made.

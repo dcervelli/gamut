@@ -286,11 +286,9 @@ fn gain_map(
             .context("opening the gain map")?;
         (map_handle, Lift::Iso(tone_map.metadata))
     } else {
-        let Some(map_handle) = handle
-            .auxiliary_images(None)
-            .into_iter()
-            .find(|aux| aux.auxiliary_type().ok().as_deref() == Some(apple::GAIN_MAP))
-        else {
+        let Some(map_handle) = handle.auxiliary_images(None).into_iter().find(|aux| {
+            aux.auxiliary_type().ok().as_deref() == Some(crate::image::gain_map::APPLE_AUXILIARY)
+        }) else {
             return Ok(None);
         };
         let Some(headroom) = handle

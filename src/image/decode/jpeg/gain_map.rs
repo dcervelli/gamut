@@ -19,9 +19,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 
-use ultrahdr_rs::Decoder;
+use ultrahdr_rs::{Decoder, GainMapMetadata};
 
-use crate::image::gain_map::{GainMap, Lift};
+use crate::image::apple_note;
+use crate::image::gain_map::{APPLE_AUXILIARY, GainMap, Lift};
 use crate::image::{AlphaMode, Channels, ColorSpace, DecodedImage, Samples};
 
 /// A JPEG, examined for the things the `image` crate throws away: the ICC
@@ -40,47 +41,88 @@ impl<'a> Container<'a> {
             .map(|decoder| Self { bytes, decoder })
     }
 
-    /// The embedded ICC profile, reassembled across the APP2 chunks it is
-    /// split into.
+    /// The photograph's own ICC profile, reassembled across the APP2 chunks
+    /// it is split into.
+    ///
+    /// Read from the photograph's header alone. `ultrahdr-rs` 0.3.5 looks
+    /// for the chunks byte by byte through the whole file, so the profile of
+    /// a gain map after the photograph — Apple's, which states PQ — would
+    /// otherwise be taken for the photograph's, or spliced into it.
     pub fn icc_profile(&self) -> Option<Vec<u8>> {
-        self.decoder.icc_profile()
+        const NAME: &[u8] = b"ICC_PROFILE\0";
+        let mut chunks: Vec<(u8, &[u8])> = header(self.bytes)?
+            .segments
+            .into_iter()
+            .filter(|&(marker, _)| marker == APP2)
+            .filter_map(|(_, payload)| payload.strip_prefix(NAME))
+            .filter_map(|chunk| Some((*chunk.first()?, chunk.get(2..)?)))
+            .collect();
+        if chunks.is_empty() {
+            return None;
+        }
+        chunks.sort_by_key(|&(sequence, _)| sequence);
+        Some(
+            chunks
+                .into_iter()
+                .flat_map(|(_, chunk)| chunk.to_vec())
+                .collect(),
+        )
     }
 
-    /// The reconstructed HDR image, or `None` when this JPEG has no gain map.
+    /// The photograph with its gain map beside it, or `None` when this JPEG
+    /// has no gain map.
     ///
     /// `color` is what the base image's own numbers mean, which the caller
     /// has already worked out from the ICC profile. The gain map is applied
     /// in that space and the result stays in it, so only the transfer
     /// function changes on the way through.
+    ///
+    /// What the map means is looked for in three places, the standard's
+    /// first: the ISO 21496-1 block in the map's own APP2, which libultrahdr,
+    /// Android and Apple's own export all write; then the `hdrgm` XMP Google
+    /// and Adobe write, which `ultrahdr-rs` reads; then Apple's auxiliary
+    /// type in the map's XMP, whose headroom is the photograph's maker
+    /// note's. A JPEG out of Apple's export carries the first and the third
+    /// and no `hdrgm` at all.
     pub fn gain_mapped(&self, color: ColorSpace) -> Result<Option<DecodedImage>> {
-        // `is_ultrahdr` is also set for a plain multi-picture JPEG — a stereo
-        // pair, or a camera that stores two exposures — where the second
-        // image is not a gain map and there is no metadata to describe one.
-        // Both have to be present before any of this means anything.
-        let (Some(metadata), Some(base_jpeg), Some(map_jpeg)) = (
-            self.decoder.metadata(),
-            self.decoder.primary_jpeg(),
-            self.decoder.gainmap_jpeg(),
-        ) else {
+        let (Some(base_jpeg), Some(map_jpeg)) =
+            (self.decoder.primary_jpeg(), self.decoder.gainmap_jpeg())
+        else {
             return Ok(None);
         };
-        if !self.decoder.is_ultrahdr() {
-            return Ok(None);
-        }
         if !self.split_holds(base_jpeg, map_jpeg) {
             return Ok(None);
         }
-
-        // v1.1 allows the stored image to be the HDR one, with the map saying
-        // how to get *down* to SDR. Nothing below implements that direction,
-        // and quietly brightening an image that is already bright would be
-        // worse than saying so.
-        if metadata.backward_direction || states_hdr_base(map_jpeg) {
-            bail!(
-                "gain map runs the other way (the base image is the HDR one), \
-                 which this build cannot apply — try --no-gain-map"
-            );
-        }
+        // `is_ultrahdr` is also set for a plain multi-picture JPEG — a stereo
+        // pair, or a camera that stores two exposures — where the second
+        // image is not a gain map, and the crate's metadata is only read from
+        // an `hdrgm` block, so the second picture is a gain map only where
+        // one of the three says so.
+        let xmp = || {
+            self.decoder
+                .metadata()
+                .filter(|_| self.decoder.is_ultrahdr())
+                .cloned()
+        };
+        let lift = match iso_metadata(map_jpeg).or_else(xmp) {
+            Some(metadata) => {
+                // v1.1 allows the stored image to be the HDR one, with the
+                // map saying how to get *down* to SDR. Nothing below
+                // implements that direction, and quietly brightening an image
+                // that is already bright would be worse than saying so.
+                if metadata.backward_direction || states_hdr_base(map_jpeg) {
+                    bail!(
+                        "gain map runs the other way (the base image is the HDR one), \
+                         which this build cannot apply — try --no-gain-map"
+                    );
+                }
+                Lift::Iso(metadata)
+            }
+            None => match apple_headroom(base_jpeg, map_jpeg) {
+                Some(headroom) => Lift::Apple { headroom },
+                None => return Ok(None),
+            },
+        };
 
         let base = decode(base_jpeg)
             .context("decoding the base image")?
@@ -121,7 +163,7 @@ impl<'a> Container<'a> {
             height: map_height,
             channels,
             data: crate::image::gain_map::Data::Codes(data),
-            lift: Lift::Iso(metadata.clone()),
+            lift,
         }));
         Ok(Some(image))
     }
@@ -139,7 +181,7 @@ impl<'a> Container<'a> {
     /// base has to run from the start of the file through it, and the map has
     /// to begin after the base ends. Anything else is a plain JPEG.
     fn split_holds(&self, base: &[u8], map: &[u8]) -> bool {
-        let Some(scan) = first_scan(self.bytes) else {
+        let Some(scan) = header(self.bytes).map(|header| header.scan) else {
             return false;
         };
         let offset = |part: &[u8]| part.as_ptr() as usize - self.bytes.as_ptr() as usize;
@@ -148,10 +190,23 @@ impl<'a> Container<'a> {
     }
 }
 
-/// Where the photograph's first SOS marker is, found by walking the segments
-/// before it by their lengths, so that a JPEG carried inside an APP segment is
-/// stepped over whole rather than mistaken for the file's own.
-fn first_scan(bytes: &[u8]) -> Option<usize> {
+/// The APP2 segment holding ICC profile chunks.
+const APP2: u8 = 0xE2;
+
+/// A JPEG's header: the marker segments before its first scan, each its
+/// marker and its payload, and where the scan's SOS marker is.
+struct Header<'a> {
+    segments: Vec<(u8, &'a [u8])>,
+    scan: usize,
+}
+
+/// The header of the JPEG `bytes` begins with, found by walking the segments
+/// by their lengths, so that a JPEG carried inside an APP segment is stepped
+/// over whole rather than mistaken for the file's own. `None` where a
+/// segment runs past the end, or something that is not a marker stands
+/// where one should.
+fn header(bytes: &[u8]) -> Option<Header<'_>> {
+    let mut segments = Vec::new();
     let mut at = 2;
     loop {
         let marker = bytes.get(at..at + 2)?;
@@ -159,16 +214,59 @@ fn first_scan(bytes: &[u8]) -> Option<usize> {
             return None;
         }
         match marker[1] {
-            0xDA => return Some(at),
+            0xDA => return Some(Header { segments, scan: at }),
             // Fill bytes before a marker.
             0xFF => at += 1,
             // The markers that stand alone, with no length after them.
             0x01 | 0xD0..=0xD8 => at += 2,
-            _ => {
+            kind => {
                 let length = bytes.get(at + 2..at + 4)?;
-                at += 2 + u16::from_be_bytes([length[0], length[1]]) as usize;
+                let length = u16::from_be_bytes([length[0], length[1]]) as usize;
+                segments.push((kind, bytes.get(at + 4..at + 2 + length.max(2))?));
+                at += 2 + length;
             }
         }
+    }
+}
+
+/// The ISO 21496-1 metadata in the gain map's own APP2, where the
+/// standard puts it, under its name. The photograph may carry a block of
+/// its own that holds only the versions, which says a map follows and
+/// nothing about it, so the map's is the one read.
+fn iso_metadata(gain_map: &[u8]) -> Option<GainMapMetadata> {
+    const NAME: &[u8] = b"urn:iso:std:iso:ts:21496:-1\0";
+    header(gain_map)?
+        .segments
+        .into_iter()
+        .filter(|&(marker, _)| marker == APP2)
+        .find_map(|(_, payload)| payload.strip_prefix(NAME))
+        .and_then(crate::image::gain_map::iso_metadata)
+}
+
+/// The headroom of Apple's gain map, where the second picture says in its
+/// XMP that it is one, from the maker note in the photograph's EXIF. `None`
+/// where either is missing: a map whose headroom is not known cannot be
+/// applied.
+fn apple_headroom(base: &[u8], gain_map: &[u8]) -> Option<f32> {
+    const XMP: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+    const APP1: u8 = 0xE1;
+    let kind = APPLE_AUXILIARY.as_bytes();
+    let says_so = header(gain_map)?
+        .segments
+        .into_iter()
+        .filter(|&(marker, _)| marker == APP1)
+        .filter_map(|(_, payload)| payload.strip_prefix(XMP))
+        .any(|packet| packet.windows(kind.len()).any(|window| window == kind));
+    if !says_so {
+        return None;
+    }
+    let exif = exif::Reader::new()
+        .read_from_container(&mut std::io::Cursor::new(base))
+        .ok()?;
+    let field = exif.get_field(exif::Tag::MakerNote, exif::In::PRIMARY)?;
+    match &field.value {
+        exif::Value::Undefined(note, _) => apple_note::headroom(note),
+        _ => None,
     }
 }
 
@@ -571,7 +669,7 @@ mod tests {
         assert!(container.decoder.is_ultrahdr());
         assert!(container.decoder.metadata().is_some());
         let base = container.decoder.primary_jpeg().expect("a base is found");
-        let scan = first_scan(&bytes).expect("the photograph has a scan");
+        let scan = header(&bytes).expect("the photograph has a scan").scan;
         assert!(
             base.len() <= scan,
             "the crate's base reaches the photograph's scan"
@@ -620,6 +718,149 @@ mod tests {
                 .gain_mapped(ColorSpace::SRGB)
                 .expect("a forward gain map applies")
                 .is_some()
+        );
+    }
+
+    /// The ISO 21496-1 block an iPhone 16 Pro's photograph carried in its
+    /// gain map's APP2 once through Apple's export, after the standard's
+    /// name: one channel, in the base's color space, the alternate at
+    /// 2.354 stops — 5.11 times SDR white, as its maker note works out too.
+    const EXPORTED: [u8; 61] = [
+        0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x42, 0x40, 0x00, 0x23,
+        0xe9, 0x6c, 0x00, 0x0f, 0x42, 0x40, 0xff, 0xf5, 0xbd, 0x95, 0x00, 0x0f, 0x42, 0x40, 0x00,
+        0x23, 0xe9, 0x6c, 0x00, 0x0f, 0x42, 0x40, 0x00, 0x10, 0xfc, 0xc1, 0x00, 0x0f, 0x42, 0x40,
+        0x00, 0x00, 0x00, 0x0a, 0x00, 0x0f, 0x42, 0x40, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x0f, 0x42,
+        0x40,
+    ];
+
+    /// `jpeg` with `segments` put in after its SOI marker.
+    fn with_segments(jpeg: &[u8], segments: &[Vec<u8>]) -> Vec<u8> {
+        let mut bytes = jpeg[..2].to_vec();
+        bytes.extend(segments.concat());
+        bytes.extend_from_slice(&jpeg[2..]);
+        bytes
+    }
+
+    /// The gain map's ISO block, as an APP2 segment.
+    fn iso_segment() -> Vec<u8> {
+        segment(
+            0xE2,
+            &[&b"urn:iso:std:iso:ts:21496:-1\0"[..], &EXPORTED].concat(),
+        )
+    }
+
+    /// The XMP Apple writes into its gain map, as an APP1 segment.
+    fn apple_xmp() -> Vec<u8> {
+        let packet = format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:apdi="http://ns.apple.com/pixeldatainfo/1.0/" apdi:AuxiliaryImageType="{APPLE_AUXILIARY}"/></rdf:RDF></x:xmpmeta>"#
+        );
+        segment(
+            0xE1,
+            &[&b"http://ns.adobe.com/xap/1.0/\0"[..], packet.as_bytes()].concat(),
+        )
+    }
+
+    /// An EXIF block, as an APP1 segment, holding an Apple maker note whose
+    /// tags 33 and 48 are 1.01 and 0.0092, near the photograph's: 2.356
+    /// stops above SDR white by Apple's formula.
+    fn apple_exif() -> Vec<u8> {
+        let note = crate::image::apple_note::tests::note(&[
+            (33, 10, &[(101, 100)]),
+            (48, 10, &[(92, 10000)]),
+        ]);
+        let field = exif::Field {
+            tag: exif::Tag::MakerNote,
+            ifd_num: exif::In::PRIMARY,
+            value: exif::Value::Undefined(note, 0),
+        };
+        let mut writer = exif::experimental::Writer::new();
+        writer.push_field(&field);
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        writer
+            .write(&mut tiff, false)
+            .expect("the EXIF block writes");
+        segment(0xE1, &[&b"Exif\0\0"[..], tiff.get_ref()].concat())
+    }
+
+    /// A photograph and a half-size map after it, as Apple's export lays
+    /// them out but for the MPF directory, which the crate does without: the
+    /// photograph's `photo` segments and the map's `map` segments.
+    fn exported(photo: &[Vec<u8>], map: &[Vec<u8>]) -> Vec<u8> {
+        let base = jpeg(
+            &[GRAY; 16 * 16 * 3],
+            16,
+            16,
+            ::image::ExtendedColorType::Rgb8,
+        );
+        let gain = jpeg(&[128; 8 * 8], 8, 8, ::image::ExtendedColorType::L8);
+        [with_segments(&base, photo), with_segments(&gain, map)].concat()
+    }
+
+    fn lift_of(bytes: &[u8]) -> Option<Lift> {
+        Container::open(bytes)
+            .expect("a JPEG opens")
+            .gain_mapped(ColorSpace::SRGB)
+            .expect("the gain map reads")
+            .map(|image| image.gain_map.expect("a map beside it").lift.clone())
+    }
+
+    /// The standard's block in the map is enough on its own, with no `hdrgm`
+    /// anywhere in the file.
+    #[test]
+    fn the_maps_iso_block_is_read_without_hdrgm() {
+        let Some(Lift::Iso(metadata)) = lift_of(&exported(&[], &[iso_segment()])) else {
+            panic!("the ISO block is read");
+        };
+        assert!((metadata.alternate_hdr_headroom - 2.353516).abs() < 1e-6);
+        assert!((metadata.gain_map_min[0] + 0.672363).abs() < 1e-6);
+        assert!(!metadata.backward_direction);
+    }
+
+    /// A map that says in its XMP it is Apple's is lifted by the headroom
+    /// the photograph's maker note works out.
+    #[test]
+    fn apples_map_is_lifted_by_the_maker_notes_headroom() {
+        let Some(Lift::Apple { headroom }) = lift_of(&exported(&[apple_exif()], &[apple_xmp()]))
+        else {
+            panic!("Apple's map is read");
+        };
+        let stops = 3.0 - 70.0 * 0.0092_f32;
+        assert!((headroom - stops.exp2()).abs() < 1e-4, "{headroom}");
+    }
+
+    /// Where the map carries both, the standard's description is the one
+    /// read, as the file Apple's export writes does.
+    #[test]
+    fn the_iso_block_comes_before_apples() {
+        let bytes = exported(&[apple_exif()], &[apple_xmp(), iso_segment()]);
+        assert!(matches!(lift_of(&bytes), Some(Lift::Iso(_))));
+    }
+
+    /// Apple's map with no maker note to say its headroom has nothing to be
+    /// applied by, and the photograph is read as a plain one; and a second
+    /// picture that says nothing of being a map is not taken for one.
+    #[test]
+    fn a_map_nothing_describes_is_not_applied() {
+        assert!(lift_of(&exported(&[], &[apple_xmp()])).is_none());
+        assert!(lift_of(&exported(&[apple_exif()], &[])).is_none());
+    }
+
+    /// The photograph's profile is its own, and the map's — which Apple's
+    /// export gives a PQ profile — is not taken for it where the photograph
+    /// has none, or spliced into it where it has one.
+    #[test]
+    fn the_maps_icc_profile_is_not_the_photographs() {
+        let chunk =
+            |profile: &[u8]| segment(0xE2, &[&b"ICC_PROFILE\0\x01\x01"[..], profile].concat());
+        let bytes = exported(&[], &[chunk(b"the map's")]);
+        let container = Container::open(&bytes).expect("a JPEG opens");
+        assert_eq!(container.icc_profile(), None);
+
+        let bytes = exported(&[chunk(b"the photograph's")], &[chunk(b"the map's")]);
+        let container = Container::open(&bytes).expect("a JPEG opens");
+        assert_eq!(
+            container.icc_profile().as_deref(),
+            Some(&b"the photograph's"[..])
         );
     }
 }

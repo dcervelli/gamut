@@ -121,27 +121,34 @@ Two descriptions of a map arrive, and each reads into a `Lift`. **ISO
 21496-1** is the standard's own: the headroom of each rendition and, per
 channel, the range of the map's log2 gains, its gamma and two offsets.
 `ultrahdr-core`'s `GainMapMetadata` is that set of numbers, and its
-`GainMapLut` at a weight is the table. Ultra HDR's XMP spells it, which
-`ultrahdr-rs` reads out of the JPEG's container (MPF and the XMP directory
-Google writes beside it, the two JPEGs handed back as raw bytes so that
-`image` remains the only JPEG decoder in the build), and so does a HEIF's
-`tmap` item: a tone-mapped image item referring by `dimg` to the base and
-the map, whose payload is the metadata. `libheif` 1.23 knows nothing of it,
-so `heif::tmap` walks the boxes — `meta`, and in it `iinf`, `iref`, `iloc`
-and `idat` — before the library takes the source. **Apple's** is the older
-description in an iPhone's HEIC: an auxiliary image typed
-`urn:com:apple:photo:2020:aux:hdrgainmap`, encoded with the Rec. 709
-transfer function, and a headroom worked out from two numbers in the maker
-note by the piecewise formula Apple publishes in "Applying Apple HDR effect
-to your photos"; `heif::apple` reads the note — Apple's own directory inside
-the EXIF, offsets from its first byte — and the table is `1 + (headroom - 1)
+`GainMapLut` at a weight is the table. A JPEG carries it in two
+spellings. The standard's own is a binary block in an APP2 segment of the
+map, under the standard's name, which `gain_map::iso_metadata` reads; Ultra
+HDR writes it, and so does Apple's export, which writes nothing else of the
+kind. The other is the `hdrgm` XMP Google and Adobe write, which
+`ultrahdr-rs` reads. The crate also walks the JPEG's container — MPF, or
+the XMP directory Google writes beside it — and hands back the two JPEGs as
+raw bytes, so that `image` remains the only JPEG decoder in the build. The
+binary block is read first, since `ultrahdr-rs` 0.3.5 reads only the XMP:
+with that alone, an exported iPhone JPEG came back with its map unread. A
+HEIF spells the same block as its `tmap` item: a tone-mapped image item
+referring by `dimg` to the base and the map, whose payload is a version
+byte and then the metadata. `libheif` 1.23 knows nothing of it, so
+`heif::tmap` walks the boxes — `meta`, and in it `iinf`, `iref`, `iloc` and
+`idat` — before the library takes the source. **Apple's** is the older
+description: a map typed `urn:com:apple:photo:2020:aux:hdrgainmap` — an
+auxiliary image in a HEIC, the second picture of an MPF JPEG saying so in
+its XMP — encoded with the Rec. 709 transfer function, and a headroom
+worked out from two numbers in the maker note by the piecewise formula
+Apple publishes in "Applying Apple HDR effect to your photos".
+`apple_note::headroom` reads the note — Apple's own directory inside the
+EXIF, offsets from its first byte — and the table is `1 + (headroom - 1)
 * gain`, the headroom scaled by the weight as the standard scales its log2
 gains. An iPhone from iOS 18 on writes both, and the two are checked against
 each other: an iPhone 16 Pro's file states 1.7243 stops in its `tmap` and
-its maker note comes to the same. The `tmap` is taken where there is one,
-since it is what every other reader of the file will use; the map itself is
-the same image either way, decoded through `libheif` like any other in the
-file.
+its maker note comes to the same. The standard's block is taken where there
+is one, in either container, since it is what every other reader of the
+file will use; the map itself is the same image either way.
 
 A raw's profile is a third kind, `Lift::Profile`, made by the developer
 rather than read from the file (see **The profile's rendering** under
@@ -165,7 +172,10 @@ lifted by nothing a ratio can say.
 the surface, and leaves a raw's profile unmade: what many other viewers show, and worth having when the two
 need comparing. The JPEG's ICC profile is read on the same pass as its
 map, because a phone JPEG is Display P3 far more often than it is sRGB,
-and P3 numbers shown as sRGB come out visibly flat.
+and P3 numbers shown as sRGB come out visibly flat. It is read from the
+photograph's own header and nowhere after: Apple's map carries a profile
+of its own, which states PQ, and a reader that looks through the whole
+file takes that for the photograph's where the photograph has none.
 
 ## Depth maps
 
