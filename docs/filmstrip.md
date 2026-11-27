@@ -65,22 +65,29 @@ than `maps-old`: a folder's files keep together, and within it go by the
 key under it.
 
 The order is remembered between runs in `State`, and a list about to be
-opened is put in it before the first of it is chosen, so that the first
-file shown is the first in the order the list was last left in. Applied
-after that file had arrived instead, the list would be sorted round
-whichever file came first by name, landing the user in the middle of it.
-An order of names needs nothing read, and `main` puts the command line's
-list in it with `app::arranged` ahead of `cli::first_readable`. Any other
+opened is put in it before its first file is asked for. Which file that
+is depends on where the list came from. The command line's opens on the
+first file named that can be read, wherever the order puts it: a file
+manager that hands over a file with its siblings names the one clicked
+first, and nothing else on a command line says which file was meant. The
+desktop's dialog says nothing of the kind, so files chosen there open on
+the first in the order; applied after that file had arrived instead, the
+list would be sorted round whichever file came first by name, landing the
+user in the middle of it. An order of names needs nothing read, and
+`cli::open_on` puts the command line's list in it with `app::arranged`,
+after `cli::first_readable` has found the first named that reads. Any other
 order needs something of every file — a `stat` for a date or a size, the
 leading bytes for a type, the metadata for a capture date, the header for
 the dimensions — and a folder of
 large raws is too much to read before the window opens, so `App::new`
 hands the list to `app/arranging.rs` instead of asking for its first file:
 the window opens on nothing, neither empty nor loading, the read runs on
-a thread of its own, and `Arrive::Open` asks for the first file in the
-order once it is in, the window sized by that file rather than by the
-header that opened it. Files chosen in the desktop's dialog go the same
-way, as `Arrive::Append`, from `App::open_named`. What was read is kept
+a thread of its own, and `Arrive::Open` asks for the first file named
+once it is in, the window sized by that file. Nothing is on screen for
+`Files::reorder` to follow, so `arrived` finds that file's new place
+itself. Files chosen in the desktop's dialog go the same way, as
+`Arrive::Append`, from `App::open_named`, and open on the first in the
+order. What was read is kept
 in `App::glimpsed` for `App::key_of` to fall back on, so the list does not
 reshuffle as the thumbnail thread's headers arrive. A slow read is said
 in the toast a slow file gets, with a count.

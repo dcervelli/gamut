@@ -842,10 +842,10 @@ impl App {
         app.filmstrip.set_order(kept_state.order);
         match source {
             // Several files from disk under an order that needs more than
-            // their names: read for it first, so that the first shown is
-            // the first in it. The window opens meanwhile, and is sized
-            // by that file when it arrives rather than by the one whose
-            // header opened it.
+            // their names: read for it first, and the first file named
+            // asked for once it is in, wherever the order has put it. The
+            // window opens meanwhile, and is sized by that file when it
+            // arrives.
             Some(Source::Disk) if app.files.len() > 1 && kept_state.order.reads_facts() => {
                 app.arrange(app.files.paths().to_vec(), arranging::Arrive::Open);
             }

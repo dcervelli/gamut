@@ -6,6 +6,14 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ## Unreleased
 
+### Fixed
+
+- Given several files on the command line, `gamut` opens on the first one
+  named, as `--help` says, rather than on the first in the order the list
+  is sorted in. A file manager that passes the file clicked ahead of its
+  neighbors now opens on that file. The list itself is still sorted as
+  before. ([#57](https://github.com/dcervelli/gamut/issues/57))
+
 ### Changed
 
 - On a Mac, Homebrew installs the signed and notarized `Gamut.app` into

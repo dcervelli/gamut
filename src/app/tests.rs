@@ -528,26 +528,29 @@ fn the_empty_window_offers_the_last_folder() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A directory opens on the first file in the order the list was last
-/// left in, not the first by name: under an order that needs more than
-/// the names, the window opens with nothing asked for, the list is read
-/// for its order, and the first in it is asked for then. The list stands
-/// in that order before any header has been read.
+/// Several files named, under an order that needs more than the names:
+/// the window opens with nothing asked for, the list is read for its
+/// order, and the first file named is asked for then, wherever the order
+/// has put it — the file a file manager names first, ahead of its
+/// siblings, being the one clicked. The list stands in that order before
+/// any header has been read.
 #[test]
-fn a_directory_opens_in_the_order_last_left() {
-    let (dir, paths) = written(
+fn several_files_open_on_the_first_named_in_the_order_last_left() {
+    let (dir, written) = written(
         "arranged",
         &[("a.png", 4, 4), ("b.png", 256, 256), ("c.png", 64, 64)],
     );
+    let [a, b, c] = [&written[0], &written[1], &written[2]].map(Clone::clone);
+    let named = vec![c.clone(), a.clone(), b.clone()];
     let order = ui::filmstrip::Order {
         sort: ui::filmstrip::Sort::Size,
         direction: ui::filmstrip::Direction::Descending,
         ..Default::default()
     };
-    let size = decode::probe(&paths[0]).unwrap();
+    let size = decode::probe(&c).unwrap();
     let mut app = App::new(
-        paths.clone(),
-        vec![dir.clone()],
+        named.clone(),
+        named.clone(),
         Some(Opening {
             index: 0,
             source: Source::Disk,
@@ -564,26 +567,26 @@ fn a_directory_opens_in_the_order_last_left() {
     assert!(!app.is_empty(), "no buttons while it is read for");
     assert_eq!(app.title(), crate::PROGRAM);
     assert!(app.window_due().is_some(), "the window waits for it");
-    assert!(!app.sizing.to_next, "nor sized by the first picture yet");
 
-    let read = arranging::read_now(app.arranging.next_job, paths.clone(), order.sort);
+    let read = arranging::read_now(app.arranging.next_job, named.clone(), order.sort);
     let _ = app.arranged_read(read);
     assert!(app.window_due().is_none());
     assert_eq!(
         app.opening_size(),
-        Some([256.0, 256.0]),
-        "the window opens at the first file's size, not the first named"
+        Some([64.0, 64.0]),
+        "the window opens at the first named file's size"
     );
-    let pending = app
-        .files
-        .pending()
-        .expect("the first in the order asked for");
-    assert_eq!(app.files.path(pending.index), paths[1]);
+    let pending = app.files.pending().expect("the first named asked for");
+    assert_eq!(
+        app.files.path(pending.index),
+        c,
+        "not the first in the order"
+    );
     answer(&mut app, Reload::Fresh);
-    assert_eq!(app.files.shown_path(), Some(paths[1].as_path()));
+    assert_eq!(app.files.shown_path(), Some(c.as_path()));
     assert_eq!(
         app.files.paths(),
-        [paths[1].clone(), paths[2].clone(), paths[0].clone()],
+        [b.clone(), c.clone(), a.clone()],
         "the order holds"
     );
     let _ = std::fs::remove_dir_all(&dir);
