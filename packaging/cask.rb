@@ -8,7 +8,7 @@
 # dcervelli/homebrew-gamut, as Casks/gamut.rb. Edit it here.
 cask "gamut" do
   version "0.14.1"
-  sha256 "2686f6e43ab92290cf1d5f3592c55b16efaefb61eed0a1b8e89ab67182fc5be6"
+  sha256 "9999080e73d8c809c77c9ea2ca4dd7f4e586174f444f6874d89be11a0a42612b"
 
   url "https://github.com/dcervelli/gamut/releases/download/v#{version}/Gamut-#{version}-arm64.zip"
   name "Gamut"
