@@ -3,8 +3,11 @@
 //! needs more than the names, and whatever the desktop's file dialog
 //! chose.
 //!
-//! The first file shown is the first in that order, rather than the first
-//! by name with the list sorted round it once it has arrived. What the
+//! The command line's opens on the first file named that can be read,
+//! wherever the order puts it, since a file manager names the file clicked
+//! ahead of its siblings; the dialog's on the first in the order, rather
+//! than the first by name with the list sorted round it once it has
+//! arrived, since the dialog says nothing of which was meant. What the
 //! order needs of each file is read on a thread of its own, as the folder
 //! beside a single file is ([`super::folder`]) — a `stat` for a date or a
 //! size, the leading bytes for a type, the header for the dimensions — so
@@ -163,11 +166,18 @@ impl App {
     fn arrived(&mut self, arrive: Arrive, paths: Vec<PathBuf>) {
         match arrive {
             Arrive::Open => {
-                // The list is these files already, the one named first
-                // standing ready to be asked for: put in order, and the
-                // first in it asked for instead.
+                // The list is these files already, the first named that
+                // could be read standing ready to be asked for: put in
+                // order, and that file asked for wherever it has gone.
+                // Nothing is on screen for the reorder to follow, so it
+                // is followed here.
+                let first = self.files.path(self.files.index()).to_path_buf();
                 let _ = self.apply_order();
-                self.files.start_at(0);
+                let at = self
+                    .files
+                    .position(&first)
+                    .expect("ordering keeps every file");
+                self.files.start_at(at);
                 // `settle_arranged` owes the frame, for this and the list.
                 let request = self.files.open_first(Source::Disk);
                 self.open_at(&request.path);

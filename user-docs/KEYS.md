@@ -256,8 +256,11 @@ neither, and then the time is read as if it were in your computer's time
 zone, which is right for pictures taken where you are and an hour or more
 out for one camera set elsewhere against another. The thumbnail shows the
 time as the camera's clock read it. The list opens in the order you last put it in,
-or in name order the first time, whatever order the files were named in,
-and the first file shown is the first in that order. Sorted by anything
+or in name order the first time, whatever order the files were named in.
+Given several files, it opens on the first one you named, wherever the
+order puts it, so a file manager that passes the file you clicked ahead of
+its neighbors opens on that file. Files chosen in the open dialog, which
+does not say which you meant, open on the first in the order. Sorted by anything
 but name or path, a long list is read for its order before its first file
 opens, and the window says so while it is. The list stays in that order
 as files arrive in a directory or leave it. Whatever the order does, the file on

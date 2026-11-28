@@ -639,6 +639,26 @@ pub fn first_readable(files: &[PathBuf]) -> Result<(usize, Option<[f32; 2]>)> {
         .expect("the argument list is never empty"))
 }
 
+/// The command line's `files` put in `order`, and the file to open on: the
+/// first of them, as they were named, whose header can be read — where the
+/// order has put it, and the size it claims. A file manager that hands the
+/// program a file and its siblings names the one clicked first, and a list
+/// sorted under it should not open somewhere else. Fails as
+/// [`first_readable`] does.
+pub fn open_on(
+    files: Vec<PathBuf>,
+    order: crate::ui::filmstrip::Order,
+) -> Result<(Vec<PathBuf>, usize, Option<[f32; 2]>)> {
+    let (named, size) = first_readable(&files)?;
+    let first = files[named].clone();
+    let files = crate::app::arranged(files, order, &Default::default());
+    let index = files
+        .iter()
+        .position(|path| *path == first)
+        .expect("arranging keeps every file");
+    Ok((files, index, size))
+}
+
 pub struct Args {
     pub files: Vec<PathBuf>,
     /// Whether the image on the clipboard goes at the front of the list. The
@@ -1159,5 +1179,24 @@ mod tests {
             );
             assert!(bundle.contains(&written), "bin/bundle writes {written}");
         }
+    }
+
+    /// Several files named open on the first of them that can be read,
+    /// wherever the order puts it, not on the first in the order: a file
+    /// manager names the file clicked ahead of its siblings.
+    #[test]
+    fn several_files_open_on_the_first_named_that_reads() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_images");
+        let missing = fixtures.join("zz-not-there.png");
+        let gama = fixtures.join("png-gama-linear.png");
+        let chrm = fixtures.join("png-chrm-p3.png");
+        let (files, index, size) = open_on(
+            vec![missing.clone(), gama.clone(), chrm.clone()],
+            Default::default(),
+        )
+        .expect("one of them reads");
+        assert_eq!(files, [chrm, gama.clone(), missing], "sorted by name");
+        assert_eq!(files[index], gama, "the first named that reads");
+        assert!(size.is_some());
     }
 }

@@ -8,6 +8,11 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 
 ### Fixed
 
+- Given several files on the command line, `gamut` opens on the first one
+  named, as `--help` says, rather than on the first in the order the list
+  is sorted in. A file manager that passes the file clicked ahead of its
+  neighbors now opens on that file. The list itself is still sorted as
+  before. ([#57](https://github.com/dcervelli/gamut/issues/57))
 - An iPhone photograph saved as a JPEG through Apple's own export now shows
   its HDR gain map. These files describe the map in the ISO 21496-1 form
   and Apple's own, with none of the Ultra HDR XMP `gamut` read before, so
