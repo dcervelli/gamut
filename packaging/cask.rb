@@ -7,7 +7,7 @@
 # the release's zip exists, and copies this file into the tap,
 # dcervelli/homebrew-gamut, as Casks/gamut.rb. Edit it here.
 cask "gamut" do
-  version "0.14.0"
+  version "0.14.1"
   sha256 "2686f6e43ab92290cf1d5f3592c55b16efaefb61eed0a1b8e89ab67182fc5be6"
 
   url "https://github.com/dcervelli/gamut/releases/download/v#{version}/Gamut-#{version}-arm64.zip"
