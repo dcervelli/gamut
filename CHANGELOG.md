@@ -4,7 +4,7 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.14.1 - 2026-11-28
 
 ### Fixed
 
@@ -19,14 +19,6 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   the map was left unread. Such a file is also no longer shown in the gain
   map's color profile when it has no profile of its own.
 
-### Changed
-
-- On a Mac, Homebrew installs the signed and notarized `Gamut.app` into
-  `/Applications` as a cask, in place of the formula that built it from
-  source: `brew install --cask dcervelli/gamut/gamut`. The formula is gone
-  from the tap, so an installed one stops receiving updates; switch with
-  `brew uninstall gamut && brew install --cask dcervelli/gamut/gamut`. Your
-  settings are kept.
 
 ## 0.14.0 - 2026-11-09
 
@@ -43,6 +35,13 @@ Notable changes to `gamut` as maintained overly verbosely by AI. The format foll
   macOS cannot read — a gray picture with transparency, and the rare
   photograph Preview shows blank — is reported as unreadable, as any file
   that cannot be read is, rather than shown blank.
+
+- On a Mac, Homebrew installs the signed and notarized `Gamut.app` into
+  `/Applications` as a cask, in place of the formula that built it from
+  source: `brew install --cask dcervelli/gamut/gamut`. The formula is gone
+  from the tap, so an installed one stops receiving updates; switch with
+  `brew uninstall gamut && brew install --cask dcervelli/gamut/gamut`. Your
+  settings are kept.
 
 ## 0.13.0 - 2026-11-06
 
